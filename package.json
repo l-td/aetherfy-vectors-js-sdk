@@ -1,0 +1,103 @@
+{
+  "name": "aetherfy-vectors",
+  "version": "1.0.0",
+  "description": "JavaScript/TypeScript SDK for Aetherfy Vectors - Global vector database with automatic replication and sub-50ms latency worldwide",
+  "main": "./dist/index.cjs.js",
+  "module": "./dist/index.esm.js",
+  "browser": "./dist/browser.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs.js",
+      "browser": "./dist/browser.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/**/*",
+    "src/**/*",
+    "examples/**/*",
+    "README.md",
+    "LICENSE",
+    "!**/*.test.*",
+    "!**/tests/**",
+    "!docs/DEVELOPMENT.md",
+    "!guide.txt",
+    "!aetherfy-js-sdk-guide.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.js",
+    "build:prod": "node scripts/build.js --production",
+    "build:watch": "rollup -c -w",
+    "dev": "rollup -c -w",
+    "test": "node scripts/test.js",
+    "test:verbose": "node scripts/test.js -v",
+    "test:watch": "node scripts/test.js --watch",
+    "test:coverage": "node scripts/test.js --coverage",
+    "test:browser": "node scripts/test.js browser",
+    "test:unit": "node scripts/test.js unit",
+    "test:integration": "node scripts/test.js integration",
+    "lint": "node scripts/test.js --lint",
+    "lint:fix": "eslint src tests --ext .ts --fix",
+    "format": "node scripts/test.js --fix-format",
+    "format:check": "node scripts/test.js --format",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist coverage",
+    "prepublishOnly": "npm run clean && npm run build:prod",
+    "docs": "typedoc src/index.ts --out docs/api",
+    "precommit": "npm run lint && npm run format:check && npm run test",
+    "deploy-check": "npm run clean && npm ci && npm run lint && npm run format:check && npm run test:coverage && npm run build:prod && npm run docs && npm audit"
+  },
+  "keywords": [
+    "vector database",
+    "similarity search",
+    "machine learning",
+    "AI",
+    "embeddings",
+    "global database",
+    "typescript",
+    "aetherfy"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aetherfy/aetherfy-vectors-js.git"
+  },
+  "homepage": "https://aetherfy.com",
+  "bugs": {
+    "url": "https://github.com/aetherfy/aetherfy-vectors-js/issues"
+  },
+  "author": "Aetherfy <developers@aetherfy.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "cross-fetch": "^4.0.0",
+    "form-data": "^4.0.0"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.0",
+    "@rollup/plugin-node-resolve": "^16.0.0",
+    "@rollup/plugin-terser": "^0.4.0",
+    "@rollup/plugin-typescript": "^12.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "abortcontroller-polyfill": "^1.7.8",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "eslint-plugin-prettier": "^5.0.0",
+    "jest": "^29.0.0",
+    "jest-environment-jsdom": "^29.0.0",
+    "jest-fetch-mock": "^3.0.3",
+    "prettier": "^3.0.0",
+    "rollup": "^4.0.0",
+    "rollup-plugin-polyfill-node": "^0.13.0",
+    "ts-jest": "^29.0.0",
+    "tslib": "^2.8.0",
+    "typedoc": "^0.28.0",
+    "typescript": "^5.9.0"
+  }
+}
