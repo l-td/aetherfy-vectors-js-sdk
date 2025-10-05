@@ -37,7 +37,7 @@
     "test:coverage": "node scripts/test.js --coverage",
     "test:browser": "node scripts/test.js browser",
     "test:unit": "node scripts/test.js unit",
-    "test:integration": "node scripts/test.js integration",
+    "test:functional": "node scripts/test.js functional",
     "lint": "node scripts/test.js --lint",
     "lint:fix": "eslint src tests --ext .ts --fix",
     "format": "node scripts/test.js --fix-format",

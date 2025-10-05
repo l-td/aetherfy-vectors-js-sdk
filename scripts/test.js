@@ -81,7 +81,7 @@ function runSpecificTestSuite(suite) {
   
   const suitePatterns = {
     unit: 'tests/unit/**/*.test.ts',
-    integration: 'tests/integration/**/*.test.ts',
+    functional: 'tests/functional/**/*.test.ts',
     browser: 'tests/browser/**/*.test.ts',
     auth: 'tests/unit/auth.test.ts',
     client: 'tests/unit/client.test.ts',
@@ -138,7 +138,7 @@ function validateTestEnvironment() {
   logStep('Validating test environment');
   
   // Check if test files exist
-  const testDirs = ['tests/unit', 'tests/integration', 'tests/browser'];
+  const testDirs = ['tests/unit', 'tests/functional', 'tests/browser'];
   const missingDirs = testDirs.filter(dir => !fs.existsSync(dir));
   
   if (missingDirs.length > 0) {
@@ -162,13 +162,13 @@ function printTestSummary() {
   try {
     // Get test file counts
     const unitTests = fs.readdirSync('tests/unit').filter(f => f.endsWith('.test.ts')).length;
-    const integrationTests = fs.readdirSync('tests/integration').filter(f => f.endsWith('.test.ts')).length;
+    const functionalTests = fs.readdirSync('tests/functional').filter(f => f.endsWith('.test.ts')).length;
     const browserTests = fs.readdirSync('tests/browser').filter(f => f.endsWith('.test.ts')).length;
-    
+
     log(`📁 Unit tests: ${unitTests} files`, 'blue');
-    log(`📁 Integration tests: ${integrationTests} files`, 'blue');
+    log(`📁 Functional tests: ${functionalTests} files`, 'blue');
     log(`📁 Browser tests: ${browserTests} files`, 'blue');
-    log(`📁 Total: ${unitTests + integrationTests + browserTests} test files`, 'cyan');
+    log(`📁 Total: ${unitTests + functionalTests + browserTests} test files`, 'cyan');
   } catch (error) {
     logError(`Could not generate test summary: ${error.message}`);
   }
@@ -213,7 +213,7 @@ Options:
 
 Test Suites:
   unit                  Run only unit tests
-  integration           Run only integration tests  
+  functional            Run only functional tests (mocked workflows)
   browser               Run only browser tests
   auth                  Run only authentication tests
   client                Run only client tests
@@ -249,8 +249,8 @@ Python Equivalents:
   
   try {
     // Handle specific test suites
-    const testSuite = args.find(arg => 
-      ['unit', 'integration', 'browser', 'auth', 'client', 'utils', 'exceptions'].includes(arg)
+    const testSuite = args.find(arg =>
+      ['unit', 'functional', 'browser', 'auth', 'client', 'utils', 'exceptions'].includes(arg)
     );
     
     if (testSuite) {
