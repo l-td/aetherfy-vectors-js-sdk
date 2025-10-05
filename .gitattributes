@@ -1,0 +1,23 @@
+# Force LF line endings for all text files to ensure consistency across platforms
+# This prevents Windows Git from converting LF to CRLF
+
+# All text files should use LF
+* text=auto eol=lf
+
+# Explicitly set line endings for source files
+*.ts text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+
+# Ensure certain files remain as-is
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
