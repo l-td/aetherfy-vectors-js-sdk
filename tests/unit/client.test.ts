@@ -73,7 +73,7 @@ describe('AetherfyVectorsClient', () => {
           }),
           body: JSON.stringify({
             name: 'test-collection',
-            vectors_config: {
+            vectors: {
               size: 128,
               distance: DistanceMetric.COSINE,
             },
