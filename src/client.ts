@@ -122,7 +122,7 @@ export class AetherfyVectorsClient {
       const response = await this.executeWithRetry(async () =>
         this.httpClient.post(`${this.endpoint}/collections`, {
           name,
-          vectors_config: config,
+          vectors: config,
         })
       );
 
