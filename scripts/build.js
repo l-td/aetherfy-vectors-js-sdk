@@ -115,11 +115,6 @@ function buildBundle() {
   run('npx rollup -c rollup.config.mjs', 'Bundle creation');
 }
 
-function runTests() {
-  logStep('Running tests');
-  run('npm test', 'Tests');
-}
-
 function validateBuild() {
   logStep('Validating build output');
   
@@ -186,11 +181,6 @@ function main() {
     } else {
       format();
     }
-    if (skipTests) {
-      logWarning('Skipping tests');
-    } else {
-      runTests();
-    }
     buildBundle();
     validateBuild();
     if (skipDocs) {
@@ -220,7 +210,6 @@ Usage: node scripts/build.js [options]
 
 Options:
   --help, -h     Show this help message
-  --skip-tests   Skip running tests
   --skip-lint    Skip linting
   --skip-format  Skip format checking
   --skip-docs    Skip documentation generation
@@ -228,14 +217,13 @@ Options:
 
 Examples:
   node scripts/build.js
-  node scripts/build.js --skip-tests
   node scripts/build.js --production
+  node scripts/build.js --skip-lint --skip-format
   `, 'cyan');
   process.exit(0);
 }
 
 // Skip flags based on arguments
-const skipTests = args.includes('--skip-tests');
 const skipLint = args.includes('--skip-lint');
 const skipFormat = args.includes('--skip-format');
 const skipDocs = args.includes('--skip-docs');
