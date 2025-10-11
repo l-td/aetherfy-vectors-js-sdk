@@ -14,6 +14,7 @@ import {
   CollectionAnalytics,
   UsageStats,
   ClientConfig,
+  DistanceMetric,
 } from './models';
 import {
   AetherfyVectorsError,
@@ -538,7 +539,18 @@ export class AetherfyVectorsClient {
       throw new ValidationError('Distance metric must be specified');
     }
 
-    return { size, distance } as VectorConfig;
+    // Normalize distance metric to match Qdrant's expected format (capitalized)
+    const distanceMap: Record<string, DistanceMetric> = {
+      cosine: DistanceMetric.COSINE,
+      euclidean: DistanceMetric.EUCLIDEAN,
+      euclid: DistanceMetric.EUCLIDEAN,
+      dot: DistanceMetric.DOT,
+      manhattan: DistanceMetric.MANHATTAN,
+    };
+
+    const normalizedDistance = distanceMap[distance.toLowerCase()] || distance;
+
+    return { size, distance: normalizedDistance } as VectorConfig;
   }
 
   private formatPointsForUpsert(
