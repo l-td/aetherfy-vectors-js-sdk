@@ -561,7 +561,8 @@ export class AetherfyVectorsClient {
         !point ||
         typeof point !== 'object' ||
         !('id' in point) ||
-        !point.id
+        point.id === null ||
+        point.id === undefined
       ) {
         throw new ValidationError('Each point must have an id');
       }
