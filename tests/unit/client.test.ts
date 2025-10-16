@@ -691,6 +691,44 @@ describe('AetherfyVectorsClient', () => {
       await expect(client.getCollections()).rejects.toThrow();
     });
 
+    it('should handle errors in deleteCollection', async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            message: 'Internal server error',
+          }),
+          {
+            status: 500,
+            statusText: 'Internal Server Error',
+            headers: { 'content-type': 'application/json' },
+          }
+        )
+      );
+
+      await expect(
+        client.deleteCollection('test-collection')
+      ).rejects.toThrow();
+    });
+
+    it('should handle non-404 errors in collectionExists', async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            message: 'Internal server error',
+          }),
+          {
+            status: 500,
+            statusText: 'Internal Server Error',
+            headers: { 'content-type': 'application/json' },
+          }
+        )
+      );
+
+      await expect(
+        client.collectionExists('test-collection')
+      ).rejects.toThrow();
+    });
+
     it('should handle non-retryable HTTP errors in upsert', async () => {
       fetchMock.mockResolvedValueOnce(
         new Response(

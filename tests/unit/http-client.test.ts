@@ -202,7 +202,7 @@ describe('HttpClient', () => {
       );
     });
 
-    it('should handle network errors', async () => {
+    it('should handle network errors with context', async () => {
       // Mock fetch to simulate a network error
       fetchMock.mockImplementation(() =>
         Promise.reject(new Error('Network request failed'))
@@ -213,6 +213,35 @@ describe('HttpClient', () => {
       await expect(
         fastClient.get('https://api.example.com/test')
       ).rejects.toThrow('Network error: Network request failed');
+    });
+
+    it('should handle request timeout with AbortError', async () => {
+      // Mock fetch to simulate an abort error
+      fetchMock.mockImplementation(() => {
+        const error = new Error('The operation was aborted');
+        error.name = 'AbortError';
+        return Promise.reject(error);
+      });
+
+      const fastClient = new HttpClient({ timeout: 10 });
+
+      await expect(
+        fastClient.get('https://api.example.com/test')
+      ).rejects.toThrow('Request timeout');
+    });
+
+    it('should handle errors with status property', async () => {
+      // Mock fetch to simulate an error with status property
+      const errorWithStatus = new Error('Bad request') as Error & {
+        status: number;
+      };
+      errorWithStatus.status = 400;
+
+      fetchMock.mockImplementation(() => Promise.reject(errorWithStatus));
+
+      await expect(client.get('https://api.example.com/test')).rejects.toThrow(
+        'Bad request'
+      );
     });
   });
 

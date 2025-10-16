@@ -299,14 +299,16 @@ export function createErrorFromResponse(
       return new AuthenticationError(message);
 
     case 404:
-      if (responseData?.collectionName) {
-        return new CollectionNotFoundError(String(responseData.collectionName));
-      }
+      // Check for both pointId and collectionName first (more specific case)
       if (responseData?.pointId && responseData?.collectionName) {
         return new PointNotFoundError(
           responseData.pointId as string | number,
           String(responseData.collectionName)
         );
+      }
+      // Then check for just collectionName
+      if (responseData?.collectionName) {
+        return new CollectionNotFoundError(String(responseData.collectionName));
       }
       return new AetherfyVectorsError(
         typeof message === 'string' ? message : 'Unknown error',

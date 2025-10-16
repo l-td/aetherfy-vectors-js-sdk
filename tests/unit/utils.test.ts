@@ -11,6 +11,7 @@ import {
   validatePointId,
   validateDistanceMetric,
   buildApiUrl,
+  parseErrorResponse,
   formatPointsForUpsert,
   sanitizeForLogging,
   retryWithBackoff,
@@ -23,7 +24,7 @@ import {
   debounce,
   throttle,
 } from '../../src/utils';
-import { ValidationError } from '../../src/exceptions';
+import { ValidationError, AetherfyVectorsError } from '../../src/exceptions';
 import { DistanceMetric } from '../../src/models';
 
 describe('Environment Detection', () => {
@@ -126,6 +127,18 @@ describe('Validation Functions', () => {
       expect(() => validatePointId(Infinity)).toThrow(ValidationError);
       expect(() => validatePointId('a'.repeat(256))).toThrow(ValidationError);
     });
+
+    it('should reject non-string, non-number types', () => {
+      expect(() => validatePointId({} as unknown as string)).toThrow(
+        'Point ID must be a string or number'
+      );
+      expect(() => validatePointId([] as unknown as string)).toThrow(
+        'Point ID must be a string or number'
+      );
+      expect(() => validatePointId(true as unknown as string)).toThrow(
+        'Point ID must be a string or number'
+      );
+    });
   });
 
   describe('validateDistanceMetric', () => {
@@ -165,6 +178,79 @@ describe('URL and Request Utilities', () => {
       expect(url).toBe('https://api.example.com/collections?limit=10&offset=0');
     });
   });
+
+  describe('parseErrorResponse', () => {
+    it('should parse error with message field', () => {
+      const error = parseErrorResponse(
+        { message: 'Error occurred' },
+        400,
+        'Bad Request',
+        'req-123'
+      );
+
+      expect(error).toBeInstanceOf(AetherfyVectorsError);
+      expect(error.message).toBe('Error occurred');
+      expect(error.requestId).toBe('req-123');
+      expect(error.statusCode).toBe(400);
+    });
+
+    it('should parse error with error field', () => {
+      const error = parseErrorResponse(
+        { error: 'Something went wrong' },
+        500,
+        'Internal Server Error'
+      );
+
+      expect(error.message).toBe('Something went wrong');
+    });
+
+    it('should parse error with detail field', () => {
+      const error = parseErrorResponse(
+        { detail: 'Validation failed' },
+        400,
+        'Bad Request'
+      );
+
+      expect(error.message).toBe('Validation failed');
+    });
+
+    it('should fallback to statusText when no message fields present', () => {
+      const error = parseErrorResponse({}, 404, 'Not Found');
+
+      expect(error.message).toBe('Not Found');
+    });
+
+    it('should handle non-object response data', () => {
+      const error = parseErrorResponse('string error', 500, 'Server Error');
+
+      expect(error.message).toBe('Unknown error');
+      expect(error.statusCode).toBe(500);
+    });
+
+    it('should handle null response data', () => {
+      const error = parseErrorResponse(null, 500, 'Server Error');
+
+      expect(error.message).toBe('Unknown error');
+      expect(error.statusCode).toBe(500);
+    });
+
+    it('should include all response data in details', () => {
+      const responseData = {
+        message: 'Error',
+        field: 'email',
+        violations: ['invalid format'],
+      };
+      const error = parseErrorResponse(responseData, 400, 'Bad Request');
+
+      expect(error.details).toEqual({
+        message: 'Error',
+        field: 'email',
+        violations: ['invalid format'],
+        statusCode: 400,
+        statusText: 'Bad Request',
+      });
+    });
+  });
 });
 
 describe('Data Formatting', () => {
@@ -191,6 +277,20 @@ describe('Data Formatting', () => {
     it('should reject points without vector', () => {
       const points = [{ id: 'point1' }];
       expect(() => formatPointsForUpsert(points)).toThrow(ValidationError);
+    });
+
+    it('should handle non-ValidationError during formatting', () => {
+      const points = [
+        {
+          id: 'point1',
+          get vector() {
+            throw new Error('Unexpected error');
+          },
+        },
+      ];
+      expect(() => formatPointsForUpsert(points)).toThrow(
+        'Invalid point at index 0: Unexpected error'
+      );
     });
   });
 
@@ -223,6 +323,47 @@ describe('Data Formatting', () => {
       expect(sanitizeForLogging('string')).toBe('string');
       expect(sanitizeForLogging(123)).toBe(123);
       expect(sanitizeForLogging(null)).toBe(null);
+    });
+
+    it('should sanitize arrays with nested objects', () => {
+      const data = {
+        items: [
+          { apiKey: 'secret1', name: 'item1' },
+          { token: 'secret2', name: 'item2' },
+        ],
+      };
+
+      const sanitized = sanitizeForLogging(data) as Record<string, unknown>;
+      const items = sanitized.items as Array<Record<string, unknown>>;
+
+      expect(items[0].apiKey).toBe('[REDACTED]');
+      expect(items[0].name).toBe('item1');
+      expect(items[1].token).toBe('[REDACTED]');
+      expect(items[1].name).toBe('item2');
+    });
+
+    it('should handle deeply nested objects', () => {
+      const data = {
+        level1: {
+          level2: {
+            level3: {
+              secret: 'hidden',
+              visible: 'shown',
+            },
+          },
+        },
+      };
+
+      const sanitized = sanitizeForLogging(data) as Record<string, unknown>;
+      const level3 = (
+        (sanitized.level1 as Record<string, unknown>).level2 as Record<
+          string,
+          unknown
+        >
+      ).level3 as Record<string, unknown>;
+
+      expect(level3.secret).toBe('[REDACTED]');
+      expect(level3.visible).toBe('shown');
     });
   });
 });
@@ -445,6 +586,36 @@ describe('Performance Utilities', () => {
       expect(time).toBeGreaterThanOrEqual(0);
       jest.useRealTimers();
     }, 1000);
+
+    it('should log execution time with label', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+      const fn = () => 'result';
+
+      await measureTime(fn, 'Test operation');
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Test operation took \d+\.\d+ms/)
+      );
+
+      warnSpy.mockRestore();
+    });
+
+    it('should log error with label when function fails', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation();
+      const fn = () => {
+        throw new Error('Test error');
+      };
+
+      await expect(measureTime(fn, 'Failing operation')).rejects.toThrow(
+        'Test error'
+      );
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Failing operation failed after \d+\.\d+ms/)
+      );
+
+      errorSpy.mockRestore();
+    });
   });
 
   describe('debounce', () => {

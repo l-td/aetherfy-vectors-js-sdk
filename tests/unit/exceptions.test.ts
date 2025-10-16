@@ -86,11 +86,40 @@ describe('Custom Exceptions', () => {
       expect(error.violations).toEqual(['must be array', 'must not be empty']);
     });
 
+    it('should serialize ValidationError to JSON', () => {
+      const error = new ValidationError('Validation failed', 'vector', [
+        'must be array',
+      ]);
+      const json = error.toJSON();
+      expect(json).toEqual({
+        name: 'ValidationError',
+        message: 'Validation failed',
+        requestId: undefined,
+        statusCode: undefined,
+        details: undefined,
+        field: 'vector',
+        violations: ['must be array'],
+      });
+    });
+
     it('should create CollectionNotFoundError', () => {
       const error = new CollectionNotFoundError('test-collection');
       expect(error.message).toBe("Collection 'test-collection' not found");
       expect(error.name).toBe('CollectionNotFoundError');
       expect(error.collectionName).toBe('test-collection');
+    });
+
+    it('should serialize CollectionNotFoundError to JSON', () => {
+      const error = new CollectionNotFoundError('test-collection');
+      const json = error.toJSON();
+      expect(json).toEqual({
+        name: 'CollectionNotFoundError',
+        message: "Collection 'test-collection' not found",
+        requestId: undefined,
+        statusCode: undefined,
+        details: undefined,
+        collectionName: 'test-collection',
+      });
     });
 
     it('should create PointNotFoundError', () => {
@@ -101,6 +130,116 @@ describe('Custom Exceptions', () => {
       expect(error.name).toBe('PointNotFoundError');
       expect(error.pointId).toBe('point-1');
       expect(error.collectionName).toBe('test-collection');
+    });
+
+    it('should serialize PointNotFoundError to JSON', () => {
+      const error = new PointNotFoundError('point-1', 'test-collection');
+      const json = error.toJSON();
+      expect(json).toEqual({
+        name: 'PointNotFoundError',
+        message: "Point 'point-1' not found in collection 'test-collection'",
+        requestId: undefined,
+        statusCode: undefined,
+        details: undefined,
+        pointId: 'point-1',
+        collectionName: 'test-collection',
+      });
+    });
+
+    it('should create RequestTimeoutError', () => {
+      const error = new RequestTimeoutError('Timeout occurred', 5000);
+      expect(error.message).toBe('Timeout occurred');
+      expect(error.name).toBe('RequestTimeoutError');
+      expect(error.timeoutMs).toBe(5000);
+    });
+
+    it('should serialize RequestTimeoutError to JSON', () => {
+      const error = new RequestTimeoutError('Timeout occurred', 5000);
+      const json = error.toJSON();
+      expect(json).toEqual({
+        name: 'RequestTimeoutError',
+        message: 'Timeout occurred',
+        requestId: undefined,
+        statusCode: undefined,
+        details: undefined,
+        timeoutMs: 5000,
+      });
+    });
+
+    it('should create NetworkError', () => {
+      const cause = new Error('Connection refused');
+      const error = new NetworkError('Network failed', cause);
+      expect(error.message).toBe('Network failed');
+      expect(error.name).toBe('NetworkError');
+      expect(error.cause).toBe(cause);
+    });
+
+    it('should serialize NetworkError to JSON', () => {
+      const cause = new Error('Connection refused');
+      const error = new NetworkError('Network failed', cause);
+      const json = error.toJSON();
+      expect(json).toEqual({
+        name: 'NetworkError',
+        message: 'Network failed',
+        requestId: undefined,
+        statusCode: undefined,
+        details: undefined,
+        cause: 'Connection refused',
+      });
+    });
+
+    it('should create ConflictError', () => {
+      const error = new ConflictError('Resource exists', 'collection-name');
+      expect(error.message).toBe('Resource exists');
+      expect(error.name).toBe('ConflictError');
+      expect(error.conflictingResource).toBe('collection-name');
+    });
+
+    it('should serialize ConflictError to JSON', () => {
+      const error = new ConflictError('Resource exists', 'collection-name');
+      const json = error.toJSON();
+      expect(json).toEqual({
+        name: 'ConflictError',
+        message: 'Resource exists',
+        requestId: undefined,
+        statusCode: undefined,
+        details: undefined,
+        conflictingResource: 'collection-name',
+      });
+    });
+
+    it('should create QuotaExceededError', () => {
+      const error = new QuotaExceededError(
+        'Quota exceeded',
+        'points',
+        1000,
+        900
+      );
+      expect(error.message).toBe('Quota exceeded');
+      expect(error.name).toBe('QuotaExceededError');
+      expect(error.quotaType).toBe('points');
+      expect(error.current).toBe(1000);
+      expect(error.limit).toBe(900);
+    });
+
+    it('should serialize QuotaExceededError to JSON', () => {
+      const error = new QuotaExceededError(
+        'Quota exceeded',
+        'points',
+        1000,
+        900
+      );
+      const json = error.toJSON();
+      expect(json).toEqual({
+        name: 'QuotaExceededError',
+        message: 'Quota exceeded',
+        requestId: undefined,
+        statusCode: undefined,
+        details: undefined,
+        quotaType: 'points',
+        current: 1000,
+        limit: 900,
+      });
     });
   });
 
@@ -168,6 +307,66 @@ describe('Custom Exceptions', () => {
 
       expect(error).toBeInstanceOf(AetherfyVectorsError);
       expect(error).not.toBeInstanceOf(ValidationError);
+    });
+
+    it('should create PointNotFoundError for 404 with pointId and collection', () => {
+      const error = createErrorFromResponse(
+        { pointId: 'point-123', collectionName: 'test-collection' },
+        404,
+        'Not Found'
+      );
+
+      expect(error).toBeInstanceOf(PointNotFoundError);
+      expect((error as PointNotFoundError).pointId).toBe('point-123');
+      expect((error as PointNotFoundError).collectionName).toBe(
+        'test-collection'
+      );
+    });
+
+    it('should create ConflictError for 409 status', () => {
+      const error = createErrorFromResponse(
+        { message: 'Resource exists', conflictingResource: 'my-collection' },
+        409,
+        'Conflict'
+      );
+
+      expect(error).toBeInstanceOf(ConflictError);
+      expect((error as ConflictError).conflictingResource).toBe(
+        'my-collection'
+      );
+    });
+
+    it('should handle message as object in createErrorFromResponse', () => {
+      const error = createErrorFromResponse(
+        { message: { nested: 'error' } },
+        500,
+        'Internal Server Error'
+      );
+
+      expect(error.message).toBe('{"nested":"error"}');
+    });
+
+    it('should handle non-string message types in createErrorFromResponse', () => {
+      const error = createErrorFromResponse(
+        { message: 12345 },
+        500,
+        'Internal Server Error'
+      );
+
+      expect(error.message).toBe('12345');
+    });
+
+    it('should handle error parsing in createErrorFromResponse catch block', () => {
+      const circularRef: Record<string, unknown> = {};
+      circularRef.self = circularRef;
+
+      const error = createErrorFromResponse(
+        { message: circularRef },
+        500,
+        'Internal Server Error'
+      );
+
+      expect(error.message).toBe('Internal Server Error');
     });
   });
 
