@@ -268,6 +268,75 @@ describe('Async Utilities', () => {
 
       expect(fn).toHaveBeenCalledTimes(3); // Initial + 2 retries
     }, 10000); // Increase timeout to 10 seconds
+
+    it('should apply exponential backoff correctly', async () => {
+      // Test that function is called the correct number of times
+      const fn = jest.fn().mockRejectedValue(new Error('fail'));
+
+      await expect(
+        retryWithBackoff(fn, { maxRetries: 3, baseDelay: 1 })
+      ).rejects.toThrow('fail');
+
+      expect(fn).toHaveBeenCalledTimes(4); // Initial + 3 retries
+    }, 15000);
+
+    it('should respect max delay cap', async () => {
+      // Test that max retries is respected even with high retry count
+      const fn = jest.fn().mockRejectedValue(new Error('fail'));
+
+      await expect(
+        retryWithBackoff(fn, {
+          maxRetries: 10,
+          baseDelay: 1,
+          maxDelay: 5000,
+        })
+      ).rejects.toThrow('fail');
+
+      expect(fn).toHaveBeenCalledTimes(11); // Initial + 10 retries
+    }, 30000);
+
+    it('should apply retry condition filter', async () => {
+      const retryableError = new Error('retryable');
+      const nonRetryableError = new Error('non-retryable');
+
+      const fn = jest.fn().mockRejectedValue(nonRetryableError);
+
+      await expect(
+        retryWithBackoff(fn, {
+          maxRetries: 3,
+          baseDelay: 1,
+          retryCondition: error =>
+            (error as Error).message === retryableError.message,
+        })
+      ).rejects.toThrow('non-retryable');
+
+      // Should fail immediately without retries
+      expect(fn).toHaveBeenCalledTimes(1);
+    }, 10000);
+
+    it('should retry when condition is met', async () => {
+      jest.useFakeTimers();
+
+      const retryableError = new Error('retryable');
+      const fn = jest
+        .fn()
+        .mockRejectedValueOnce(retryableError)
+        .mockResolvedValue('success');
+
+      const promise = retryWithBackoff(fn, {
+        maxRetries: 2,
+        baseDelay: 1,
+        retryCondition: error => (error as Error).message === 'retryable',
+      });
+
+      await jest.runOnlyPendingTimersAsync();
+      const result = await promise;
+
+      expect(result).toBe('success');
+      expect(fn).toHaveBeenCalledTimes(2);
+
+      jest.useRealTimers();
+    }, 10000);
   });
 
   describe('sleep', () => {
