@@ -68,7 +68,10 @@ export class AetherfyVectorsClient {
   private authManager: APIKeyManager;
   private analytics: AnalyticsClient;
   private endpoint: string;
-  private schemaCache: Map<string, { size: number; distance: string; etag: string }>;
+  private schemaCache: Map<
+    string,
+    { size: number; distance: string; etag: string }
+  >;
 
   /**
    * Create a new Aetherfy Vectors client
@@ -259,7 +262,8 @@ export class AetherfyVectorsClient {
     // Validate vector dimensions
     const expectedDim = schema.size;
     for (const point of points) {
-      const vector = (point as any).vector;
+      const typedPoint = point as Record<string, unknown>;
+      const vector = typedPoint.vector;
       if (!vector || !Array.isArray(vector)) {
         throw new ValidationError('Each point must have a vector array');
       }
@@ -284,33 +288,41 @@ export class AetherfyVectorsClient {
         this.httpClient.put(
           `${this.endpoint}/collections/${encodeURIComponent(collectionName)}/points`,
           { points: formattedPoints },
-          { headers }
+          headers
         )
       );
 
       return response.status === 200;
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Handle 412 Precondition Failed (schema changed)
-      if (error.response?.status === 412) {
-        this.clearSchemaCache(collectionName);
-        throw new ValidationError(
-          `Collection schema has changed for '${collectionName}'. Please retry your request.`
-        );
-      }
+      if (error && typeof error === 'object' && 'response' in error) {
+        const httpError = error as {
+          response?: {
+            status?: number;
+            data?: { error?: { message?: string } };
+          };
+        };
+        if (httpError.response?.status === 412) {
+          this.clearSchemaCache(collectionName);
+          throw new ValidationError(
+            `Collection schema has changed for '${collectionName}'. Please retry your request.`
+          );
+        }
 
-      // Handle 400 (validation error from backend)
-      if (error.response?.status === 400) {
-        const errorData = error.response.data;
-        throw new ValidationError(
-          errorData?.error?.message || 'Validation error occurred'
-        );
-      }
+        // Handle 400 (validation error from backend)
+        if (httpError.response?.status === 400) {
+          const errorData = httpError.response.data;
+          throw new ValidationError(
+            errorData?.error?.message || 'Validation error occurred'
+          );
+        }
 
-      // Handle 500+ (server errors)
-      if (error.response?.status >= 500) {
-        throw new AetherfyVectorsError(
-          `Server error occurred: ${error.response.data?.error?.message || error.message}`
-        );
+        // Handle 500+ (server errors)
+        if (httpError.response?.status && httpError.response.status >= 500) {
+          throw new AetherfyVectorsError(
+            `Server error occurred: ${httpError.response.data?.error?.message || 'Unknown server error'}`
+          );
+        }
       }
 
       throw this.handleError(error);
@@ -543,27 +555,43 @@ export class AetherfyVectorsClient {
 
   // Private helper methods
 
-  private getCachedSchema(collectionName: string): { size: number; distance: string; etag: string } | undefined {
+  private getCachedSchema(
+    collectionName: string
+  ): { size: number; distance: string; etag: string } | undefined {
     return this.schemaCache.get(collectionName);
   }
 
-  private async fetchAndCacheSchema(collectionName: string): Promise<{ size: number; distance: string; etag: string }> {
-    const response = await this.httpClient.get<any>(
-      `${this.endpoint}/collections/${encodeURIComponent(collectionName)}`
-    );
+  private async fetchAndCacheSchema(
+    collectionName: string
+  ): Promise<{ size: number; distance: string; etag: string }> {
+    const response = await this.httpClient.get<{
+      result: {
+        config: {
+          params: {
+            vectors: {
+              size: number;
+              distance: string;
+            };
+          };
+        };
+      };
+      schema_version: string;
+    }>(`${this.endpoint}/collections/${encodeURIComponent(collectionName)}`);
 
     const result = response.data.result;
     const schemaVersion = response.data.schema_version;
     const vectorConfig = result?.config?.params?.vectors;
 
     if (!vectorConfig || !vectorConfig.size) {
-      throw new ValidationError('Invalid collection schema received from server');
+      throw new ValidationError(
+        'Invalid collection schema received from server'
+      );
     }
 
     const schema = {
       size: vectorConfig.size,
       distance: vectorConfig.distance,
-      etag: schemaVersion
+      etag: schemaVersion,
     };
 
     this.schemaCache.set(collectionName, schema);

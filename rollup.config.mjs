@@ -15,28 +15,28 @@ export default [
       {
         file: 'dist/index.cjs.js',
         format: 'cjs',
-        sourcemap: true
+        sourcemap: true,
       },
       {
-        file: 'dist/index.esm.js', 
+        file: 'dist/index.esm.js',
         format: 'es',
-        sourcemap: true
-      }
+        sourcemap: true,
+      },
     ],
     external: ['cross-fetch', 'form-data'],
     plugins: [
       typescript({
         tsconfig: './tsconfig.json',
-        sourceMap: true
+        sourceMap: true,
       }),
       resolve({
-        preferBuiltins: true
+        preferBuiltins: true,
       }),
       commonjs(),
-      isProduction && terser()
-    ].filter(Boolean)
+      isProduction && terser(),
+    ].filter(Boolean),
   },
-  
+
   // Browser build (secondary)
   {
     input: 'src/index.ts',
@@ -44,20 +44,20 @@ export default [
       file: 'dist/browser.js',
       format: 'umd',
       name: 'AetherfyVectors',
-      sourcemap: true
+      sourcemap: true,
     },
     plugins: [
       typescript({
         tsconfig: './tsconfig.json',
-        sourceMap: true
+        sourceMap: true,
       }),
       resolve({
         browser: true,
-        preferBuiltins: false
+        preferBuiltins: false,
       }),
       commonjs(),
       nodePolyfills(),
-      isProduction && terser()
-    ].filter(Boolean)
-  }
+      isProduction && terser(),
+    ].filter(Boolean),
+  },
 ];

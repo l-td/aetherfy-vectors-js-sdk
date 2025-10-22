@@ -1,9 +1,9 @@
 /**
  * Browser Usage Example for Aetherfy Vectors JavaScript SDK
- * 
+ *
  * This example shows how to use the SDK in browser environments with
  * proper security considerations and error handling.
- * 
+ *
  * ⚠️ SECURITY WARNING: Never expose production API keys in browser code!
  * This example is for development, demos, and admin tools only.
  */
@@ -23,13 +23,12 @@ class VectorSearchApp {
     try {
       this.client = new AetherfyVectorsClient({
         apiKey: 'afy_test_demo_key_only', // Replace with your TEST key only
-        endpoint: 'https://vectors.aetherfy.com'
+        endpoint: 'https://vectors.aetherfy.com',
       });
-      
+
       // The SDK automatically shows a security warning in the browser console
       console.log('✅ Aetherfy Vectors client initialized');
       this.updateStatus('Client initialized successfully', 'success');
-      
     } catch (error) {
       this.handleError(error);
     }
@@ -38,28 +37,27 @@ class VectorSearchApp {
   // Set up the demo collection
   async setupDemo() {
     this.updateStatus('Setting up demo collection...', 'info');
-    
+
     try {
       // Check if collection exists
       const exists = await this.client.collectionExists(this.currentCollection);
-      
+
       if (!exists) {
         // Create the collection
         await this.client.createCollection(this.currentCollection, {
           size: 384, // OpenAI ada-002 embedding size
-          distance: DistanceMetric.COSINE
+          distance: DistanceMetric.COSINE,
         });
         this.updateStatus('Demo collection created', 'success');
-        
+
         // Add sample data
         await this.addSampleProducts();
       } else {
         this.updateStatus('Demo collection already exists', 'info');
       }
-      
+
       // Enable search functionality
       this.enableSearch();
-      
     } catch (error) {
       this.handleError(error);
     }
@@ -76,19 +74,20 @@ class VectorSearchApp {
           category: 'Electronics',
           price: 1299.99,
           description: 'High-performance gaming laptop with RTX graphics',
-          features: ['RGB keyboard', '144Hz display', '16GB RAM']
-        }
+          features: ['RGB keyboard', '144Hz display', '16GB RAM'],
+        },
       },
       {
         id: 'laptop_2',
         vector: this.generateMockEmbedding(),
         payload: {
           name: 'Business Ultrabook',
-          category: 'Electronics', 
+          category: 'Electronics',
           price: 899.99,
-          description: 'Lightweight ultrabook perfect for business professionals',
-          features: ['Long battery life', 'Fingerprint reader', '8GB RAM']
-        }
+          description:
+            'Lightweight ultrabook perfect for business professionals',
+          features: ['Long battery life', 'Fingerprint reader', '8GB RAM'],
+        },
       },
       {
         id: 'headphones_1',
@@ -97,9 +96,10 @@ class VectorSearchApp {
           name: 'Wireless Noise-Canceling Headphones',
           category: 'Audio',
           price: 299.99,
-          description: 'Premium wireless headphones with active noise cancellation',
-          features: ['40-hour battery', 'Quick charge', 'Premium sound']
-        }
+          description:
+            'Premium wireless headphones with active noise cancellation',
+          features: ['40-hour battery', 'Quick charge', 'Premium sound'],
+        },
       },
       {
         id: 'phone_1',
@@ -109,32 +109,35 @@ class VectorSearchApp {
           category: 'Electronics',
           price: 1099.99,
           description: 'Latest smartphone with advanced camera system',
-          features: ['Triple camera', '5G connectivity', 'Wireless charging']
-        }
-      }
+          features: ['Triple camera', '5G connectivity', 'Wireless charging'],
+        },
+      },
     ];
 
     await this.client.upsert(this.currentCollection, sampleProducts);
-    this.updateStatus(`Added ${sampleProducts.length} sample products`, 'success');
+    this.updateStatus(
+      `Added ${sampleProducts.length} sample products`,
+      'success'
+    );
   }
 
   // Generate mock embeddings for demo (in real usage, use actual embeddings)
   generateMockEmbedding() {
-    return Array.from({length: 384}, () => Math.random() * 2 - 1);
+    return Array.from({ length: 384 }, () => Math.random() * 2 - 1);
   }
 
   // Enable search functionality
   enableSearch() {
     const searchButton = document.getElementById('searchButton');
     const searchInput = document.getElementById('searchInput');
-    
+
     if (searchButton && searchInput) {
       searchButton.disabled = false;
       searchInput.disabled = false;
       searchButton.onclick = () => this.performSearch();
-      
+
       // Enable enter key for search
-      searchInput.onkeypress = (e) => {
+      searchInput.onkeypress = e => {
         if (e.key === 'Enter') {
           this.performSearch();
         }
@@ -146,7 +149,7 @@ class VectorSearchApp {
   async performSearch() {
     const searchInput = document.getElementById('searchInput');
     const query = searchInput?.value?.trim();
-    
+
     if (!query) {
       this.updateStatus('Please enter a search query', 'warning');
       return;
@@ -159,15 +162,18 @@ class VectorSearchApp {
       // using OpenAI, Cohere, or another embedding service
       // For this demo, we'll use a mock embedding
       const queryVector = this.generateMockEmbedding();
-      
-      const results = await this.client.search(this.currentCollection, queryVector, {
-        limit: 5,
-        withPayload: true,
-        scoreThreshold: 0.0 // Accept all results for demo
-      });
+
+      const results = await this.client.search(
+        this.currentCollection,
+        queryVector,
+        {
+          limit: 5,
+          withPayload: true,
+          scoreThreshold: 0.0, // Accept all results for demo
+        }
+      );
 
       this.displayResults(results, query);
-      
     } catch (error) {
       this.handleError(error);
     }
@@ -179,7 +185,8 @@ class VectorSearchApp {
     if (!resultsContainer) return;
 
     if (results.length === 0) {
-      resultsContainer.innerHTML = '<p class="no-results">No products found matching your query.</p>';
+      resultsContainer.innerHTML =
+        '<p class="no-results">No products found matching your query.</p>';
       this.updateStatus('No results found', 'warning');
       return;
     }
@@ -205,7 +212,7 @@ class VectorSearchApp {
 
     html += '</div>';
     resultsContainer.innerHTML = html;
-    
+
     this.updateStatus(`Found ${results.length} matching products`, 'success');
   }
 
@@ -214,7 +221,7 @@ class VectorSearchApp {
     try {
       const analytics = await this.client.getPerformanceAnalytics('1h');
       const usage = await this.client.getUsageStats();
-      
+
       const analyticsHtml = `
         <div class="analytics-panel">
           <h3>Analytics Dashboard</h3>
@@ -240,12 +247,11 @@ class VectorSearchApp {
           <p class="regions">Active Regions: ${analytics.activeRegions.join(', ')}</p>
         </div>
       `;
-      
+
       const analyticsContainer = document.getElementById('analytics');
       if (analyticsContainer) {
         analyticsContainer.innerHTML = analyticsHtml;
       }
-      
     } catch (error) {
       this.handleError(error);
     }
@@ -254,10 +260,10 @@ class VectorSearchApp {
   // Handle errors with user-friendly messages
   handleError(error) {
     console.error('Error:', error);
-    
+
     let message = 'An error occurred';
     let type = 'error';
-    
+
     if (error.name === 'AuthenticationError') {
       message = 'Authentication failed. Please check your API key.';
     } else if (error.name === 'RateLimitExceededError') {
@@ -269,7 +275,7 @@ class VectorSearchApp {
     } else {
       message = error.message || 'Unknown error occurred';
     }
-    
+
     this.updateStatus(message, type);
   }
 
@@ -277,10 +283,10 @@ class VectorSearchApp {
   updateStatus(message, type = 'info') {
     const statusElement = document.getElementById('status');
     if (!statusElement) return;
-    
+
     statusElement.textContent = message;
     statusElement.className = `status status-${type}`;
-    
+
     // Auto-clear success/info messages after 5 seconds
     if (type === 'success' || type === 'info') {
       setTimeout(() => {
@@ -307,15 +313,15 @@ let app;
 
 document.addEventListener('DOMContentLoaded', () => {
   app = new VectorSearchApp();
-  
+
   // Set up button handlers
   const setupButton = document.getElementById('setupButton');
   const analyticsButton = document.getElementById('analyticsButton');
-  
+
   if (setupButton) {
     setupButton.onclick = () => app.setupDemo();
   }
-  
+
   if (analyticsButton) {
     analyticsButton.onclick = () => app.showAnalytics();
   }

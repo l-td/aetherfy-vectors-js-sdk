@@ -19,13 +19,13 @@ module.exports = [
         module: true,
         require: true,
         exports: true,
-        global: true
-      }
+        global: true,
+      },
     },
     rules: {
       'no-undef': 'error',
-      'no-console': 'off'
-    }
+      'no-console': 'off',
+    },
   },
   {
     files: ['*.js', '*.mjs', '*.cjs'],
@@ -42,26 +42,26 @@ module.exports = [
         module: true,
         require: true,
         exports: true,
-        global: true
-      }
+        global: true,
+      },
     },
     rules: {
       'no-undef': 'error',
-      'no-console': 'off'
-    }
+      'no-console': 'off',
+    },
   },
   {
     files: ['src/**/*.ts', 'src/**/*.tsx'],
     plugins: {
       '@typescript-eslint': tseslint,
-      prettier: prettier
+      prettier: prettier,
     },
     languageOptions: {
       parser: tsparser,
       ecmaVersion: 2020,
       sourceType: 'module',
       parserOptions: {
-        project: './tsconfig.json'
+        project: './tsconfig.json',
       },
       globals: {
         console: true,
@@ -76,25 +76,28 @@ module.exports = [
         navigator: 'readonly',
         performance: 'readonly',
         setTimeout: 'readonly',
-        clearTimeout: 'readonly'
-      }
+        clearTimeout: 'readonly',
+      },
     },
     rules: {
       'prettier/prettier': 'error',
-      '@typescript-eslint/no-unused-vars': ['error', { 
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-        ignoreRestSiblings: true,
-        destructuredArrayIgnorePattern: '^_'
-      }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+          destructuredArrayIgnorePattern: '^_',
+        },
+      ],
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-non-null-assertion': 'warn',
       'no-console': ['warn', { allow: ['warn', 'error'] }],
       'no-undef': 'off',
-      'no-unused-vars': 'off'
-    }
+      'no-unused-vars': 'off',
+    },
   },
   {
     files: ['examples/**/*.js', 'examples/**/*.mjs'],
@@ -116,19 +119,19 @@ module.exports = [
         window: 'readonly',
         document: 'readonly',
         navigator: 'readonly',
-        performance: 'readonly'
-      }
+        performance: 'readonly',
+      },
     },
     rules: {
       'no-undef': 'error',
-      'no-console': 'off'
-    }
+      'no-console': 'off',
+    },
   },
   {
     files: ['tests/**/*.ts', 'tests/**/*.tsx'],
     plugins: {
       '@typescript-eslint': tseslint,
-      prettier: prettier
+      prettier: prettier,
     },
     languageOptions: {
       parser: tsparser,
@@ -156,23 +159,26 @@ module.exports = [
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         window: 'readonly',
-        document: 'readonly'
-      }
+        document: 'readonly',
+      },
     },
     rules: {
       'prettier/prettier': 'error',
-      '@typescript-eslint/no-unused-vars': ['error', { 
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-        ignoreRestSiblings: true,
-        destructuredArrayIgnorePattern: '^_'
-      }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+          destructuredArrayIgnorePattern: '^_',
+        },
+      ],
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-non-null-assertion': 'warn',
       'no-console': ['warn', { allow: ['warn', 'error'] }],
-      'no-unused-vars': 'off'
-    }
-  }
+      'no-unused-vars': 'off',
+    },
+  },
 ];

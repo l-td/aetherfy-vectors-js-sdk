@@ -10,7 +10,7 @@ Global vector database with automatic replication and sub-50ms latency worldwide
 
 - **🌍 Global Performance** - Automatic replication across 12+ global regions
 - **⚡ Intelligent Caching** - 94%+ cache hit rate with sub-50ms response times
-- **🛡️ Zero DevOps** - Fully managed infrastructure, no setup required  
+- **🛡️ Zero DevOps** - Fully managed infrastructure, no setup required
 - **📊 Built-in Analytics** - Real-time performance metrics and insights
 - **🔧 Auto-Failover** - Seamless failover and disaster recovery
 - **🔒 Enterprise Security** - End-to-end encryption and compliance ready
@@ -47,8 +47,8 @@ const points = [
   {
     id: 'product_1',
     vector: [0.1, 0.2, ...], // 384-dimensional vector
-    payload: { 
-      name: 'Wireless Headphones', 
+    payload: {
+      name: 'Wireless Headphones',
       category: 'electronics',
       price: 299.99
     }
@@ -71,18 +71,20 @@ console.log('Similar products:', results);
 The SDK supports multiple ways to provide your API key:
 
 ### 1. Constructor Parameter (Recommended)
+
 ```typescript
 const client = new AetherfyVectorsClient({
-  apiKey: 'afy_live_your_api_key_here'
+  apiKey: 'afy_live_your_api_key_here',
 });
 ```
 
 ### 2. Environment Variables (Node.js only)
+
 ```bash
 # Option 1
 export AETHERFY_API_KEY=afy_live_your_api_key_here
 
-# Option 2  
+# Option 2
 export AETHERFY_VECTORS_API_KEY=afy_live_your_api_key_here
 ```
 
@@ -92,11 +94,12 @@ const client = new AetherfyVectorsClient();
 ```
 
 ### 3. Custom Endpoint
+
 ```typescript
 const client = new AetherfyVectorsClient({
   apiKey: 'your_api_key',
   endpoint: 'https://custom.vectors.endpoint.com',
-  timeout: 45000 // Custom timeout in milliseconds
+  timeout: 45000, // Custom timeout in milliseconds
 });
 ```
 
@@ -108,7 +111,7 @@ const client = new AetherfyVectorsClient({
 // Create collection with vector configuration
 await client.createCollection('my-collection', {
   size: 768,
-  distance: DistanceMetric.EUCLIDEAN
+  distance: DistanceMetric.EUCLIDEAN,
 });
 
 // List all collections
@@ -135,7 +138,7 @@ await client.upsert('collection-name', [
     payload: { category: 'A', metadata: {...} }
   },
   {
-    id: 'vec-2', 
+    id: 'vec-2',
     vector: [0.4, 0.5, 0.6, ...],
     payload: { category: 'B', metadata: {...} }
   }
@@ -169,7 +172,7 @@ const filteredCount = await client.count('collection-name', {
 const results = await client.search('collection-name', queryVector, {
   limit: 10,
   withPayload: true,
-  withVectors: false
+  withVectors: false,
 });
 
 // Advanced search with filtering
@@ -181,9 +184,9 @@ const filteredResults = await client.search('collection-name', queryVector, {
   queryFilter: {
     must: [
       { key: 'category', match: { value: 'electronics' } },
-      { key: 'price', range: { gte: 100, lte: 500 } }
-    ]
-  }
+      { key: 'price', range: { gte: 100, lte: 500 } },
+    ],
+  },
 });
 ```
 
@@ -196,7 +199,7 @@ console.log(`Cache hit rate: ${analytics.cacheHitRate}%`);
 console.log(`Average latency: ${analytics.avgLatencyMs}ms`);
 console.log(`Active regions: ${analytics.activeRegions.join(', ')}`);
 
-// Get collection-specific analytics  
+// Get collection-specific analytics
 const collectionStats = await client.getCollectionAnalytics('products', '7d');
 console.log(`Search requests: ${collectionStats.searchRequests}`);
 console.log(`Average search latency: ${collectionStats.avgSearchLatencyMs}ms`);
@@ -220,33 +223,33 @@ The SDK works in browsers with important security considerations:
 ```html
 <!DOCTYPE html>
 <html>
-<head>
+  <head>
     <title>Vector Search Demo</title>
-</head>
-<body>
+  </head>
+  <body>
     <script type="module">
-        import { AetherfyVectorsClient } from 'https://unpkg.com/aetherfy-vectors@1.0.0/dist/browser.js';
-        
-        // ⚠️ Only use test keys in browser - never production keys!
-        const client = new AetherfyVectorsClient({
-          apiKey: 'afy_test_demo_key_only' // Test key only!
-        });
-        
-        // The SDK will show security warnings in browser console
-        
-        async function searchProducts(query) {
-          try {
-            const results = await client.search('products', query, {
-              limit: 5,
-              withPayload: true
-            });
-            displayResults(results);
-          } catch (error) {
-            handleError(error);
-          }
+      import { AetherfyVectorsClient } from 'https://unpkg.com/aetherfy-vectors@1.0.0/dist/browser.js';
+
+      // ⚠️ Only use test keys in browser - never production keys!
+      const client = new AetherfyVectorsClient({
+        apiKey: 'afy_test_demo_key_only', // Test key only!
+      });
+
+      // The SDK will show security warnings in browser console
+
+      async function searchProducts(query) {
+        try {
+          const results = await client.search('products', query, {
+            limit: 5,
+            withPayload: true,
+          });
+          displayResults(results);
+        } catch (error) {
+          handleError(error);
         }
+      }
     </script>
-</body>
+  </body>
 </html>
 ```
 
@@ -263,12 +266,12 @@ The SDK works in browsers with important security considerations:
 ### Error Handling
 
 ```typescript
-import { 
+import {
   AetherfyVectorsClient,
   AuthenticationError,
   RateLimitExceededError,
   ValidationError,
-  CollectionNotFoundError
+  CollectionNotFoundError,
 } from 'aetherfy-vectors';
 
 try {
@@ -312,7 +315,7 @@ const results = await retryWithBackoff(
     maxRetries: 3,
     baseDelay: 1000,
     backoffFactor: 2,
-    retryCondition: (error) => error.name === 'ServiceUnavailableError'
+    retryCondition: error => error.name === 'ServiceUnavailableError',
   }
 );
 ```
@@ -333,62 +336,62 @@ if (isBrowser()) {
 
 ### AetherfyVectorsClient
 
-| Method | Description | Returns |
-|--------|-------------|---------|
-| `createCollection(name, config)` | Create a new collection | `Promise<boolean>` |
-| `deleteCollection(name)` | Delete a collection | `Promise<boolean>` |
-| `getCollections()` | List all collections | `Promise<Collection[]>` |
-| `collectionExists(name)` | Check if collection exists | `Promise<boolean>` |
-| `getCollection(name)` | Get collection info | `Promise<Collection>` |
-| `upsert(collection, points)` | Insert/update vectors | `Promise<boolean>` |
-| `delete(collection, selector)` | Delete vectors | `Promise<boolean>` |
-| `retrieve(collection, ids, options)` | Get vectors by ID | `Promise<Record<string, any>[]>` |
-| `search(collection, vector, options)` | Similarity search | `Promise<SearchResult[]>` |
-| `count(collection, options)` | Count vectors | `Promise<number>` |
-| `getPerformanceAnalytics(timeRange, region)` | Performance metrics | `Promise<PerformanceAnalytics>` |
-| `getCollectionAnalytics(collection, timeRange)` | Collection metrics | `Promise<CollectionAnalytics>` |
-| `getUsageStats()` | Account usage | `Promise<UsageStats>` |
-| `testConnection()` | Test API connection | `Promise<boolean>` |
+| Method                                          | Description                | Returns                          |
+| ----------------------------------------------- | -------------------------- | -------------------------------- |
+| `createCollection(name, config)`                | Create a new collection    | `Promise<boolean>`               |
+| `deleteCollection(name)`                        | Delete a collection        | `Promise<boolean>`               |
+| `getCollections()`                              | List all collections       | `Promise<Collection[]>`          |
+| `collectionExists(name)`                        | Check if collection exists | `Promise<boolean>`               |
+| `getCollection(name)`                           | Get collection info        | `Promise<Collection>`            |
+| `upsert(collection, points)`                    | Insert/update vectors      | `Promise<boolean>`               |
+| `delete(collection, selector)`                  | Delete vectors             | `Promise<boolean>`               |
+| `retrieve(collection, ids, options)`            | Get vectors by ID          | `Promise<Record<string, any>[]>` |
+| `search(collection, vector, options)`           | Similarity search          | `Promise<SearchResult[]>`        |
+| `count(collection, options)`                    | Count vectors              | `Promise<number>`                |
+| `getPerformanceAnalytics(timeRange, region)`    | Performance metrics        | `Promise<PerformanceAnalytics>`  |
+| `getCollectionAnalytics(collection, timeRange)` | Collection metrics         | `Promise<CollectionAnalytics>`   |
+| `getUsageStats()`                               | Account usage              | `Promise<UsageStats>`            |
+| `testConnection()`                              | Test API connection        | `Promise<boolean>`               |
 
 ### Distance Metrics
 
 ```typescript
 import { DistanceMetric } from 'aetherfy-vectors';
 
-DistanceMetric.COSINE     // Cosine similarity (recommended for most use cases)
-DistanceMetric.EUCLIDEAN  // Euclidean distance  
-DistanceMetric.DOT        // Dot product
-DistanceMetric.MANHATTAN  // Manhattan distance
+DistanceMetric.COSINE; // Cosine similarity (recommended for most use cases)
+DistanceMetric.EUCLIDEAN; // Euclidean distance
+DistanceMetric.DOT; // Dot product
+DistanceMetric.MANHATTAN; // Manhattan distance
 ```
 
 ### Types
 
 ```typescript
 interface VectorConfig {
-  size: number;           // Vector dimensions
+  size: number; // Vector dimensions
   distance: DistanceMetric;
 }
 
 interface Point {
-  id: string | number;    // Unique identifier
-  vector: number[];       // Vector data
+  id: string | number; // Unique identifier
+  vector: number[]; // Vector data
   payload?: Record<string, any>; // Optional metadata
 }
 
 interface SearchOptions {
-  limit?: number;         // Max results (default: 10)
-  offset?: number;        // Skip results (default: 0)  
-  withPayload?: boolean;  // Include metadata (default: true)
-  withVectors?: boolean;  // Include vectors (default: false)
+  limit?: number; // Max results (default: 10)
+  offset?: number; // Skip results (default: 0)
+  withPayload?: boolean; // Include metadata (default: true)
+  withVectors?: boolean; // Include vectors (default: false)
   scoreThreshold?: number; // Min similarity score
-  queryFilter?: Filter;   // Filter conditions
+  queryFilter?: Filter; // Filter conditions
 }
 
 interface SearchResult {
-  id: string | number;    // Point identifier
-  score: number;          // Similarity score
+  id: string | number; // Point identifier
+  score: number; // Similarity score
   payload?: Record<string, any>; // Metadata (if requested)
-  vector?: number[];      // Vector (if requested)
+  vector?: number[]; // Vector (if requested)
 }
 ```
 
@@ -399,7 +402,7 @@ interface SearchResult {
 npm test
 
 # Run tests with coverage
-npm run test:coverage  
+npm run test:coverage
 
 # Run browser compatibility tests
 npm run test:browser
@@ -438,7 +441,7 @@ npm run format
 ### Benchmarks
 
 - **Latency**: Sub-50ms average globally
-- **Throughput**: 100,000+ queries per second  
+- **Throughput**: 100,000+ queries per second
 - **Cache Hit Rate**: 94%+ typical
 - **Availability**: 99.9% SLA
 - **Regions**: 12+ global locations

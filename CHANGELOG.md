@@ -3,6 +3,7 @@
 ## [1.0.0] - 2024-01-XX
 
 ### Added
+
 - Initial release of Aetherfy Vectors JavaScript SDK
 - Full API compatibility with Python SDK
 - TypeScript support with complete type definitions
@@ -19,6 +20,7 @@
 - Automatic replication and intelligent caching
 
 ### Features
+
 - **Collections**: Create and manage vector collections with configurable distance metrics
 - **Points**: Insert, update, delete, and retrieve vector points with metadata
 - **Search**: Similarity search with advanced filtering and scoring options
@@ -28,6 +30,7 @@
 - **Cross-Platform**: Works in both Node.js and browser environments
 
 ### Technical Details
+
 - Built with TypeScript for type safety
 - Rollup-based build system with multiple output formats
 - Jest test suite with comprehensive coverage

@@ -2,7 +2,7 @@
 
 /**
  * Test runner script for Aetherfy Vectors JavaScript SDK
- * 
+ *
  * Equivalent to Python's pytest with various options
  */
 
@@ -56,11 +56,11 @@ function runTests(options = {}) {
     browser = false,
     parallel = false,
     bail = false,
-    silent = false
+    silent = false,
   } = options;
 
   let jestCommand = 'npx jest';
-  
+
   if (verbose) jestCommand += ' --verbose';
   if (coverage) jestCommand += ' --coverage';
   if (watch) jestCommand += ' --watch';
@@ -68,7 +68,7 @@ function runTests(options = {}) {
   if (parallel) jestCommand += ' --maxWorkers=4';
   if (bail) jestCommand += ' --bail';
   if (silent) jestCommand += ' --silent';
-  
+
   if (testPattern) {
     jestCommand += ` --testNamePattern="${testPattern}"`;
   }
@@ -78,7 +78,7 @@ function runTests(options = {}) {
 
 function runSpecificTestSuite(suite) {
   logStep(`Running ${suite} tests`);
-  
+
   const suitePatterns = {
     unit: 'tests/unit/**/*.test.ts',
     functional: 'tests/functional/**/*.test.ts',
@@ -86,7 +86,7 @@ function runSpecificTestSuite(suite) {
     auth: 'tests/unit/auth.test.ts',
     client: 'tests/unit/client.test.ts',
     utils: 'tests/unit/utils.test.ts',
-    exceptions: 'tests/unit/exceptions.test.ts'
+    exceptions: 'tests/unit/exceptions.test.ts',
   };
 
   const pattern = suitePatterns[suite];
@@ -100,75 +100,93 @@ function runSpecificTestSuite(suite) {
 
 function runLinting() {
   logStep('Running linting (equivalent to mypy)');
-  
+
   // TypeScript type checking (equivalent to mypy)
   const typeCheckResult = run('npx tsc --noEmit', 'TypeScript type checking');
-  
+
   // ESLint (code quality)
   const lintResult = run('npx eslint src tests --ext .ts', 'ESLint checking');
-  
+
   return typeCheckResult && lintResult;
 }
 
 function runFormatting() {
   logStep('Running code formatting (equivalent to black)');
-  return run('npx prettier --check src/**/*.ts tests/**/*.ts', 'Prettier format checking');
+  return run(
+    'npx prettier --check src/**/*.ts tests/**/*.ts',
+    'Prettier format checking'
+  );
 }
 
 function fixFormatting() {
   logStep('Fixing code formatting');
-  return run('npx prettier --write src/**/*.ts tests/**/*.ts', 'Prettier format fixing');
+  return run(
+    'npx prettier --write src/**/*.ts tests/**/*.ts',
+    'Prettier format fixing'
+  );
 }
 
 function runCoverageReport() {
   logStep('Generating coverage report');
-  
-  const success = run('npx jest --coverage --coverageReporters=text --coverageReporters=html --coverageReporters=lcov', 'Coverage generation');
-  
+
+  const success = run(
+    'npx jest --coverage --coverageReporters=text --coverageReporters=html --coverageReporters=lcov',
+    'Coverage generation'
+  );
+
   if (success) {
     log('\n📊 Coverage report generated:', 'cyan');
     log('- HTML report: coverage/lcov-report/index.html', 'blue');
     log('- LCOV report: coverage/lcov.info', 'blue');
   }
-  
+
   return success;
 }
 
 function validateTestEnvironment() {
   logStep('Validating test environment');
-  
+
   // Check if test files exist
   const testDirs = ['tests/unit', 'tests/functional', 'tests/browser'];
   const missingDirs = testDirs.filter(dir => !fs.existsSync(dir));
-  
+
   if (missingDirs.length > 0) {
     logError(`Missing test directories: ${missingDirs.join(', ')}`);
     return false;
   }
-  
+
   // Check if jest config exists
   if (!fs.existsSync('jest.config.js')) {
     logError('jest.config.js not found');
     return false;
   }
-  
+
   logSuccess('Test environment validated');
   return true;
 }
 
 function printTestSummary() {
   logStep('Test Summary');
-  
+
   try {
     // Get test file counts
-    const unitTests = fs.readdirSync('tests/unit').filter(f => f.endsWith('.test.ts')).length;
-    const functionalTests = fs.readdirSync('tests/functional').filter(f => f.endsWith('.test.ts')).length;
-    const browserTests = fs.readdirSync('tests/browser').filter(f => f.endsWith('.test.ts')).length;
+    const unitTests = fs
+      .readdirSync('tests/unit')
+      .filter(f => f.endsWith('.test.ts')).length;
+    const functionalTests = fs
+      .readdirSync('tests/functional')
+      .filter(f => f.endsWith('.test.ts')).length;
+    const browserTests = fs
+      .readdirSync('tests/browser')
+      .filter(f => f.endsWith('.test.ts')).length;
 
     log(`📁 Unit tests: ${unitTests} files`, 'blue');
     log(`📁 Functional tests: ${functionalTests} files`, 'blue');
     log(`📁 Browser tests: ${browserTests} files`, 'blue');
-    log(`📁 Total: ${unitTests + functionalTests + browserTests} test files`, 'cyan');
+    log(
+      `📁 Total: ${unitTests + functionalTests + browserTests} test files`,
+      'cyan'
+    );
   } catch (error) {
     logError(`Could not generate test summary: ${error.message}`);
   }
@@ -177,7 +195,7 @@ function printTestSummary() {
 function main() {
   const startTime = Date.now();
   const args = process.argv.slice(2);
-  
+
   // Parse command line arguments
   const options = {
     verbose: args.includes('-v') || args.includes('--verbose'),
@@ -190,11 +208,12 @@ function main() {
     lint: args.includes('--lint'),
     format: args.includes('--format'),
     fixFormat: args.includes('--fix-format'),
-    help: args.includes('--help') || args.includes('-h')
+    help: args.includes('--help') || args.includes('-h'),
   };
 
   if (options.help) {
-    log(`
+    log(
+      `
 🧪 Aetherfy Vectors SDK Test Runner
 
 Usage: node scripts/test.js [options] [test-pattern]
@@ -235,24 +254,34 @@ Python Equivalents:
   black src/                     →  node scripts/test.js --fix-format
   black --check src/             →  node scripts/test.js --format
   pytest --cov=src tests/        →  node scripts/test.js --coverage
-    `, 'cyan');
+    `,
+      'cyan'
+    );
     process.exit(0);
   }
 
   log('🎯 Aetherfy Vectors SDK Test Runner', 'cyan');
-  
+
   if (!validateTestEnvironment()) {
     process.exit(1);
   }
-  
+
   let success = true;
-  
+
   try {
     // Handle specific test suites
     const testSuite = args.find(arg =>
-      ['unit', 'functional', 'browser', 'auth', 'client', 'utils', 'exceptions'].includes(arg)
+      [
+        'unit',
+        'functional',
+        'browser',
+        'auth',
+        'client',
+        'utils',
+        'exceptions',
+      ].includes(arg)
     );
-    
+
     if (testSuite) {
       success = runSpecificTestSuite(testSuite);
     } else {
@@ -270,15 +299,17 @@ Python Equivalents:
         success = runTests(options);
       }
     }
-    
+
     if (success) {
       printTestSummary();
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      log(`\n🎉 All operations completed successfully in ${duration}s`, 'green');
+      log(
+        `\n🎉 All operations completed successfully in ${duration}s`,
+        'green'
+      );
     } else {
       process.exit(1);
     }
-    
   } catch (error) {
     logError(`Test execution failed: ${error.message}`);
     process.exit(1);
