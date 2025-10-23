@@ -2,8 +2,8 @@
  * Tests for ETag-based schema validation and caching
  */
 
-import { AetherfyVectorsClient } from '../src/client';
-import { ValidationError, AetherfyVectorsError } from '../src/exceptions';
+import { AetherfyVectorsClient } from '../../src/client';
+import { ValidationError, AetherfyVectorsError } from '../../src/exceptions';
 import fetchMock from 'jest-fetch-mock';
 
 describe('ETag Validation', () => {
@@ -167,21 +167,20 @@ describe('ETag Validation', () => {
       }
     );
 
-    // Upsert with wrong dimensions
+    // Upsert with wrong dimensions (too small)
     const points = [{ id: '1', vector: new Array(384).fill(0.1), payload: {} }];
 
-    await expect(client.upsert('test-collection', points)).rejects.toThrow(
-      ValidationError
-    );
-    await expect(client.upsert('test-collection', points)).rejects.toThrow(
-      /dimension mismatch/i
-    );
-    await expect(client.upsert('test-collection', points)).rejects.toThrow(
-      /expected 768/
-    );
-    await expect(client.upsert('test-collection', points)).rejects.toThrow(
-      /got 384/
-    );
+    try {
+      await client.upsert('test-collection', points);
+      throw new Error(
+        'Should have thrown ValidationError for dimension mismatch'
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as Error).message).toMatch(/dimension mismatch/i);
+      expect((error as Error).message).toContain('expected 768');
+      expect((error as Error).message).toContain('got 384');
+    }
 
     // PUT should NOT have been called (failed validation client-side)
     const putCalls = fetchMock.mock.calls.filter(
@@ -190,7 +189,7 @@ describe('ETag Validation', () => {
     expect(putCalls.length).toBe(0);
   });
 
-  it('should handle 412 response (schema changed)', async () => {
+  it('should catch dimension mismatch for oversized vectors', async () => {
     // Mock GET collection response
     fetchMock.mockResponseOnce(
       JSON.stringify({
@@ -212,13 +211,68 @@ describe('ETag Validation', () => {
       }
     );
 
-    // Mock PUT with 412 response
+    // Upsert with wrong dimensions (too large)
+    const points = [
+      { id: '1', vector: new Array(1536).fill(0.1), payload: {} },
+    ];
+
+    try {
+      await client.upsert('test-collection', points);
+      throw new Error(
+        'Should have thrown ValidationError for dimension mismatch'
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as Error).message).toMatch(/dimension mismatch/i);
+      expect((error as Error).message).toContain('expected 768');
+      expect((error as Error).message).toContain('got 1536');
+    }
+
+    // PUT should NOT have been called (failed validation client-side)
+    const putCalls = fetchMock.mock.calls.filter(
+      call => call[1]?.method === 'PUT'
+    );
+    expect(putCalls.length).toBe(0);
+  });
+
+  it('should handle 412 response (schema changed)', async () => {
+    // First upsert - populate cache
     fetchMock.mockResponseOnce(
       JSON.stringify({
-        error: {
-          code: 'SCHEMA_VERSION_MISMATCH',
-          message: 'Collection schema has changed',
+        result: {
+          config: {
+            params: {
+              vectors: {
+                size: 768,
+                distance: 'Cosine',
+              },
+            },
+          },
         },
+        schema_version: 'abc12345',
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }
+    );
+
+    fetchMock.mockResponseOnce(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+
+    const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
+
+    // First call succeeds and caches schema
+    await client.upsert('test-collection', points);
+
+    // Second upsert - schema changed on server
+    // Mock PUT with 412 response (no GET needed because of cache)
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        message: 'Collection schema has changed',
+        code: 'SCHEMA_VERSION_MISMATCH',
       }),
       {
         status: 412,
@@ -226,14 +280,49 @@ describe('ETag Validation', () => {
       }
     );
 
-    const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
+    // This should throw ValidationError with schema changed message
+    try {
+      await client.upsert('test-collection', points);
+      throw new Error('Should have thrown ValidationError');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as Error).message).toMatch(/schema.*changed/i);
+      expect((error as Error).message).toContain('test-collection');
+    }
 
-    await expect(client.upsert('test-collection', points)).rejects.toThrow(
-      ValidationError
+    // Verify cache was cleared by checking next call fetches schema again
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        result: {
+          config: {
+            params: {
+              vectors: {
+                size: 768,
+                distance: 'Cosine',
+              },
+            },
+          },
+        },
+        schema_version: 'new-version',
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }
     );
-    await expect(client.upsert('test-collection', points)).rejects.toThrow(
-      /schema.*changed/i
-    );
+
+    fetchMock.mockResponseOnce(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+
+    // This call should fetch schema again (because cache was cleared)
+    await client.upsert('test-collection', points);
+
+    // Verify schema was fetched (should have GET + PUT calls)
+    const lastTwoCalls = fetchMock.mock.calls.slice(-2);
+    expect(lastTwoCalls[0][0]).toContain('/collections/test-collection');
+    expect(lastTwoCalls[0][1]?.method || 'GET').toBe('GET');
   });
 
   it('should clear cache for single collection', () => {
@@ -277,10 +366,8 @@ describe('ETag Validation', () => {
     // Mock PUT with 400 response
     fetchMock.mockResponseOnce(
       JSON.stringify({
-        error: {
-          code: 'DIMENSION_MISMATCH',
-          message: 'Vector dimension mismatch: expected 768, got 384',
-        },
+        message: 'Vector dimension mismatch: expected 768, got 384',
+        code: 'DIMENSION_MISMATCH',
       }),
       {
         status: 400,
@@ -290,12 +377,13 @@ describe('ETag Validation', () => {
 
     const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
 
-    await expect(client.upsert('test-collection', points)).rejects.toThrow(
-      ValidationError
-    );
-    await expect(client.upsert('test-collection', points)).rejects.toThrow(
-      /dimension mismatch/i
-    );
+    try {
+      await client.upsert('test-collection', points);
+      throw new Error('Should have thrown ValidationError');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as Error).message).toMatch(/dimension mismatch/i);
+    }
   });
 
   it('should handle 500 server error', async () => {
@@ -323,9 +411,8 @@ describe('ETag Validation', () => {
     // Mock PUT with 500 response
     fetchMock.mockResponseOnce(
       JSON.stringify({
-        error: {
-          message: 'Internal server error',
-        },
+        message: 'Internal server error',
+        code: 'INTERNAL_ERROR',
       }),
       {
         status: 500,
@@ -335,12 +422,61 @@ describe('ETag Validation', () => {
 
     const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
 
-    await expect(client.upsert('test-collection', points)).rejects.toThrow(
-      AetherfyVectorsError
+    // Should throw AetherfyVectorsError with server error message
+    try {
+      await client.upsert('test-collection', points);
+      throw new Error('Should have thrown AetherfyVectorsError');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AetherfyVectorsError);
+      expect((error as Error).message).toMatch(/server error/i);
+      expect((error as Error).message).toContain('Internal server error');
+    }
+  });
+
+  it('should handle 503 server error', async () => {
+    // Mock GET collection response
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        result: {
+          config: {
+            params: {
+              vectors: {
+                size: 768,
+                distance: 'Cosine',
+              },
+            },
+          },
+        },
+        schema_version: 'abc12345',
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }
     );
-    await expect(client.upsert('test-collection', points)).rejects.toThrow(
-      /server error/i
+
+    // Mock PUT with 503 response (Service Unavailable)
+    fetchMock.mockResponseOnce(
+      JSON.stringify({
+        message: 'Service temporarily unavailable',
+        code: 'SERVICE_UNAVAILABLE',
+      }),
+      {
+        status: 503,
+        headers: { 'content-type': 'application/json' },
+      }
     );
+
+    const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
+
+    // Should throw AetherfyVectorsError for 5xx errors
+    try {
+      await client.upsert('test-collection', points);
+      throw new Error('Should have thrown AetherfyVectorsError');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AetherfyVectorsError);
+      expect((error as Error).message).toMatch(/server error/i);
+    }
   });
 
   it('should validate vector array exists', async () => {

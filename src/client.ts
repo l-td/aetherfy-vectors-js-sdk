@@ -294,15 +294,15 @@ export class AetherfyVectorsClient {
 
       return response.status === 200;
     } catch (error: unknown) {
-      // Handle 412 Precondition Failed (schema changed)
-      if (error && typeof error === 'object' && 'response' in error) {
+      // Handle specific HTTP error statuses from HttpClient
+      if (error && typeof error === 'object' && 'status' in error) {
         const httpError = error as {
-          response?: {
-            status?: number;
-            data?: { error?: { message?: string } };
-          };
+          status: number;
+          responseData?: Record<string, unknown>;
         };
-        if (httpError.response?.status === 412) {
+
+        // Handle 412 Precondition Failed (schema changed)
+        if (httpError.status === 412) {
           this.clearSchemaCache(collectionName);
           throw new ValidationError(
             `Collection schema has changed for '${collectionName}'. Please retry your request.`
@@ -310,17 +310,32 @@ export class AetherfyVectorsClient {
         }
 
         // Handle 400 (validation error from backend)
-        if (httpError.response?.status === 400) {
-          const errorData = httpError.response.data;
-          throw new ValidationError(
-            errorData?.error?.message || 'Validation error occurred'
-          );
+        if (httpError.status === 400) {
+          const responseData = httpError.responseData;
+          // Try nested error object first, then flat error/message
+          const errorObj = responseData?.error as
+            | { message?: string }
+            | undefined;
+          const errorMessage =
+            errorObj?.message ||
+            (responseData?.message as string) ||
+            (responseData?.error as string) ||
+            'Validation error occurred';
+          throw new ValidationError(errorMessage);
         }
 
         // Handle 500+ (server errors)
-        if (httpError.response?.status && httpError.response.status >= 500) {
+        if (httpError.status >= 500) {
+          const responseData = httpError.responseData;
+          const errorObj = responseData?.error as
+            | { message?: string }
+            | undefined;
+          const errorMessage =
+            errorObj?.message ||
+            (responseData?.message as string) ||
+            'Unknown server error';
           throw new AetherfyVectorsError(
-            `Server error occurred: ${httpError.response.data?.error?.message || 'Unknown server error'}`
+            `Server error occurred: ${errorMessage}`
           );
         }
       }
