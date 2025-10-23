@@ -247,6 +247,31 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should upsert points successfully', async () => {
+      // Mock GET collection response for schema fetch
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              config: {
+                params: {
+                  vectors: {
+                    size: 3,
+                    distance: 'Cosine',
+                  },
+                },
+              },
+            },
+            schema_version: 'v1',
+          }),
+          {
+            status: 200,
+            statusText: 'OK',
+            headers: { 'content-type': 'application/json' },
+          }
+        )
+      );
+
+      // Mock PUT upsert response
       fetchMock.mockResolvedValueOnce(
         new Response(JSON.stringify({ success: true }), {
           status: 200,
@@ -268,6 +293,30 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should validate point data', async () => {
+      // Mock GET collection response for first upsert attempt
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              config: {
+                params: {
+                  vectors: {
+                    size: 3,
+                    distance: 'Cosine',
+                  },
+                },
+              },
+            },
+            schema_version: 'v1',
+          }),
+          {
+            status: 200,
+            statusText: 'OK',
+            headers: { 'content-type': 'application/json' },
+          }
+        )
+      );
+
       const invalidPoints = [
         {
           // Missing ID
@@ -279,6 +328,30 @@ describe('AetherfyVectorsClient', () => {
       await expect(
         client.upsert('test-collection', invalidPoints)
       ).rejects.toThrow(ValidationError);
+
+      // Mock GET collection response for second upsert attempt
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              config: {
+                params: {
+                  vectors: {
+                    size: 3,
+                    distance: 'Cosine',
+                  },
+                },
+              },
+            },
+            schema_version: 'v1',
+          }),
+          {
+            status: 200,
+            statusText: 'OK',
+            headers: { 'content-type': 'application/json' },
+          }
+        )
+      );
 
       const invalidVector = [
         {
@@ -363,6 +436,30 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should validate point has vector array', async () => {
+      // Mock GET collection response for schema fetch
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              config: {
+                params: {
+                  vectors: {
+                    size: 3,
+                    distance: 'Cosine',
+                  },
+                },
+              },
+            },
+            schema_version: 'v1',
+          }),
+          {
+            status: 200,
+            statusText: 'OK',
+            headers: { 'content-type': 'application/json' },
+          }
+        )
+      );
+
       const invalidPoints = [
         {
           id: 'point1',
@@ -730,6 +827,31 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should handle non-retryable HTTP errors in upsert', async () => {
+      // Mock GET collection response for schema fetch
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              config: {
+                params: {
+                  vectors: {
+                    size: 3,
+                    distance: 'Cosine',
+                  },
+                },
+              },
+            },
+            schema_version: 'v1',
+          }),
+          {
+            status: 200,
+            statusText: 'OK',
+            headers: { 'content-type': 'application/json' },
+          }
+        )
+      );
+
+      // Mock PUT upsert response with error
       fetchMock.mockResolvedValueOnce(
         new Response(
           JSON.stringify({
