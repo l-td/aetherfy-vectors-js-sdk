@@ -4,7 +4,7 @@
 
 import { AetherfyVectorsClient } from '../../src/client';
 import { DistanceMetric, VectorConfig, Point } from '../../src/models';
-import { ValidationError } from '../../src/exceptions';
+import { ValidationError, NetworkError } from '../../src/exceptions';
 import fetchMock from 'jest-fetch-mock';
 
 describe('AetherfyVectorsClient', () => {
@@ -971,6 +971,84 @@ describe('AetherfyVectorsClient', () => {
       );
 
       await expect(client.getCollection('non-existent')).rejects.toThrow();
+    });
+
+    it('should convert generic network error to NetworkError', async () => {
+      fetchMock.mockRejectedValueOnce(
+        new Error('Network error: Connection failed')
+      );
+
+      try {
+        await client.getCollections();
+        throw new Error('Expected NetworkError to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(NetworkError);
+        expect((error as NetworkError).message).toBe(
+          'Network error: Network error: Connection failed'
+        );
+      }
+    });
+
+    it('should convert timeout error to NetworkError', async () => {
+      fetchMock.mockRejectedValueOnce(new Error('Request timeout after 30s'));
+
+      try {
+        await client.getCollections();
+        throw new Error('Expected NetworkError to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(NetworkError);
+        expect((error as NetworkError).message).toBe(
+          'Network error: Request timeout after 30s'
+        );
+      }
+    });
+
+    it('should convert ECONNRESET error to NetworkError', async () => {
+      fetchMock.mockRejectedValueOnce(
+        new Error('ECONNRESET: Connection reset by peer')
+      );
+
+      try {
+        await client.getCollections();
+        throw new Error('Expected NetworkError to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(NetworkError);
+        expect((error as NetworkError).message).toBe(
+          'Network error: ECONNRESET: Connection reset by peer'
+        );
+      }
+    });
+
+    it('should convert ETIMEDOUT error to NetworkError', async () => {
+      fetchMock.mockRejectedValueOnce(
+        new Error('ETIMEDOUT: Connection timed out')
+      );
+
+      try {
+        await client.getCollections();
+        throw new Error('Expected NetworkError to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(NetworkError);
+        expect((error as NetworkError).message).toBe(
+          'Network error: ETIMEDOUT: Connection timed out'
+        );
+      }
+    });
+
+    it('should convert ECONNABORTED error to NetworkError', async () => {
+      fetchMock.mockRejectedValueOnce(
+        new Error('ECONNABORTED: Connection aborted')
+      );
+
+      try {
+        await client.getCollections();
+        throw new Error('Expected NetworkError to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(NetworkError);
+        expect((error as NetworkError).message).toBe(
+          'Network error: ECONNABORTED: Connection aborted'
+        );
+      }
     });
   });
 });

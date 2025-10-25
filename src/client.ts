@@ -19,6 +19,7 @@ import {
 import {
   AetherfyVectorsError,
   ValidationError,
+  NetworkError,
   createErrorFromResponse,
   isRetryableError,
 } from './exceptions';
@@ -746,6 +747,20 @@ export class AetherfyVectorsClient {
         httpError.statusText,
         httpError.requestId
       );
+    }
+
+    // Check if it's a network error (timeout, connection errors, etc.)
+    if (error instanceof Error) {
+      const message = error.message;
+      if (
+        message.includes('Network error') ||
+        message.includes('timeout') ||
+        message.includes('ECONNRESET') ||
+        message.includes('ETIMEDOUT') ||
+        message.includes('ECONNABORTED')
+      ) {
+        return new NetworkError(message);
+      }
     }
 
     const message =
