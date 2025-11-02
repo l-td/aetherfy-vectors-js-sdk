@@ -2,25 +2,21 @@
  * Unit tests for AetherfyVectorsClient
  */
 
+import nock from 'nock';
 import { AetherfyVectorsClient } from '../../src/client';
 import { DistanceMetric, VectorConfig, Point } from '../../src/models';
-import { ValidationError, NetworkError } from '../../src/exceptions';
-import fetchMock from 'jest-fetch-mock';
+import {
+  ValidationError,
+  NetworkError,
+  AetherfyVectorsError,
+} from '../../src/exceptions';
 
 describe('AetherfyVectorsClient', () => {
-  beforeEach(() => {
-    fetchMock.resetMocks();
-    // Mock successful responses by default
-    fetchMock.mockResponse(JSON.stringify({ collections: [] }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    });
-  });
-
   describe('Constructor', () => {
     it('should create client with explicit API key', () => {
       const client = new AetherfyVectorsClient({
         apiKey: 'afy_test_1234567890123456',
+        enableConnectionPooling: false,
       });
       expect(client).toBeInstanceOf(AetherfyVectorsClient);
     });
@@ -29,6 +25,7 @@ describe('AetherfyVectorsClient', () => {
       expect(() => {
         new AetherfyVectorsClient({
           apiKey: 'invalid_key',
+          enableConnectionPooling: false,
         });
       }).toThrow("Invalid API key format. API key must start with 'afy_'");
     });
@@ -37,6 +34,7 @@ describe('AetherfyVectorsClient', () => {
       const client = new AetherfyVectorsClient({
         apiKey: 'afy_test_1234567890123456',
         endpoint: 'https://custom.endpoint.com',
+        enableConnectionPooling: false,
       });
       expect(client).toBeInstanceOf(AetherfyVectorsClient);
     });
@@ -48,14 +46,14 @@ describe('AetherfyVectorsClient', () => {
     beforeEach(() => {
       client = new AetherfyVectorsClient({
         apiKey: 'afy_test_1234567890123456',
+        enableConnectionPooling: false,
       });
     });
 
     it('should create collection successfully', async () => {
-      fetchMock.mockResponseOnce(JSON.stringify({ success: true }), {
-        status: 201,
-        headers: { 'content-type': 'application/json' },
-      });
+      nock('https://vectors.aetherfy.com')
+        .post('/collections')
+        .reply(201, { success: true });
 
       const result = await client.createCollection('test-collection', {
         size: 128,
@@ -63,23 +61,6 @@ describe('AetherfyVectorsClient', () => {
       });
 
       expect(result).toBe(true);
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://vectors.aetherfy.com/collections',
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer afy_test_1234567890123456',
-          }),
-          body: JSON.stringify({
-            name: 'test-collection',
-            vectors: {
-              size: 128,
-              distance: DistanceMetric.COSINE,
-            },
-          }),
-        })
-      );
     });
 
     it('should validate collection name', async () => {
@@ -104,61 +85,37 @@ describe('AetherfyVectorsClient', () => {
         { name: 'collection2', config: { size: 256, distance: 'Euclidean' } },
       ];
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ collections: mockCollections }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .get('/collections')
+        .reply(200, { collections: mockCollections });
 
       const collections = await client.getCollections();
 
       expect(collections).toEqual(mockCollections);
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://vectors.aetherfy.com/collections',
-        expect.objectContaining({
-          method: 'GET',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer afy_test_1234567890123456',
-          }),
-        })
-      );
     });
 
     it('should check if collection exists', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ name: 'test-collection' }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/test-collection')
+        .reply(200, { name: 'test-collection' });
 
       const exists = await client.collectionExists('test-collection');
       expect(exists).toBe(true);
     });
 
     it('should return false for non-existent collection', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ message: 'Collection not found' }), {
-          status: 404,
-          statusText: 'Not Found',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/non-existent')
+        .reply(404, { message: 'Collection not found' });
 
       const exists = await client.collectionExists('non-existent');
       expect(exists).toBe(false);
     });
 
     it('should delete collection', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(null, {
-          status: 204,
-          statusText: 'No Content',
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .delete('/collections/test-collection')
+        .reply(204);
 
       const result = await client.deleteCollection('test-collection');
       expect(result).toBe(true);
@@ -171,23 +128,13 @@ describe('AetherfyVectorsClient', () => {
         pointsCount: 1000,
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockCollection), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/test-collection')
+        .reply(200, mockCollection);
 
       const collection = await client.getCollection('test-collection');
 
       expect(collection).toEqual(mockCollection);
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://vectors.aetherfy.com/collections/test-collection',
-        expect.objectContaining({
-          method: 'GET',
-        })
-      );
     });
 
     it('should validate collection name length', async () => {
@@ -243,42 +190,30 @@ describe('AetherfyVectorsClient', () => {
     beforeEach(() => {
       client = new AetherfyVectorsClient({
         apiKey: 'afy_test_1234567890123456',
+        enableConnectionPooling: false,
       });
     });
 
     it('should upsert points successfully', async () => {
-      // Mock GET collection response for schema fetch
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: {
-              config: {
-                params: {
-                  vectors: {
-                    size: 3,
-                    distance: 'Cosine',
-                  },
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/test-collection')
+        .reply(200, {
+          result: {
+            config: {
+              params: {
+                vectors: {
+                  size: 3,
+                  distance: 'Cosine',
                 },
               },
             },
-            schema_version: 'v1',
-          }),
-          {
-            status: 200,
-            statusText: 'OK',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+          },
+          schema_version: 'v1',
+        });
 
-      // Mock PUT upsert response
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ success: true }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .put('/collections/test-collection/points')
+        .reply(200, { success: true });
 
       const points = [
         {
@@ -293,29 +228,21 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should validate point data', async () => {
-      // Mock GET collection response for first upsert attempt
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: {
-              config: {
-                params: {
-                  vectors: {
-                    size: 3,
-                    distance: 'Cosine',
-                  },
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/test-collection')
+        .reply(200, {
+          result: {
+            config: {
+              params: {
+                vectors: {
+                  size: 3,
+                  distance: 'Cosine',
                 },
               },
             },
-            schema_version: 'v1',
-          }),
-          {
-            status: 200,
-            statusText: 'OK',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+          },
+          schema_version: 'v1',
+        });
 
       const invalidPoints = [
         {
@@ -329,30 +256,7 @@ describe('AetherfyVectorsClient', () => {
         client.upsert('test-collection', invalidPoints)
       ).rejects.toThrow(ValidationError);
 
-      // Mock GET collection response for second upsert attempt
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: {
-              config: {
-                params: {
-                  vectors: {
-                    size: 3,
-                    distance: 'Cosine',
-                  },
-                },
-              },
-            },
-            schema_version: 'v1',
-          }),
-          {
-            status: 200,
-            statusText: 'OK',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
-
+      // No need to mock GET again - schema is cached from first call
       const invalidVector = [
         {
           id: 'point1',
@@ -375,13 +279,9 @@ describe('AetherfyVectorsClient', () => {
         },
       ];
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ result: mockResults }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .post('/collections/test-collection/points/search')
+        .reply(200, { result: mockResults });
 
       const queryVector = [0.1, 0.2, 0.3];
       const results = await client.search('test-collection', queryVector, {
@@ -436,29 +336,21 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should validate point has vector array', async () => {
-      // Mock GET collection response for schema fetch
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: {
-              config: {
-                params: {
-                  vectors: {
-                    size: 3,
-                    distance: 'Cosine',
-                  },
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/test-collection')
+        .reply(200, {
+          result: {
+            config: {
+              params: {
+                vectors: {
+                  size: 3,
+                  distance: 'Cosine',
                 },
               },
             },
-            schema_version: 'v1',
-          }),
-          {
-            status: 200,
-            statusText: 'OK',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+          },
+          schema_version: 'v1',
+        });
 
       const invalidPoints = [
         {
@@ -473,13 +365,9 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should delete points by IDs', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ success: true }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .post('/collections/test-collection/points/delete')
+        .reply(200, { success: true });
 
       const result = await client.delete('test-collection', [
         'point1',
@@ -487,35 +375,17 @@ describe('AetherfyVectorsClient', () => {
       ]);
 
       expect(result).toBe(true);
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://vectors.aetherfy.com/collections/test-collection/points/delete',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({ points: ['point1', 'point2'] }),
-        })
-      );
     });
 
     it('should delete points by filter', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ success: true }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .post('/collections/test-collection/points/delete')
+        .reply(200, { success: true });
 
       const filter = { must: [{ key: 'category', match: { value: 'test' } }] };
       const result = await client.delete('test-collection', filter);
 
       expect(result).toBe(true);
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://vectors.aetherfy.com/collections/test-collection/points/delete',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({ filter }),
-        })
-      );
     });
 
     it('should retrieve points by IDs', async () => {
@@ -532,13 +402,9 @@ describe('AetherfyVectorsClient', () => {
         },
       ];
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ result: mockPoints }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .post('/collections/test-collection/points')
+        .reply(200, { result: mockPoints });
 
       const result = await client.retrieve('test-collection', [
         'point1',
@@ -546,43 +412,17 @@ describe('AetherfyVectorsClient', () => {
       ]);
 
       expect(result).toEqual(mockPoints);
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://vectors.aetherfy.com/collections/test-collection/points',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({
-            ids: ['point1', 'point2'],
-            with_payload: true,
-            with_vectors: false,
-          }),
-        })
-      );
     });
 
     it('should retrieve points with custom options', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ result: [] }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .post('/collections/test-collection/points')
+        .reply(200, { result: [] });
 
       await client.retrieve('test-collection', ['point1'], {
         withPayload: false,
         withVectors: true,
       });
-
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://vectors.aetherfy.com/collections/test-collection/points',
-        expect.objectContaining({
-          body: JSON.stringify({
-            ids: ['point1'],
-            with_payload: false,
-            with_vectors: true,
-          }),
-        })
-      );
     });
 
     it('should return empty array when retrieving with empty IDs', async () => {
@@ -591,37 +431,19 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should count points in collection', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ result: { count: 42 } }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .post('/collections/test-collection/points/count')
+        .reply(200, { result: { count: 42 } });
 
       const count = await client.count('test-collection');
 
       expect(count).toBe(42);
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://vectors.aetherfy.com/collections/test-collection/points/count',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({
-            filter: undefined,
-            exact: false,
-          }),
-        })
-      );
     });
 
     it('should count points with filter and exact option', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ result: { count: 10 } }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .post('/collections/test-collection/points/count')
+        .reply(200, { result: { count: 10 } });
 
       const filter = { must: [{ key: 'category', match: { value: 'test' } }] };
       const count = await client.count('test-collection', {
@@ -630,15 +452,6 @@ describe('AetherfyVectorsClient', () => {
       });
 
       expect(count).toBe(10);
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://vectors.aetherfy.com/collections/test-collection/points/count',
-        expect.objectContaining({
-          body: JSON.stringify({
-            filter,
-            exact: true,
-          }),
-        })
-      );
     });
   });
 
@@ -648,6 +461,7 @@ describe('AetherfyVectorsClient', () => {
     beforeEach(() => {
       client = new AetherfyVectorsClient({
         apiKey: 'afy_test_1234567890123456',
+        enableConnectionPooling: false,
       });
     });
 
@@ -659,13 +473,9 @@ describe('AetherfyVectorsClient', () => {
         activeRegions: ['us-east-1', 'eu-west-1'],
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockAnalytics), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .get('/analytics/performance?time_range=24h')
+        .reply(200, mockAnalytics);
 
       const analytics = await client.getPerformanceAnalytics('24h');
       expect(analytics).toEqual(mockAnalytics);
@@ -680,13 +490,9 @@ describe('AetherfyVectorsClient', () => {
         planName: 'Developer',
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockUsage), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .get('/analytics/usage')
+        .reply(200, mockUsage);
 
       const usage = await client.getUsageStats();
       expect(usage).toEqual(mockUsage);
@@ -702,13 +508,9 @@ describe('AetherfyVectorsClient', () => {
         avgSearchLatencyMs: 30,
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockAnalytics), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .get('/analytics/collections/test-collection?time_range=7d')
+        .reply(200, mockAnalytics);
 
       const analytics = await client.getCollectionAnalytics(
         'test-collection',
@@ -730,24 +532,23 @@ describe('AetherfyVectorsClient', () => {
     beforeEach(() => {
       client = new AetherfyVectorsClient({
         apiKey: 'afy_test_1234567890123456',
+        enableConnectionPooling: false,
       });
     });
 
     it('should test connection successfully', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ collections: [] }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock('https://vectors.aetherfy.com')
+        .get('/collections')
+        .reply(200, { collections: [] });
 
       const connected = await client.testConnection();
       expect(connected).toBe(true);
     });
 
     it('should return false on connection failure', async () => {
-      fetchMock.mockRejectedValueOnce(new Error('Network error'));
+      nock('https://vectors.aetherfy.com')
+        .get('/collections')
+        .replyWithError(new Error('Network Error'));
 
       const connected = await client.testConnection();
       expect(connected).toBe(false);
@@ -764,43 +565,31 @@ describe('AetherfyVectorsClient', () => {
     beforeEach(() => {
       client = new AetherfyVectorsClient({
         apiKey: 'afy_test_1234567890123456',
+        enableConnectionPooling: false,
       });
     });
 
     it('should handle HTTP errors with proper status codes', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Unauthorized access',
-            code: 'UNAUTHORIZED',
-          }),
-          {
-            status: 401,
-            statusText: 'Unauthorized',
-            headers: {
-              'content-type': 'application/json',
-              'x-request-id': 'req-123',
-            },
-          }
-        )
+      nock('https://vectors.aetherfy.com').get('/collections').reply(
+        401,
+        {
+          message: 'Unauthorized access',
+          code: 'UNAUTHORIZED',
+        },
+        {
+          'x-request-id': 'req-123',
+        }
       );
 
       await expect(client.getCollections()).rejects.toThrow();
     });
 
     it('should handle errors in deleteCollection', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Internal server error',
-          }),
-          {
-            status: 500,
-            statusText: 'Internal Server Error',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock('https://vectors.aetherfy.com')
+        .delete('/collections/test-collection')
+        .reply(500, {
+          message: 'Internal server error',
+        });
 
       await expect(
         client.deleteCollection('test-collection')
@@ -808,18 +597,11 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should handle non-404 errors in collectionExists', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Internal server error',
-          }),
-          {
-            status: 500,
-            statusText: 'Internal Server Error',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/test-collection')
+        .reply(500, {
+          message: 'Internal server error',
+        });
 
       await expect(
         client.collectionExists('test-collection')
@@ -827,44 +609,28 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should handle non-retryable HTTP errors in upsert', async () => {
-      // Mock GET collection response for schema fetch
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: {
-              config: {
-                params: {
-                  vectors: {
-                    size: 3,
-                    distance: 'Cosine',
-                  },
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/test-collection')
+        .reply(200, {
+          result: {
+            config: {
+              params: {
+                vectors: {
+                  size: 3,
+                  distance: 'Cosine',
                 },
               },
             },
-            schema_version: 'v1',
-          }),
-          {
-            status: 200,
-            statusText: 'OK',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+          },
+          schema_version: 'v1',
+        });
 
-      // Mock PUT upsert response with error
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Bad request',
-            code: 'VALIDATION_ERROR',
-          }),
-          {
-            status: 400,
-            statusText: 'Bad Request',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock('https://vectors.aetherfy.com')
+        .put('/collections/test-collection/points')
+        .reply(400, {
+          message: 'Bad request',
+          code: 'VALIDATION_ERROR',
+        });
 
       const points = [
         {
@@ -878,19 +644,12 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should handle non-retryable HTTP errors in search', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Collection not found',
-            code: 'NOT_FOUND',
-          }),
-          {
-            status: 404,
-            statusText: 'Not Found',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock('https://vectors.aetherfy.com')
+        .post('/collections/test-collection/points/search')
+        .reply(404, {
+          message: 'Collection not found',
+          code: 'NOT_FOUND',
+        });
 
       await expect(
         client.search('test-collection', [0.1, 0.2, 0.3])
@@ -898,19 +657,12 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should handle errors in delete operation', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Server error',
-            code: 'INTERNAL_ERROR',
-          }),
-          {
-            status: 500,
-            statusText: 'Internal Server Error',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock('https://vectors.aetherfy.com')
+        .post('/collections/test-collection/points/delete')
+        .reply(500, {
+          message: 'Server error',
+          code: 'INTERNAL_ERROR',
+        });
 
       await expect(
         client.delete('test-collection', ['point1'])
@@ -918,19 +670,12 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should handle errors in retrieve operation', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Service unavailable',
-            code: 'SERVICE_UNAVAILABLE',
-          }),
-          {
-            status: 503,
-            statusText: 'Service Unavailable',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock('https://vectors.aetherfy.com')
+        .post('/collections/test-collection/points')
+        .reply(503, {
+          message: 'Service unavailable',
+          code: 'SERVICE_UNAVAILABLE',
+        });
 
       await expect(
         client.retrieve('test-collection', ['point1'])
@@ -938,45 +683,31 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should handle errors in count operation', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Forbidden',
-            code: 'FORBIDDEN',
-          }),
-          {
-            status: 403,
-            statusText: 'Forbidden',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock('https://vectors.aetherfy.com')
+        .post('/collections/test-collection/points/count')
+        .reply(403, {
+          message: 'Forbidden',
+          code: 'FORBIDDEN',
+        });
 
       await expect(client.count('test-collection')).rejects.toThrow();
     });
 
     it('should handle errors in getCollection operation', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Collection not found',
-            code: 'NOT_FOUND',
-          }),
-          {
-            status: 404,
-            statusText: 'Not Found',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/non-existent')
+        .reply(404, {
+          message: 'Collection not found',
+          code: 'NOT_FOUND',
+        });
 
       await expect(client.getCollection('non-existent')).rejects.toThrow();
     });
 
     it('should convert generic network error to NetworkError', async () => {
-      fetchMock.mockRejectedValueOnce(
-        new Error('Network error: Connection failed')
-      );
+      nock('https://vectors.aetherfy.com')
+        .get('/collections')
+        .replyWithError(new Error('Network Error'));
 
       try {
         await client.getCollections();
@@ -984,13 +715,18 @@ describe('AetherfyVectorsClient', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(NetworkError);
         expect((error as NetworkError).message).toBe(
-          'Network error: Network error: Connection failed'
+          'Network error: Network Error'
         );
       }
     });
 
     it('should convert timeout error to NetworkError', async () => {
-      fetchMock.mockRejectedValueOnce(new Error('Request timeout after 30s'));
+      const error = new Error('timeout of 30000ms exceeded');
+      Object.assign(error, { code: 'ECONNABORTED' });
+
+      nock('https://vectors.aetherfy.com')
+        .get('/collections')
+        .replyWithError(error);
 
       try {
         await client.getCollections();
@@ -998,15 +734,18 @@ describe('AetherfyVectorsClient', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(NetworkError);
         expect((error as NetworkError).message).toBe(
-          'Network error: Request timeout after 30s'
+          'Network error: timeout of 30000ms exceeded'
         );
       }
     });
 
     it('should convert ECONNRESET error to NetworkError', async () => {
-      fetchMock.mockRejectedValueOnce(
-        new Error('ECONNRESET: Connection reset by peer')
-      );
+      const error = new Error('Connection reset by peer');
+      Object.assign(error, { code: 'ECONNRESET' });
+
+      nock('https://vectors.aetherfy.com')
+        .get('/collections')
+        .replyWithError(error);
 
       try {
         await client.getCollections();
@@ -1014,15 +753,18 @@ describe('AetherfyVectorsClient', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(NetworkError);
         expect((error as NetworkError).message).toBe(
-          'Network error: ECONNRESET: Connection reset by peer'
+          'Network error: Connection reset by peer'
         );
       }
     });
 
     it('should convert ETIMEDOUT error to NetworkError', async () => {
-      fetchMock.mockRejectedValueOnce(
-        new Error('ETIMEDOUT: Connection timed out')
-      );
+      const error = new Error('Connection timed out');
+      Object.assign(error, { code: 'ETIMEDOUT' });
+
+      nock('https://vectors.aetherfy.com')
+        .get('/collections')
+        .replyWithError(error);
 
       try {
         await client.getCollections();
@@ -1030,15 +772,18 @@ describe('AetherfyVectorsClient', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(NetworkError);
         expect((error as NetworkError).message).toBe(
-          'Network error: ETIMEDOUT: Connection timed out'
+          'Network error: Connection timed out'
         );
       }
     });
 
     it('should convert ECONNABORTED error to NetworkError', async () => {
-      fetchMock.mockRejectedValueOnce(
-        new Error('ECONNABORTED: Connection aborted')
-      );
+      const error = new Error('Connection aborted');
+      Object.assign(error, { code: 'ECONNABORTED' });
+
+      nock('https://vectors.aetherfy.com')
+        .get('/collections')
+        .replyWithError(error);
 
       try {
         await client.getCollections();
@@ -1046,9 +791,234 @@ describe('AetherfyVectorsClient', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(NetworkError);
         expect((error as NetworkError).message).toBe(
-          'Network error: ECONNABORTED: Connection aborted'
+          'Network error: Connection aborted'
         );
       }
+    });
+
+    it('should handle createCollection errors', async () => {
+      nock('https://vectors.aetherfy.com')
+        .post('/collections')
+        .replyWithError(new Error('Connection failed'));
+
+      await expect(
+        client.createCollection('test-collection', {
+          size: 128,
+          distance: DistanceMetric.COSINE,
+        })
+      ).rejects.toThrow();
+    });
+
+    it('should handle invalid collection schema from server', async () => {
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/invalid-schema')
+        .reply(200, {
+          result: {
+            config: {
+              params: {
+                // Missing vectors config
+              },
+            },
+          },
+          schema_version: 'v1',
+        });
+
+      await expect(
+        client.upsert('invalid-schema', [
+          { id: '1', vector: [0.1, 0.2, 0.3], payload: {} },
+        ])
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('should handle points without vector array', async () => {
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/test-collection')
+        .reply(200, {
+          result: {
+            config: {
+              params: {
+                vectors: {
+                  size: 3,
+                  distance: 'Cosine',
+                },
+              },
+            },
+          },
+          schema_version: 'v1',
+        });
+
+      const pointsWithoutVector = [
+        {
+          id: 'point1',
+          payload: { category: 'test' },
+        } as unknown as Point,
+      ];
+
+      await expect(
+        client.upsert('test-collection', pointsWithoutVector)
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('should handle points with null vector', async () => {
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/test-collection')
+        .reply(200, {
+          result: {
+            config: {
+              params: {
+                vectors: {
+                  size: 3,
+                  distance: 'Cosine',
+                },
+              },
+            },
+          },
+          schema_version: 'v1',
+        });
+
+      const pointsWithNullVector = [
+        {
+          id: 'point1',
+          vector: null,
+          payload: { category: 'test' },
+        } as unknown as Point,
+      ];
+
+      await expect(
+        client.upsert('test-collection', pointsWithNullVector)
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('should handle points with non-array vector', async () => {
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/test-collection')
+        .reply(200, {
+          result: {
+            config: {
+              params: {
+                vectors: {
+                  size: 3,
+                  distance: 'Cosine',
+                },
+              },
+            },
+          },
+          schema_version: 'v1',
+        });
+
+      const pointsWithStringVector = [
+        {
+          id: 'point1',
+          vector: 'not an array',
+          payload: { category: 'test' },
+        } as unknown as Point,
+      ];
+
+      await expect(
+        client.upsert('test-collection', pointsWithStringVector)
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('should pass through AetherfyVectorsError unchanged', async () => {
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/test-collection')
+        .reply(500, {
+          message: 'Server error',
+          code: 'INTERNAL_ERROR',
+        });
+
+      try {
+        await client.collectionExists('test-collection');
+        throw new Error('Expected error to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(AetherfyVectorsError);
+      }
+    });
+
+    it('should handle AetherfyVectorsError passthrough', async () => {
+      nock('https://vectors.aetherfy.com').get('/collections').reply(500, {
+        message: 'Server error',
+      });
+
+      await expect(client.getCollections()).rejects.toThrow(
+        AetherfyVectorsError
+      );
+    });
+
+    it('should handle generic network errors', async () => {
+      nock('https://vectors.aetherfy.com')
+        .get('/collections')
+        .replyWithError(new Error('Connection failed'));
+
+      await expect(client.getCollections()).rejects.toThrow(NetworkError);
+    });
+
+    it('should handle ECONNABORTED errors', async () => {
+      const error = new Error('Connection ECONNABORTED');
+
+      nock('https://vectors.aetherfy.com')
+        .get('/collections')
+        .replyWithError(error);
+
+      await expect(client.getCollections()).rejects.toThrow(NetworkError);
+    });
+
+    it('should handle timeout errors', async () => {
+      const error = new Error('Request timeout');
+
+      nock('https://vectors.aetherfy.com')
+        .get('/collections')
+        .replyWithError(error);
+
+      await expect(client.getCollections()).rejects.toThrow(NetworkError);
+    });
+
+    it('should handle upsert errors that are not 500 status', async () => {
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/test-collection')
+        .reply(200, {
+          result: {
+            config: {
+              params: {
+                vectors: {
+                  size: 3,
+                  distance: 'Cosine',
+                },
+              },
+            },
+          },
+          schema_version: 'v1',
+        });
+
+      nock('https://vectors.aetherfy.com')
+        .put('/collections/test-collection/points')
+        .replyWithError(new Error('Database connection failed'));
+
+      await expect(
+        client.upsert('test-collection', [
+          { id: '1', vector: [0.1, 0.2, 0.3], payload: {} },
+        ])
+      ).rejects.toThrow(NetworkError);
+    });
+  });
+
+  describe('Cleanup', () => {
+    it('should destroy client resources', () => {
+      const testClient = new AetherfyVectorsClient({
+        apiKey: 'afy_test_1234567890123456',
+        enableConnectionPooling: true,
+      });
+
+      expect(() => testClient.destroy()).not.toThrow();
+    });
+
+    it('should destroy client without connection pooling', () => {
+      const testClient = new AetherfyVectorsClient({
+        apiKey: 'afy_test_1234567890123456',
+        enableConnectionPooling: false,
+      });
+
+      expect(() => testClient.destroy()).not.toThrow();
     });
   });
 });

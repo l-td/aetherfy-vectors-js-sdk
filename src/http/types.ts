@@ -24,6 +24,7 @@ export interface HttpClientOptions {
    * Enable HTTP connection pooling for better performance.
    * Defaults to true in Node.js environments.
    * Set to false to disable custom agents (useful for testing with interceptors).
+   * @internal
    */
   enableConnectionPooling?: boolean;
 }

@@ -85,6 +85,7 @@ export class HttpClient {
   /**
    * Destroy HTTP agents and close all connections
    * Call this when you're done with the client to prevent hanging processes
+   * This method is idempotent and can be safely called multiple times
    */
   destroy(): void {
     if (
@@ -93,6 +94,7 @@ export class HttpClient {
       'destroy' in this.httpAgent
     ) {
       (this.httpAgent as { destroy: () => void }).destroy();
+      this.httpAgent = undefined;
     }
     if (
       this.httpsAgent &&
@@ -100,6 +102,7 @@ export class HttpClient {
       'destroy' in this.httpsAgent
     ) {
       (this.httpsAgent as { destroy: () => void }).destroy();
+      this.httpsAgent = undefined;
     }
   }
 
