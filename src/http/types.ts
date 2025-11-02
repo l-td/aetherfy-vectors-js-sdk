@@ -20,6 +20,12 @@ export interface HttpResponse<T = unknown> {
 export interface HttpClientOptions {
   timeout?: number;
   defaultHeaders?: Record<string, string>;
+  /**
+   * Enable HTTP connection pooling for better performance.
+   * Defaults to true in Node.js environments.
+   * Set to false to disable custom agents (useful for testing with interceptors).
+   */
+  enableConnectionPooling?: boolean;
 }
 
 export interface ErrorResponse {

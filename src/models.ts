@@ -198,6 +198,12 @@ export interface ClientConfig {
   endpoint?: string;
   /** Request timeout in milliseconds */
   timeout?: number;
+  /**
+   * Enable HTTP connection pooling for better performance.
+   * Defaults to true in Node.js environments.
+   * Set to false to disable (useful for testing with HTTP interceptors).
+   */
+  enableConnectionPooling?: boolean;
 }
 
 /**

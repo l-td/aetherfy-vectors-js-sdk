@@ -89,6 +89,7 @@ export class AetherfyVectorsClient {
     this.httpClient = new HttpClient({
       timeout: config.timeout || AetherfyVectorsClient.DEFAULT_TIMEOUT,
       defaultHeaders: this.authManager.getAuthHeaders(),
+      enableConnectionPooling: config.enableConnectionPooling,
     });
 
     // Initialize schema cache for ETag-based validation
@@ -773,5 +774,20 @@ export class AetherfyVectorsClient {
       maxRetries: 3,
       retryCondition: error => isRetryableError(error),
     });
+  }
+
+  /**
+   * Destroy the HTTP client and close all connections
+   * Call this when you're done with the client to prevent hanging processes
+   *
+   * @example
+   * ```typescript
+   * const client = new AetherfyVectorsClient({ apiKey: 'afy_xxx' });
+   * // ... use client ...
+   * client.destroy(); // Clean up when done
+   * ```
+   */
+  destroy(): void {
+    this.httpClient.destroy();
   }
 }

@@ -8,7 +8,15 @@ module.exports = {
   coverageReporters: ['text', 'lcov', 'html'],
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
   transform: {
-    '^.+\\.ts$': 'ts-jest',
+    '^.+\\.ts$': [
+      'ts-jest',
+      {
+        tsconfig: {
+          rootDir: '.',
+          types: ['jest', 'node'],
+        },
+      },
+    ],
   },
   coverageProvider: 'v8',
   projects: [
@@ -16,9 +24,17 @@ module.exports = {
       displayName: 'node',
       testEnvironment: 'node',
       testMatch: ['<rootDir>/tests/unit/**/*.test.ts'],
-      setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
+      setupFilesAfterEnv: [
+        '<rootDir>/tests/setup.ts',
+        '<rootDir>/tests/node-setup.ts',
+      ],
       transform: {
-        '^.+\\.ts$': 'ts-jest',
+        '^.+\\.ts$': [
+          'ts-jest',
+          {
+            tsconfig: '<rootDir>/tests/tsconfig.json',
+          },
+        ],
       },
     },
     {
@@ -30,7 +46,12 @@ module.exports = {
         '<rootDir>/tests/browser-setup.ts',
       ],
       transform: {
-        '^.+\\.ts$': 'ts-jest',
+        '^.+\\.ts$': [
+          'ts-jest',
+          {
+            tsconfig: '<rootDir>/tests/tsconfig.json',
+          },
+        ],
       },
     },
   ],

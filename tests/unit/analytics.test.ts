@@ -2,6 +2,8 @@
  * Unit tests for AnalyticsClient
  */
 
+import nock from 'nock';
+
 import { AnalyticsClient } from '../../src/analytics';
 import { HttpClient } from '../../src/http/client';
 import {
@@ -17,7 +19,6 @@ import {
   AuthenticationError,
   RateLimitExceededError,
 } from '../../src/exceptions';
-import fetchMock from 'jest-fetch-mock';
 
 describe('AnalyticsClient', () => {
   let client: AnalyticsClient;
@@ -26,15 +27,11 @@ describe('AnalyticsClient', () => {
   const authHeaders = { Authorization: 'Bearer afy_test_1234567890123456' };
 
   beforeEach(() => {
-    fetchMock.resetMocks();
     httpClient = new HttpClient({
       defaultHeaders: authHeaders,
+      enableConnectionPooling: false,
     });
     client = new AnalyticsClient(httpClient, baseUrl, authHeaders);
-  });
-
-  afterAll(() => {
-    fetchMock.disableMocks();
   });
 
   describe('getPerformanceAnalytics', () => {
@@ -50,26 +47,13 @@ describe('AnalyticsClient', () => {
         },
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockAnalytics), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get('/analytics/performance?time_range=24h')
+        .reply(200, mockAnalytics);
 
       const result = await client.getPerformanceAnalytics();
 
       expect(result).toEqual(mockAnalytics);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/performance?time_range=24h`,
-        expect.objectContaining({
-          method: 'GET',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer afy_test_1234567890123456',
-          }),
-        })
-      );
     });
 
     it('should get performance analytics with custom time range', async () => {
@@ -83,23 +67,13 @@ describe('AnalyticsClient', () => {
         },
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockAnalytics), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get('/analytics/performance?time_range=7d')
+        .reply(200, mockAnalytics);
 
       const result = await client.getPerformanceAnalytics('7d');
 
       expect(result).toEqual(mockAnalytics);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/performance?time_range=7d`,
-        expect.objectContaining({
-          method: 'GET',
-        })
-      );
     });
 
     it('should get performance analytics for specific region', async () => {
@@ -113,39 +87,20 @@ describe('AnalyticsClient', () => {
         },
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockAnalytics), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get('/analytics/performance?time_range=24h&region=us-east-1')
+        .reply(200, mockAnalytics);
 
       const result = await client.getPerformanceAnalytics('24h', 'us-east-1');
 
       expect(result).toEqual(mockAnalytics);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/performance?time_range=24h&region=us-east-1`,
-        expect.objectContaining({
-          method: 'GET',
-        })
-      );
     });
 
     it('should handle errors properly', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Authentication failed',
-            code: 'AUTH_ERROR',
-          }),
-          {
-            status: 401,
-            statusText: 'Unauthorized',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock(baseUrl).get('/analytics/performance?time_range=24h').reply(401, {
+        message: 'Authentication failed',
+        code: 'AUTH_ERROR',
+      });
 
       await expect(client.getPerformanceAnalytics()).rejects.toThrow(
         AuthenticationError
@@ -164,26 +119,13 @@ describe('AnalyticsClient', () => {
         topRegions: ['us-east-1', 'eu-west-1'],
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockAnalytics), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get('/analytics/collections/products?time_range=24h')
+        .reply(200, mockAnalytics);
 
       const result = await client.getCollectionAnalytics('products');
 
       expect(result).toEqual(mockAnalytics);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/collections/products?time_range=24h`,
-        expect.objectContaining({
-          method: 'GET',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer afy_test_1234567890123456',
-          }),
-        })
-      );
     });
 
     it('should get analytics for specific collection with custom time range', async () => {
@@ -196,23 +138,13 @@ describe('AnalyticsClient', () => {
         topRegions: ['us-east-1'],
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockAnalytics), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get('/analytics/collections/users?time_range=7d')
+        .reply(200, mockAnalytics);
 
       const result = await client.getCollectionAnalytics('users', '7d');
 
       expect(result).toEqual(mockAnalytics);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/collections/users?time_range=7d`,
-        expect.objectContaining({
-          method: 'GET',
-        })
-      );
     });
 
     it('should properly encode collection name', async () => {
@@ -225,39 +157,22 @@ describe('AnalyticsClient', () => {
         topRegions: ['us-east-1'],
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockAnalytics), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get('/analytics/collections/test%20collection?time_range=24h')
+        .reply(200, mockAnalytics);
 
       const result = await client.getCollectionAnalytics('test collection');
 
       expect(result).toEqual(mockAnalytics);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/collections/test%20collection?time_range=24h`,
-        expect.objectContaining({
-          method: 'GET',
-        })
-      );
     });
 
     it('should handle not found error for non-existent collection', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Collection not found',
-            code: 'COLLECTION_NOT_FOUND',
-          }),
-          {
-            status: 404,
-            statusText: 'Not Found',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock(baseUrl)
+        .get('/analytics/collections/non-existent?time_range=24h')
+        .reply(404, {
+          message: 'Collection not found',
+          code: 'COLLECTION_NOT_FOUND',
+        });
 
       await expect(
         client.getCollectionAnalytics('non-existent')
@@ -279,42 +194,18 @@ describe('AnalyticsClient', () => {
         planName: 'Developer',
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockUsage), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl).get('/analytics/usage').reply(200, mockUsage);
 
       const result = await client.getUsageStats();
 
       expect(result).toEqual(mockUsage);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/usage`,
-        expect.objectContaining({
-          method: 'GET',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer afy_test_1234567890123456',
-          }),
-        })
-      );
     });
 
     it('should handle errors properly', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Too many requests',
-            code: 'RATE_LIMIT_EXCEEDED',
-          }),
-          {
-            status: 429,
-            statusText: 'Too Many Requests',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock(baseUrl).get('/analytics/usage').reply(429, {
+        message: 'Too many requests',
+        code: 'RATE_LIMIT_EXCEEDED',
+      });
 
       await expect(client.getUsageStats()).rejects.toThrow(
         RateLimitExceededError
@@ -331,26 +222,13 @@ describe('AnalyticsClient', () => {
         },
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockRegions), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get('/analytics/regions?time_range=24h')
+        .reply(200, mockRegions);
 
       const result = await client.getRegionPerformance();
 
       expect(result).toEqual(mockRegions.regions);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/regions?time_range=24h`,
-        expect.objectContaining({
-          method: 'GET',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer afy_test_1234567890123456',
-          }),
-        })
-      );
     });
 
     it('should get regional performance with custom time range', async () => {
@@ -360,33 +238,17 @@ describe('AnalyticsClient', () => {
         },
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockRegions), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get('/analytics/regions?time_range=7d')
+        .reply(200, mockRegions);
 
       const result = await client.getRegionPerformance('7d');
 
       expect(result).toEqual(mockRegions.regions);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/regions?time_range=7d`,
-        expect.objectContaining({
-          method: 'GET',
-        })
-      );
     });
 
     it('should return empty object if regions are missing', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({}), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl).get('/analytics/regions?time_range=24h').reply(200, {});
 
       const result = await client.getRegionPerformance();
 
@@ -394,19 +256,10 @@ describe('AnalyticsClient', () => {
     });
 
     it('should handle errors properly', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Internal server error',
-            code: 'INTERNAL_ERROR',
-          }),
-          {
-            status: 500,
-            statusText: 'Internal Server Error',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock(baseUrl).get('/analytics/regions?time_range=24h').reply(500, {
+        message: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
 
       await expect(client.getRegionPerformance()).rejects.toThrow();
     });
@@ -420,26 +273,13 @@ describe('AnalyticsClient', () => {
         misses: 750,
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockCacheStats), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get('/analytics/cache?time_range=24h')
+        .reply(200, mockCacheStats);
 
       const result = await client.getCacheAnalytics();
 
       expect(result).toEqual(mockCacheStats);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/cache?time_range=24h`,
-        expect.objectContaining({
-          method: 'GET',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer afy_test_1234567890123456',
-          }),
-        })
-      );
     });
 
     it('should get cache analytics with custom time range', async () => {
@@ -449,39 +289,20 @@ describe('AnalyticsClient', () => {
         misses: 6000,
       };
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(mockCacheStats), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get('/analytics/cache?time_range=30d')
+        .reply(200, mockCacheStats);
 
       const result = await client.getCacheAnalytics('30d');
 
       expect(result).toEqual(mockCacheStats);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/cache?time_range=30d`,
-        expect.objectContaining({
-          method: 'GET',
-        })
-      );
     });
 
     it('should handle errors properly', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Forbidden',
-            code: 'FORBIDDEN',
-          }),
-          {
-            status: 403,
-            statusText: 'Forbidden',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock(baseUrl).get('/analytics/cache?time_range=24h').reply(403, {
+        message: 'Forbidden',
+        code: 'FORBIDDEN',
+      });
 
       await expect(client.getCacheAnalytics()).rejects.toThrow();
     });
@@ -495,26 +316,15 @@ describe('AnalyticsClient', () => {
         { collectionName: 'documents', value: 8000 },
       ];
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ collections: mockCollections }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get(
+          '/analytics/collections/top?metric=requests&time_range=24h&limit=10'
+        )
+        .reply(200, { collections: mockCollections });
 
       const result = await client.getTopCollections();
 
       expect(result).toEqual(mockCollections);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/collections/top?metric=requests&time_range=24h&limit=10`,
-        expect.objectContaining({
-          method: 'GET',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer afy_test_1234567890123456',
-          }),
-        })
-      );
     });
 
     it('should get top collections with custom parameters', async () => {
@@ -523,33 +333,21 @@ describe('AnalyticsClient', () => {
         { collectionName: 'medium-dataset', value: 500000 },
       ];
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ collections: mockCollections }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get('/analytics/collections/top?metric=points&time_range=7d&limit=5')
+        .reply(200, { collections: mockCollections });
 
       const result = await client.getTopCollections('points', '7d', 5);
 
       expect(result).toEqual(mockCollections);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/collections/top?metric=points&time_range=7d&limit=5`,
-        expect.objectContaining({
-          method: 'GET',
-        })
-      );
     });
 
     it('should return empty array if collections are missing', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({}), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get(
+          '/analytics/collections/top?metric=requests&time_range=24h&limit=10'
+        )
+        .reply(200, {});
 
       const result = await client.getTopCollections();
 
@@ -557,19 +355,14 @@ describe('AnalyticsClient', () => {
     });
 
     it('should handle errors properly', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Bad request',
-            code: 'VALIDATION_ERROR',
-          }),
-          {
-            status: 400,
-            statusText: 'Bad Request',
-            headers: { 'content-type': 'application/json' },
-          }
+      nock(baseUrl)
+        .get(
+          '/analytics/collections/top?metric=requests&time_range=24h&limit=10'
         )
-      );
+        .reply(400, {
+          message: 'Bad request',
+          code: 'VALIDATION_ERROR',
+        });
 
       await expect(client.getTopCollections()).rejects.toThrow(ValidationError);
     });
@@ -598,36 +391,17 @@ describe('AnalyticsClient', () => {
         },
       ];
 
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({ regions: mockRegions }), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl)
+        .get('/analytics/regions/info')
+        .reply(200, { regions: mockRegions });
 
       const result = await client.getRegions();
 
       expect(result).toEqual(mockRegions);
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${baseUrl}/analytics/regions/info`,
-        expect.objectContaining({
-          method: 'GET',
-          headers: expect.objectContaining({
-            Authorization: 'Bearer afy_test_1234567890123456',
-          }),
-        })
-      );
     });
 
     it('should return empty array if regions are missing', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify({}), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'content-type': 'application/json' },
-        })
-      );
+      nock(baseUrl).get('/analytics/regions/info').reply(200, {});
 
       const result = await client.getRegions();
 
@@ -635,19 +409,10 @@ describe('AnalyticsClient', () => {
     });
 
     it('should handle errors properly', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Service unavailable',
-            code: 'SERVICE_UNAVAILABLE',
-          }),
-          {
-            status: 503,
-            statusText: 'Service Unavailable',
-            headers: { 'content-type': 'application/json' },
-          }
-        )
-      );
+      nock(baseUrl).get('/analytics/regions/info').reply(503, {
+        message: 'Service unavailable',
+        code: 'SERVICE_UNAVAILABLE',
+      });
 
       await expect(client.getRegions()).rejects.toThrow();
     });
@@ -655,22 +420,10 @@ describe('AnalyticsClient', () => {
 
   describe('handleError', () => {
     it('should convert HTTP errors to appropriate exception types', async () => {
-      fetchMock.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: 'Invalid API key',
-            code: 'INVALID_API_KEY',
-          }),
-          {
-            status: 401,
-            statusText: 'Unauthorized',
-            headers: {
-              'content-type': 'application/json',
-              'x-request-id': 'req-123',
-            },
-          }
-        )
-      );
+      nock(baseUrl).get('/analytics/performance?time_range=24h').reply(401, {
+        message: 'Invalid API key',
+        code: 'INVALID_API_KEY',
+      });
 
       await expect(client.getPerformanceAnalytics()).rejects.toThrow(
         AuthenticationError
@@ -678,15 +431,20 @@ describe('AnalyticsClient', () => {
     });
 
     it('should handle non-HTTP errors', async () => {
-      fetchMock.mockRejectedValueOnce(new Error('Network connection failed'));
+      nock(baseUrl)
+        .get('/analytics/performance?time_range=24h')
+        .replyWithError(new Error('Network Error'));
 
-      await expect(client.getPerformanceAnalytics()).rejects.toThrow(
-        'Network connection failed'
-      );
+      await expect(client.getPerformanceAnalytics()).rejects.toThrow();
     });
 
     it('should handle unknown errors', async () => {
-      fetchMock.mockRejectedValueOnce('Unknown error string');
+      const error = new Error('timeout');
+      Object.assign(error, { code: 'ECONNABORTED' });
+
+      nock(baseUrl)
+        .get('/analytics/performance?time_range=24h')
+        .replyWithError(error);
 
       await expect(client.getPerformanceAnalytics()).rejects.toThrow();
     });

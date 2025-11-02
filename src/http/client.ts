@@ -1,42 +1,29 @@
-import crossFetch from 'cross-fetch';
-
-/**
- * Get the appropriate fetch implementation at runtime
- * This allows for proper mocking in tests and dynamic resolution
- */
-function getFetch(): typeof globalThis.fetch {
-  // In tests, cross-fetch is mapped to jest-fetch-mock which respects our global mocks
-  // In production, prioritize native implementations first
-  if (typeof globalThis !== 'undefined' && globalThis.fetch) {
-    return globalThis.fetch;
-  }
-
-  if (typeof window !== 'undefined' && window.fetch) {
-    return window.fetch;
-  }
-
-  if (typeof global !== 'undefined' && (global as typeof globalThis).fetch) {
-    return (global as typeof globalThis).fetch;
-  }
-
-  // Fall back to cross-fetch (which is mocked in tests)
-  return crossFetch as typeof globalThis.fetch;
-}
 import {
   RequestConfig,
   HttpResponse,
   HttpClientOptions,
   ErrorResponse,
 } from './types';
+import axios, { AxiosInstance, AxiosError as AxiosErrorType } from 'axios';
+
+// Type guard for axios errors
+function isAxiosError(error: unknown): error is AxiosErrorType {
+  return axios.isAxiosError(error);
+}
 
 /**
- * Universal HTTP client that works in both Node.js and browser environments.
- * Uses cross-fetch for universal compatibility with consistent timeout handling
- * and error management.
+ * HTTP client with persistent connection pooling using axios.
+ *
+ * Connection pooling prevents TCP/TLS handshake overhead on every request,
+ * significantly improving performance for server-to-server communication.
  */
 export class HttpClient {
   private timeout: number;
   private defaultHeaders: Record<string, string>;
+  private enableConnectionPooling: boolean;
+  private axiosInstance: AxiosInstance;
+  private httpAgent?: unknown;
+  private httpsAgent?: unknown;
 
   constructor(options: HttpClientOptions = {}) {
     this.timeout = options.timeout || 30000;
@@ -45,6 +32,75 @@ export class HttpClient {
       'User-Agent': 'Aetherfy-Vectors-JS/1.0.0',
       ...options.defaultHeaders,
     };
+    this.enableConnectionPooling = options.enableConnectionPooling ?? true;
+
+    this.axiosInstance = this.createAxiosInstance();
+  }
+
+  /**
+   * Create axios instance with persistent HTTP connection pooling
+   */
+  private createAxiosInstance(): AxiosInstance {
+    const config: Record<string, unknown> = {
+      timeout: this.timeout,
+      headers: this.defaultHeaders,
+      validateStatus: () => true, // Handle all status codes ourselves
+    };
+
+    // Add connection pooling for Node.js environment when enabled
+    if (typeof process !== 'undefined' && process.versions?.node) {
+      if (this.enableConnectionPooling) {
+        const http = require('http');
+        const https = require('https');
+
+        this.httpAgent = new http.Agent({
+          keepAlive: true,
+          maxSockets: 50,
+          maxFreeSockets: 10,
+          timeout: 60000,
+          keepAliveMsecs: 1000,
+        });
+
+        this.httpsAgent = new https.Agent({
+          keepAlive: true,
+          maxSockets: 50,
+          maxFreeSockets: 10,
+          timeout: 60000,
+          keepAliveMsecs: 1000,
+        });
+
+        config.httpAgent = this.httpAgent;
+        config.httpsAgent = this.httpsAgent;
+      } else {
+        // Explicitly set agents to undefined for test environments
+        // This allows HTTP mocking libraries like nock to intercept requests
+        config.httpAgent = undefined;
+        config.httpsAgent = undefined;
+      }
+    }
+
+    return axios.create(config);
+  }
+
+  /**
+   * Destroy HTTP agents and close all connections
+   * Call this when you're done with the client to prevent hanging processes
+   */
+  destroy(): void {
+    if (
+      this.httpAgent &&
+      typeof this.httpAgent === 'object' &&
+      'destroy' in this.httpAgent
+    ) {
+      (this.httpAgent as { destroy: () => void }).destroy();
+    }
+    if (
+      this.httpsAgent &&
+      typeof this.httpsAgent === 'object' &&
+      'destroy' in this.httpsAgent
+    ) {
+      (this.httpsAgent as { destroy: () => void }).destroy();
+    }
   }
 
   /**
@@ -58,39 +114,20 @@ export class HttpClient {
       ...headers,
     };
 
-    // Set up AbortController for timeout handling
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-    // Ensure timeout cleanup to prevent memory leaks
-    if (timeoutId && typeof timeoutId === 'object' && 'unref' in timeoutId) {
-      (timeoutId as NodeJS.Timeout).unref();
-    }
-
     try {
-      const fetchFn = getFetch();
-      const response = await fetchFn(url, {
+      const response = await this.axiosInstance.request({
+        url,
         method,
         headers: requestHeaders,
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
+        data: body,
+        timeout,
       });
 
-      clearTimeout(timeoutId);
+      const data = response.data as T;
 
-      const responseHeaders = this.parseResponseHeaders(response.headers);
-      let data: T;
-
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        data = await response.json();
-      } else {
-        data = (await response.text()) as T;
-      }
-
-      if (!response.ok) {
+      if (response.status >= 400) {
         throw this.createError(
-          data as Record<string, unknown>,
+          data as unknown as ErrorResponse,
           response.status,
           response.statusText
         );
@@ -100,22 +137,52 @@ export class HttpClient {
         data,
         status: response.status,
         statusText: response.statusText,
-        headers: responseHeaders,
+        headers: response.headers as Record<string, string>,
       };
     } catch (error: unknown) {
-      clearTimeout(timeoutId);
-
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`Request timeout`);
-      }
-
-      if (error instanceof Error && 'status' in error) {
+      // Check if this is our own HTTP error (created by createError)
+      // These errors have both 'status' and 'responseData' properties
+      if (
+        error &&
+        typeof error === 'object' &&
+        'status' in error &&
+        'responseData' in error
+      ) {
         throw error;
       }
 
-      const message =
-        error instanceof Error ? error.message : 'Unknown network error';
-      throw new Error(`Network error: ${message}`);
+      // Check for network errors with error codes (e.g., ECONNRESET, ETIMEDOUT, etc.)
+      // This needs to be checked before isAxiosError since mocks may use plain objects
+      if (error && typeof error === 'object' && 'code' in error) {
+        const errorObj = error as { code: string; message?: string };
+        const message = errorObj.message || `Network error: ${errorObj.code}`;
+        const networkError = new Error(
+          message.includes('Network error')
+            ? message
+            : `Network error: ${message}`
+        );
+        Object.assign(networkError, { code: errorObj.code });
+        throw networkError;
+      }
+
+      if (!isAxiosError(error)) {
+        // For non-axios errors (like nock mock errors), format as network errors
+        if (error instanceof Error) {
+          const message = error.message.includes('Network error')
+            ? error.message
+            : `Network error: ${error.message}`;
+          throw new Error(message);
+        }
+        throw new Error('Network error: Unknown network error');
+      }
+
+      // Axios-specific errors - format as network errors
+      const message = error.message || 'Unknown network error';
+      throw new Error(
+        message.includes('Network error')
+          ? message
+          : `Network error: ${message}`
+      );
     }
   }
 
@@ -159,17 +226,6 @@ export class HttpClient {
     headers?: Record<string, string>
   ): Promise<HttpResponse<T>> {
     return this.request<T>({ url, method: 'DELETE', headers });
-  }
-
-  /**
-   * Parse response headers from fetch Response
-   */
-  private parseResponseHeaders(headers: Headers): Record<string, string> {
-    const result: Record<string, string> = {};
-    headers.forEach((value, key) => {
-      result[key] = value;
-    });
-    return result;
   }
 
   /**

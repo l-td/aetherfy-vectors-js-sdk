@@ -160,6 +160,7 @@ module.exports = [
         clearTimeout: 'readonly',
         window: 'readonly',
         document: 'readonly',
+        mockAxios: 'writable',
       },
     },
     rules: {

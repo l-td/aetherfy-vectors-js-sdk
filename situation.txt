@@ -28,3 +28,41 @@ Ran all test suites in 2 projects.
 - Different JavaScript runtime environments (browser vs Node vs Worker)
 - Specific timing scenarios for debounce/throttle
 - Rare error conditions
+
+
+---02/11/2025---
+
+----------------|---------|----------|---------|---------|-----------------------------
+File            | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+----------------|---------|----------|---------|---------|-----------------------------
+All files       |   97.83 |    91.01 |   99.04 |   97.83 |                             
+ src            |   99.45 |    92.01 |     100 |   99.45 |                             
+  analytics.ts  |     100 |    96.66 |     100 |     100 | 243                         
+  auth.ts       |     100 |      100 |     100 |     100 |                             
+  client.ts     |   99.11 |    86.52 |     100 |   99.11 | 715-716,730-731,761,766-767
+  exceptions.ts |     100 |     92.3 |     100 |     100 | 275,285,314,332
+  models.ts     |     100 |      100 |     100 |     100 |                             
+  utils.ts      |   98.92 |    94.89 |     100 |   98.92 | 323-325,378-380
+ src/http       |   84.42 |     82.6 |   91.66 |   84.42 | 
+  client.ts     |   96.44 |     82.6 |     100 |   96.44 | 169-177
+  types.ts      |       0 |      100 |       0 |       0 | 1-36
+----------------|---------|----------|---------|---------|-----------------------------
+
+Test Suites: 10 passed, 10 total
+Tests:       265 passed, 265 total
+Snapshots:   0 total
+Time:        413.406 s
+Ran all test suites in 2 projects.
+✅ Coverage generation completed
+
+📊 Coverage report generated:
+- HTML report: coverage/lcov-report/index.html
+- LCOV report: coverage/lcov.info
+
+🧪 Test Summary
+📁 Unit tests: 9 files
+📁 Functional tests: 1 files
+📁 Browser tests: 1 files
+📁 Total: 11 test files
+
+🎉 All operations completed successfully in 469.77s
