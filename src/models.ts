@@ -194,8 +194,21 @@ export interface BatchResult {
 export interface ClientConfig {
   /** API key for authentication */
   apiKey?: string;
-  /** Custom endpoint URL */
+  /**
+   * Custom endpoint URL (legacy single-endpoint mode)
+   * @deprecated Use managementEndpoint and dataEndpoint instead for dual-endpoint architecture
+   */
   endpoint?: string;
+  /**
+   * Management endpoint for collection CRUD operations
+   * Defaults to https://aetherfy.com/api/dashboard
+   */
+  managementEndpoint?: string;
+  /**
+   * Data endpoint for vector operations (insert, search, delete)
+   * Defaults to https://vectors.aetherfy.com
+   */
+  dataEndpoint?: string;
   /** Request timeout in milliseconds */
   timeout?: number;
   /**

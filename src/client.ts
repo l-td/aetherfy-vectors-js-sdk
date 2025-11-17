@@ -62,13 +62,17 @@ import { retryWithBackoff } from './utils';
  * ```
  */
 export class AetherfyVectorsClient {
-  private static readonly DEFAULT_ENDPOINT = 'https://vectors.aetherfy.com';
+  private static readonly DEFAULT_MANAGEMENT_ENDPOINT =
+    'https://aetherfy.com/api/dashboard';
+  private static readonly DEFAULT_DATA_ENDPOINT =
+    'https://vectors.aetherfy.com';
   private static readonly DEFAULT_TIMEOUT = 30000;
 
   private httpClient: HttpClient;
   private authManager: APIKeyManager;
   private analytics: AnalyticsClient;
-  private endpoint: string;
+  private managementEndpoint: string;
+  private dataEndpoint: string;
   private schemaCache: Map<
     string,
     { size: number; distance: string; etag: string }
@@ -84,8 +88,21 @@ export class AetherfyVectorsClient {
     const apiKey = APIKeyManager.resolveApiKey(config.apiKey);
     this.authManager = new APIKeyManager(apiKey);
 
-    // Set up endpoint and HTTP client
-    this.endpoint = config.endpoint || AetherfyVectorsClient.DEFAULT_ENDPOINT;
+    // Set up dual endpoints for separation of concerns
+    // Management endpoint: collection CRUD (dashboard handles limits, billing, metadata)
+    // Data endpoint: vector operations (vectordb backend handles Qdrant)
+    if (config.endpoint && !config.managementEndpoint && !config.dataEndpoint) {
+      // Legacy single-endpoint mode for backward compatibility
+      this.managementEndpoint = config.endpoint;
+      this.dataEndpoint = config.endpoint;
+    } else {
+      this.managementEndpoint =
+        config.managementEndpoint ||
+        AetherfyVectorsClient.DEFAULT_MANAGEMENT_ENDPOINT;
+      this.dataEndpoint =
+        config.dataEndpoint || AetherfyVectorsClient.DEFAULT_DATA_ENDPOINT;
+    }
+
     this.httpClient = new HttpClient({
       timeout: config.timeout || AetherfyVectorsClient.DEFAULT_TIMEOUT,
       defaultHeaders: this.authManager.getAuthHeaders(),
@@ -95,10 +112,10 @@ export class AetherfyVectorsClient {
     // Initialize schema cache for ETag-based validation
     this.schemaCache = new Map();
 
-    // Initialize analytics client
+    // Initialize analytics client (uses data endpoint for analytics)
     this.analytics = new AnalyticsClient(
       this.httpClient,
-      this.endpoint,
+      this.dataEndpoint,
       this.authManager.getAuthHeaders()
     );
   }
@@ -129,10 +146,15 @@ export class AetherfyVectorsClient {
     const config = this.normalizeVectorConfig(vectorsConfig);
 
     try {
+      // Use management endpoint for collection CRUD operations
       const response = await this.executeWithRetry(async () =>
-        this.httpClient.post(`${this.endpoint}/collections`, {
+        this.httpClient.post(`${this.managementEndpoint}/collections`, {
           name,
-          vectors: config,
+          config: {
+            params: {
+              vectors: config,
+            },
+          },
         })
       );
 
@@ -152,8 +174,9 @@ export class AetherfyVectorsClient {
     this.validateCollectionName(name);
 
     try {
+      // Use management endpoint for collection CRUD operations
       const response = await this.httpClient.delete(
-        `${this.endpoint}/collections/${encodeURIComponent(name)}`
+        `${this.managementEndpoint}/collections?name=${encodeURIComponent(name)}`
       );
 
       return response.status === 200 || response.status === 204;
@@ -169,8 +192,9 @@ export class AetherfyVectorsClient {
    */
   async getCollections(): Promise<Collection[]> {
     try {
+      // Use management endpoint for collection CRUD operations
       const response = await this.httpClient.get<{ collections: Collection[] }>(
-        `${this.endpoint}/collections`
+        `${this.managementEndpoint}/collections`
       );
 
       return response.data.collections || [];
@@ -189,8 +213,9 @@ export class AetherfyVectorsClient {
     this.validateCollectionName(name);
 
     try {
+      // Use management endpoint to check collection metadata
       await this.httpClient.get(
-        `${this.endpoint}/collections/${encodeURIComponent(name)}`
+        `${this.managementEndpoint}/collections?name=${encodeURIComponent(name)}`
       );
       return true;
     } catch (error: unknown) {
@@ -218,8 +243,9 @@ export class AetherfyVectorsClient {
     this.validateCollectionName(name);
 
     try {
+      // Use management endpoint to get collection metadata
       const response = await this.httpClient.get<Collection>(
-        `${this.endpoint}/collections/${encodeURIComponent(name)}`
+        `${this.managementEndpoint}/collections?name=${encodeURIComponent(name)}`
       );
 
       return response.data;
@@ -288,7 +314,7 @@ export class AetherfyVectorsClient {
 
       const response = await this.executeWithRetry(async () =>
         this.httpClient.put(
-          `${this.endpoint}/collections/${encodeURIComponent(collectionName)}/points`,
+          `${this.dataEndpoint}/collections/${encodeURIComponent(collectionName)}/points`,
           { points: formattedPoints },
           headers
         )
@@ -366,7 +392,7 @@ export class AetherfyVectorsClient {
 
     try {
       const response = await this.httpClient.post(
-        `${this.endpoint}/collections/${encodeURIComponent(collectionName)}/points/delete`,
+        `${this.dataEndpoint}/collections/${encodeURIComponent(collectionName)}/points/delete`,
         body
       );
 
@@ -399,7 +425,7 @@ export class AetherfyVectorsClient {
       const response = await this.httpClient.post<{
         result: Point[];
       }>(
-        `${this.endpoint}/collections/${encodeURIComponent(collectionName)}/points`,
+        `${this.dataEndpoint}/collections/${encodeURIComponent(collectionName)}/points`,
         {
           ids,
           with_payload: options.withPayload ?? true,
@@ -443,7 +469,7 @@ export class AetherfyVectorsClient {
     try {
       const response = await this.executeWithRetry(async () =>
         this.httpClient.post<{ result: SearchResult[] }>(
-          `${this.endpoint}/collections/${encodeURIComponent(collectionName)}/points/search`,
+          `${this.dataEndpoint}/collections/${encodeURIComponent(collectionName)}/points/search`,
           {
             vector: queryVector,
             limit: options.limit ?? 10,
@@ -479,7 +505,7 @@ export class AetherfyVectorsClient {
       const response = await this.httpClient.post<{
         result: { count: number };
       }>(
-        `${this.endpoint}/collections/${encodeURIComponent(collectionName)}/points/count`,
+        `${this.dataEndpoint}/collections/${encodeURIComponent(collectionName)}/points/count`,
         {
           filter: options.countFilter,
           exact: options.exact ?? false,
@@ -593,7 +619,9 @@ export class AetherfyVectorsClient {
         };
       };
       schema_version: string;
-    }>(`${this.endpoint}/collections/${encodeURIComponent(collectionName)}`);
+    }>(
+      `${this.dataEndpoint}/collections/${encodeURIComponent(collectionName)}`
+    );
 
     const result = response.data.result;
     const schemaVersion = response.data.schema_version;
