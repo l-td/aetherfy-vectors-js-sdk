@@ -128,7 +128,6 @@ describe('APIKeyManager', () => {
 
       expect(headers).toEqual({
         Authorization: `Bearer ${apiKey}`,
-        'X-API-Key': apiKey,
       });
     });
   });

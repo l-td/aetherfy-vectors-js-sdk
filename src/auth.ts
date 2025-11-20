@@ -119,7 +119,6 @@ export class APIKeyManager {
   getAuthHeaders(): Record<string, string> {
     return {
       Authorization: `Bearer ${this.apiKey}`,
-      'X-API-Key': this.apiKey,
     };
   }
 
