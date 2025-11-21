@@ -110,6 +110,7 @@ export class AetherfyVectorsClient {
    *
    * @param name - Collection name (must be unique)
    * @param vectorsConfig - Vector configuration or legacy config object
+   * @param description - Optional collection description (max 500 characters)
    * @returns Promise that resolves to true if successful
    *
    * @example
@@ -117,12 +118,13 @@ export class AetherfyVectorsClient {
    * await client.createCollection('my-collection', {
    *   size: 384,
    *   distance: DistanceMetric.COSINE
-   * });
+   * }, 'My collection for semantic search');
    * ```
    */
   async createCollection(
     name: string,
-    vectorsConfig: VectorConfig | Record<string, unknown>
+    vectorsConfig: VectorConfig | Record<string, unknown>,
+    description?: string
   ): Promise<boolean> {
     this.validateCollectionName(name);
 
@@ -133,6 +135,7 @@ export class AetherfyVectorsClient {
         this.httpClient.post(`${this.endpoint}/collections`, {
           name,
           vectors: config,
+          description: description || null,
         })
       );
 

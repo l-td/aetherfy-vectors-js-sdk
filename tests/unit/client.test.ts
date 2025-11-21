@@ -63,6 +63,45 @@ describe('AetherfyVectorsClient', () => {
       expect(result).toBe(true);
     });
 
+    it('should create collection with description', async () => {
+      const scope = nock('https://vectors.aetherfy.com')
+        .post('/collections', body => {
+          return (
+            body.name === 'test-collection' &&
+            body.description === 'Test collection for embeddings'
+          );
+        })
+        .reply(201, { success: true });
+
+      const result = await client.createCollection(
+        'test-collection',
+        {
+          size: 128,
+          distance: DistanceMetric.COSINE,
+        },
+        'Test collection for embeddings'
+      );
+
+      expect(result).toBe(true);
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('should create collection without description sends null', async () => {
+      const scope = nock('https://vectors.aetherfy.com')
+        .post('/collections', body => {
+          return body.name === 'test-collection' && body.description === null;
+        })
+        .reply(201, { success: true });
+
+      const result = await client.createCollection('test-collection', {
+        size: 128,
+        distance: DistanceMetric.COSINE,
+      });
+
+      expect(result).toBe(true);
+      expect(scope.isDone()).toBe(true);
+    });
+
     it('should validate collection name', async () => {
       await expect(
         client.createCollection('', {

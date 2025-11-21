@@ -54,6 +54,8 @@ export interface SearchResult {
 export interface Collection {
   /** Collection name */
   name: string;
+  /** Collection description (optional) */
+  description?: string;
   /** Vector configuration */
   config: VectorConfig;
   /** Number of points in collection (if available) */
