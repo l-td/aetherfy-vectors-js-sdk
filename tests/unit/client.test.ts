@@ -169,7 +169,7 @@ describe('AetherfyVectorsClient', () => {
 
       nock('https://vectors.aetherfy.com')
         .get('/collections/test-collection')
-        .reply(200, mockCollection);
+        .reply(200, { result: mockCollection });
 
       const collection = await client.getCollection('test-collection');
 

@@ -221,11 +221,11 @@ export class AetherfyVectorsClient {
     this.validateCollectionName(name);
 
     try {
-      const response = await this.httpClient.get<Collection>(
+      const response = await this.httpClient.get<{ result: Collection }>(
         `${this.endpoint}/collections/${encodeURIComponent(name)}`
       );
 
-      return response.data;
+      return response.data.result;
     } catch (error: unknown) {
       throw this.handleError(error);
     }
