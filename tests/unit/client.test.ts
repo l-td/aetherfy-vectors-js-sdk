@@ -1041,6 +1041,235 @@ describe('AetherfyVectorsClient', () => {
     });
   });
 
+  describe('Schema Management', () => {
+    let client: AetherfyVectorsClient;
+
+    beforeEach(() => {
+      client = new AetherfyVectorsClient({
+        apiKey: 'afy_test_1234567890123456',
+        enableConnectionPooling: false,
+      });
+    });
+
+    describe('getSchema', () => {
+      it('should fetch schema successfully', async () => {
+        nock('https://vectors.aetherfy.com')
+          .get('/api/v1/schema/test-collection')
+          .reply(200, {
+            schema: {
+              fields: {
+                price: { type: 'integer', required: true },
+                name: { type: 'string', required: true },
+              },
+            },
+            enforcement_mode: 'strict',
+            etag: 'schema_abc123',
+          });
+
+        const schema = await client.getSchema('test-collection');
+
+        expect(schema).not.toBeNull();
+        expect(schema?.fields.price.type).toBe('integer');
+        expect(schema?.fields.name.type).toBe('string');
+      });
+
+      it('should return null when schema not found', async () => {
+        nock('https://vectors.aetherfy.com')
+          .get('/api/v1/schema/test-collection')
+          .reply(404, { error: { message: 'Schema not found' } });
+
+        const schema = await client.getSchema('test-collection');
+        expect(schema).toBeNull();
+      });
+
+      it('should cache schema after fetching', async () => {
+        nock('https://vectors.aetherfy.com')
+          .get('/api/v1/schema/test-collection')
+          .reply(200, {
+            schema: {
+              fields: { price: { type: 'integer', required: true } },
+            },
+            enforcement_mode: 'off',
+            etag: 'abc123',
+          });
+
+        // First call - fetches from server
+        await client.getSchema('test-collection');
+
+        // Second call - should use cache (no second nock call defined)
+        const schema = await client.getSchema('test-collection');
+
+        expect(schema).not.toBeNull();
+        expect(schema?.fields.price.type).toBe('integer');
+      });
+    });
+
+    describe('setSchema', () => {
+      it('should set schema successfully', async () => {
+        nock('https://vectors.aetherfy.com')
+          .put('/api/v1/schema/test-collection', {
+            schema: {
+              fields: {
+                price: { type: 'integer', required: true },
+              },
+            },
+            enforcement_mode: 'strict',
+          })
+          .reply(200, { etag: 'new_etag_123' });
+
+        const etag = await client.setSchema(
+          'test-collection',
+          {
+            fields: {
+              price: { type: 'integer', required: true },
+            },
+          },
+          'strict'
+        );
+
+        expect(etag).toBe('new_etag_123');
+      });
+
+      it('should default to off enforcement mode', async () => {
+        const scope = nock('https://vectors.aetherfy.com')
+          .put('/api/v1/schema/test-collection', body => {
+            return body.enforcement_mode === 'off';
+          })
+          .reply(200, { etag: 'etag_456' });
+
+        await client.setSchema('test-collection', {
+          fields: { name: { type: 'string', required: false } },
+        });
+
+        expect(scope.isDone()).toBe(true);
+      });
+    });
+
+    describe('deleteSchema', () => {
+      it('should delete schema successfully', async () => {
+        nock('https://vectors.aetherfy.com')
+          .delete('/api/v1/schema/test-collection')
+          .reply(200, { success: true });
+
+        await expect(
+          client.deleteSchema('test-collection')
+        ).resolves.not.toThrow();
+      });
+
+      it('should clear cache after deletion', async () => {
+        // First set a schema (which caches it)
+        nock('https://vectors.aetherfy.com')
+          .put('/api/v1/schema/test-collection')
+          .reply(200, { etag: 'abc' });
+
+        await client.setSchema('test-collection', {
+          fields: { test: { type: 'string', required: false } },
+        });
+
+        // Delete it
+        nock('https://vectors.aetherfy.com')
+          .delete('/api/v1/schema/test-collection')
+          .reply(200, { success: true });
+
+        await client.deleteSchema('test-collection');
+
+        // Try to get it - should fetch from server (cache cleared)
+        nock('https://vectors.aetherfy.com')
+          .get('/api/v1/schema/test-collection')
+          .reply(404, {});
+
+        const schema = await client.getSchema('test-collection');
+        expect(schema).toBeNull();
+      });
+    });
+
+    describe('analyzeSchema', () => {
+      it('should analyze schema successfully', async () => {
+        nock('https://vectors.aetherfy.com')
+          .post('/api/v1/schema/test-collection/analyze', {
+            sample_size: 1000,
+          })
+          .reply(200, {
+            collection: 'test-collection',
+            sample_size: 1000,
+            total_points: 5000,
+            fields: {
+              price: {
+                presence: 1.0,
+                types: { integer: 1.0 },
+                warnings: [],
+              },
+            },
+            suggested_schema: {
+              fields: {
+                price: { type: 'integer', required: true },
+              },
+            },
+            processing_time_ms: 42,
+          });
+
+        const analysis = await client.analyzeSchema('test-collection', 1000);
+
+        expect(analysis.collection).toBe('test-collection');
+        expect(analysis.sampleSize).toBe(1000);
+        expect(analysis.suggestedSchema.fields.price.type).toBe('integer');
+      });
+
+      it('should use default sample size', async () => {
+        const scope = nock('https://vectors.aetherfy.com')
+          .post('/api/v1/schema/test-collection/analyze', body => {
+            return body.sample_size === 1000;
+          })
+          .reply(200, {
+            collection: 'test-collection',
+            sample_size: 1000,
+            total_points: 5000,
+            fields: {},
+            suggested_schema: { fields: {} },
+            processing_time_ms: 10,
+          });
+
+        await client.analyzeSchema('test-collection');
+        expect(scope.isDone()).toBe(true);
+      });
+    });
+
+    describe('refreshSchema', () => {
+      it('should clear cache and refetch schema', async () => {
+        // Initial schema fetch
+        nock('https://vectors.aetherfy.com')
+          .get('/api/v1/schema/test-collection')
+          .reply(200, {
+            schema: {
+              fields: { old: { type: 'string', required: true } },
+            },
+            enforcement_mode: 'off',
+            etag: 'old_etag',
+          });
+
+        await client.getSchema('test-collection');
+
+        // Refresh - should fetch again
+        nock('https://vectors.aetherfy.com')
+          .get('/api/v1/schema/test-collection')
+          .reply(200, {
+            schema: {
+              fields: { new: { type: 'integer', required: true } },
+            },
+            enforcement_mode: 'strict',
+            etag: 'new_etag',
+          });
+
+        await client.refreshSchema('test-collection');
+
+        // Verify new schema is cached
+        const schema = await client.getSchema('test-collection');
+        expect(schema?.fields.new).toBeDefined();
+        expect(schema?.fields.old).toBeUndefined();
+      });
+    });
+  });
+
   describe('Cleanup', () => {
     it('should destroy client resources', () => {
       const testClient = new AetherfyVectorsClient({

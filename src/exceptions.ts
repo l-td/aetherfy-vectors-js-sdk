@@ -259,6 +259,53 @@ export class QuotaExceededError extends AetherfyVectorsError {
 }
 
 /**
+ * Schema validation errors - when payload fails schema validation
+ */
+export class SchemaValidationError extends AetherfyVectorsError {
+  public readonly validationErrors: Array<{
+    index: number;
+    id: string | number;
+    errors: Array<{
+      field: string;
+      code: string;
+      message: string;
+      expected?: string;
+      actual?: string;
+    }>;
+  }>;
+
+  constructor(
+    validationErrors: Array<{
+      index: number;
+      id: string | number;
+      errors: Array<{
+        field: string;
+        code: string;
+        message: string;
+        expected?: string;
+        actual?: string;
+      }>;
+    }>
+  ) {
+    // Create human-readable message
+    const messages = validationErrors.flatMap(ve =>
+      ve.errors.map(e => `Vector ${ve.index}: ${e.message}`)
+    );
+    super(`Schema validation failed:\n${messages.join('\n')}`);
+    this.name = 'SchemaValidationError';
+    this.validationErrors = validationErrors;
+    Object.setPrototypeOf(this, SchemaValidationError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      validationErrors: this.validationErrors,
+    };
+  }
+}
+
+/**
  * Utility function to create appropriate error from HTTP response
  */
 export function createErrorFromResponse(

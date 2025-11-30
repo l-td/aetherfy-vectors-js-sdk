@@ -15,15 +15,22 @@ import {
   UsageStats,
   ClientConfig,
   DistanceMetric,
+  Schema,
+  SchemaData,
+  EnforcementMode,
+  AnalysisResult,
+  FieldAnalysis,
 } from './models';
 import {
   AetherfyVectorsError,
   ValidationError,
   NetworkError,
+  SchemaValidationError,
   createErrorFromResponse,
   isRetryableError,
 } from './exceptions';
 import { retryWithBackoff } from './utils';
+import { validateVectors } from './schema';
 
 /**
  * Aetherfy Vectors JavaScript SDK
@@ -73,6 +80,7 @@ export class AetherfyVectorsClient {
     string,
     { size: number; distance: string; etag: string }
   >;
+  private payloadSchemaCache: Map<string, SchemaData | null>;
 
   /**
    * Create a new Aetherfy Vectors client
@@ -94,6 +102,9 @@ export class AetherfyVectorsClient {
 
     // Initialize schema cache for ETag-based validation
     this.schemaCache = new Map();
+
+    // Initialize payload schema cache
+    this.payloadSchemaCache = new Map();
 
     // Initialize analytics client
     this.analytics = new AnalyticsClient(
@@ -258,7 +269,7 @@ export class AetherfyVectorsClient {
     this.validateCollectionName(collectionName);
     this.validateBatchSize(points);
 
-    // Get schema (from cache or fetch)
+    // Get vector schema (from cache or fetch)
     let schema = this.getCachedSchema(collectionName);
     if (!schema) {
       schema = await this.fetchAndCacheSchema(collectionName);
@@ -280,13 +291,41 @@ export class AetherfyVectorsClient {
       }
     }
 
+    // Get payload schema for validation (if exists)
+    const payloadSchemaData = await this.getCachedPayloadSchema(collectionName);
+
+    // Client-side payload validation
+    if (payloadSchemaData && payloadSchemaData.schema) {
+      const enforcementMode = payloadSchemaData.enforcementMode || 'off';
+
+      // Only validate if enforcement is not 'off'
+      if (enforcementMode !== 'off') {
+        const validationErrors = validateVectors(
+          points,
+          payloadSchemaData.schema
+        );
+        if (validationErrors.length > 0) {
+          // Only raise error in strict mode
+          if (enforcementMode === 'strict') {
+            throw new SchemaValidationError(validationErrors);
+          }
+          // In warn mode, just allow the request to proceed
+          // (warnings would be logged client-side if we had a logger)
+        }
+      }
+    }
+
     const formattedPoints = this.formatPointsForUpsert(points);
 
     try {
-      // Add If-Match header with ETag
+      // Add If-Match headers with ETags
       const headers: Record<string, string> = {};
       if (schema.etag) {
         headers['If-Match'] = schema.etag;
+      }
+      // Payload schema ETag overrides vector schema ETag
+      if (payloadSchemaData && payloadSchemaData.etag) {
+        headers['If-Match'] = payloadSchemaData.etag;
       }
 
       const response = await this.executeWithRetry(async () =>
@@ -309,9 +348,61 @@ export class AetherfyVectorsClient {
         // Handle 412 Precondition Failed (schema changed)
         if (httpError.status === 412) {
           this.clearSchemaCache(collectionName);
-          throw new ValidationError(
-            `Collection schema has changed for '${collectionName}'. Please retry your request.`
-          );
+          this.payloadSchemaCache.delete(collectionName);
+
+          // Fetch updated schemas and re-validate
+          let updatedPayloadSchema: SchemaData | null = null;
+          try {
+            updatedPayloadSchema =
+              await this.getCachedPayloadSchema(collectionName);
+            if (updatedPayloadSchema && updatedPayloadSchema.schema) {
+              const enforcementMode =
+                updatedPayloadSchema.enforcementMode || 'off';
+              if (enforcementMode !== 'off') {
+                const validationErrors = validateVectors(
+                  points,
+                  updatedPayloadSchema.schema
+                );
+                if (
+                  validationErrors.length > 0 &&
+                  enforcementMode === 'strict'
+                ) {
+                  throw new SchemaValidationError(validationErrors);
+                }
+              }
+            }
+          } catch (schemaError) {
+            if (schemaError instanceof SchemaValidationError) {
+              throw schemaError;
+            }
+            // Ignore other errors during schema refresh
+          }
+
+          // Retry the upsert with updated schemas
+          try {
+            const updatedVectorSchema =
+              await this.fetchAndCacheSchema(collectionName);
+            const retryHeaders: Record<string, string> = {};
+            if (updatedVectorSchema.etag) {
+              retryHeaders['If-Match'] = updatedVectorSchema.etag;
+            }
+            if (updatedPayloadSchema && updatedPayloadSchema.etag) {
+              retryHeaders['If-Match'] = updatedPayloadSchema.etag;
+            }
+
+            const response = await this.httpClient.put(
+              `${this.endpoint}/collections/${encodeURIComponent(collectionName)}/points`,
+              { points: formattedPoints },
+              retryHeaders
+            );
+
+            return response.status === 200;
+          } catch {
+            // If retry also fails, raise the original 412 error
+            throw new ValidationError(
+              `Collection schema has changed for '${collectionName}'. Please retry your request.`
+            );
+          }
         }
 
         // Handle 400 (validation error from backend)
@@ -777,6 +868,225 @@ export class AetherfyVectorsClient {
       maxRetries: 3,
       retryCondition: error => isRetryableError(error),
     });
+  }
+
+  // ==================== Schema Management Methods ====================
+
+  /**
+   * Get schema for a collection
+   *
+   * @param collectionName - Name of the collection
+   * @returns Schema definition if exists, null otherwise
+   *
+   * @example
+   * ```typescript
+   * const schema = await client.getSchema('products');
+   * if (schema) {
+   *   console.log('Schema fields:', schema.fields);
+   * }
+   * ```
+   */
+  async getSchema(collectionName: string): Promise<Schema | null> {
+    this.validateCollectionName(collectionName);
+
+    // Check cache first
+    if (this.payloadSchemaCache.has(collectionName)) {
+      const cached = this.payloadSchemaCache.get(collectionName);
+      return cached ? cached.schema : null;
+    }
+
+    try {
+      const response = await this.httpClient.get(
+        `${this.endpoint}/api/v1/schema/${encodeURIComponent(collectionName)}`
+      );
+
+      if (response.status === 404) {
+        return null;
+      }
+
+      const data = response.data as {
+        schema: Schema;
+        enforcement_mode: EnforcementMode;
+        etag: string;
+      };
+
+      // Cache it
+      this.payloadSchemaCache.set(collectionName, {
+        schema: data.schema,
+        enforcementMode: data.enforcement_mode,
+        etag: data.etag,
+      });
+
+      return data.schema;
+    } catch (error: unknown) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'status' in error &&
+        error.status === 404
+      ) {
+        return null;
+      }
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Set or update schema for a collection
+   *
+   * @param collectionName - Name of the collection
+   * @param schema - Schema definition
+   * @param enforcementMode - Enforcement mode: 'off', 'warn', or 'strict'
+   * @returns ETag of the new schema
+   *
+   * @example
+   * ```typescript
+   * const etag = await client.setSchema('products', {
+   *   fields: {
+   *     price: { type: 'integer', required: true },
+   *     name: { type: 'string', required: true }
+   *   }
+   * }, 'strict');
+   * ```
+   */
+  async setSchema(
+    collectionName: string,
+    schema: Schema,
+    enforcementMode: EnforcementMode = 'off'
+  ): Promise<string> {
+    this.validateCollectionName(collectionName);
+
+    const response = await this.httpClient.put(
+      `${this.endpoint}/api/v1/schema/${encodeURIComponent(collectionName)}`,
+      {
+        schema,
+        enforcement_mode: enforcementMode,
+      }
+    );
+
+    const data = response.data as { etag: string };
+
+    // Update cache
+    this.payloadSchemaCache.set(collectionName, {
+      schema,
+      enforcementMode,
+      etag: data.etag,
+    });
+
+    return data.etag;
+  }
+
+  /**
+   * Delete schema from a collection
+   *
+   * @param collectionName - Name of the collection
+   *
+   * @example
+   * ```typescript
+   * await client.deleteSchema('products');
+   * ```
+   */
+  async deleteSchema(collectionName: string): Promise<void> {
+    this.validateCollectionName(collectionName);
+
+    await this.httpClient.delete(
+      `${this.endpoint}/api/v1/schema/${encodeURIComponent(collectionName)}`
+    );
+
+    // Clear cache
+    this.payloadSchemaCache.delete(collectionName);
+  }
+
+  /**
+   * Analyze collection data to understand payload structure
+   *
+   * @param collectionName - Name of the collection
+   * @param sampleSize - Number of points to sample (default: 1000)
+   * @returns Analysis result with field statistics and suggested schema
+   *
+   * @example
+   * ```typescript
+   * const analysis = await client.analyzeSchema('products', 1000);
+   * console.log('Suggested schema:', analysis.suggestedSchema);
+   * console.log('Field analysis:', analysis.fields);
+   * ```
+   */
+  async analyzeSchema(
+    collectionName: string,
+    sampleSize: number = 1000
+  ): Promise<AnalysisResult> {
+    this.validateCollectionName(collectionName);
+
+    const response = await this.httpClient.post(
+      `${this.endpoint}/api/v1/schema/${encodeURIComponent(collectionName)}/analyze`,
+      { sample_size: sampleSize }
+    );
+
+    const data = response.data as {
+      collection: string;
+      sample_size: number;
+      total_points: number;
+      fields: Record<string, FieldAnalysis>;
+      suggested_schema: Schema;
+      processing_time_ms: number;
+    };
+
+    return {
+      collection: data.collection,
+      sampleSize: data.sample_size,
+      totalPoints: data.total_points,
+      fields: data.fields,
+      suggestedSchema: data.suggested_schema,
+      processingTimeMs: data.processing_time_ms,
+    };
+  }
+
+  /**
+   * Force refresh of cached schema for a collection
+   *
+   * @param collectionName - Name of the collection
+   *
+   * @example
+   * ```typescript
+   * await client.refreshSchema('products');
+   * ```
+   */
+  async refreshSchema(collectionName: string): Promise<void> {
+    this.payloadSchemaCache.delete(collectionName);
+    await this.getSchema(collectionName);
+  }
+
+  /**
+   * Get cached schema data or fetch if not present
+   *
+   * @private
+   * @param collectionName - Name of the collection
+   * @returns Schema data or null
+   */
+  private async getCachedPayloadSchema(
+    collectionName: string
+  ): Promise<SchemaData | null> {
+    // Check cache first
+    if (this.payloadSchemaCache.has(collectionName)) {
+      const cached = this.payloadSchemaCache.get(collectionName);
+      return cached !== undefined ? cached : null;
+    }
+
+    // Try to fetch from server
+    // Note: getSchema already caches the SchemaData internally
+    try {
+      const schema = await this.getSchema(collectionName);
+      if (schema === null) {
+        return null;
+      }
+      // getSchema already cached the SchemaData, so retrieve it from cache
+      const cached = this.payloadSchemaCache.get(collectionName);
+      return cached !== undefined ? cached : null;
+    } catch {
+      // On error, cache null to avoid retrying
+      this.payloadSchemaCache.set(collectionName, null);
+      return null;
+    }
   }
 
   /**

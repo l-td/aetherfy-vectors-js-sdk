@@ -279,3 +279,118 @@ export interface TopCollectionEntry {
   /** Optional additional metrics */
   [key: string]: string | number;
 }
+
+/**
+ * Supported data types for schema validation
+ */
+export type DataType =
+  | 'string'
+  | 'integer'
+  | 'float'
+  | 'boolean'
+  | 'null'
+  | 'array'
+  | 'object';
+
+/**
+ * Schema enforcement modes
+ */
+export type EnforcementMode = 'off' | 'warn' | 'strict';
+
+/**
+ * Field definition in a schema
+ */
+export interface FieldDefinition {
+  /** Data type of the field */
+  type: DataType;
+  /** Whether the field is required */
+  required: boolean;
+  /** Element type for arrays */
+  elementType?: DataType;
+  /** Nested field definitions for objects */
+  fields?: Record<string, FieldDefinition>;
+}
+
+/**
+ * Schema definition for a collection's payload structure
+ */
+export interface Schema {
+  /** Field definitions */
+  fields: Record<string, FieldDefinition>;
+}
+
+/**
+ * Validation error for a single field
+ */
+export interface FieldValidationError {
+  /** Field path (e.g., "price" or "metadata.source") */
+  field: string;
+  /** Error code */
+  code: string;
+  /** Human-readable error message */
+  message: string;
+  /** Expected type/value */
+  expected?: string;
+  /** Actual type/value */
+  actual?: string;
+}
+
+/**
+ * Validation errors for a single vector
+ */
+export interface VectorValidationError {
+  /** Index of the vector in the batch */
+  index: number;
+  /** ID of the vector */
+  id: string | number;
+  /** List of validation errors */
+  errors: FieldValidationError[];
+}
+
+/**
+ * Field analysis result
+ */
+export interface FieldAnalysis {
+  /** Field presence rate (0.0 to 1.0) */
+  presence: number;
+  /** Type distribution (type name -> percentage) */
+  types: Record<string, number>;
+  /** Element types for arrays */
+  elementTypes?: Record<string, number>;
+  /** Nested field analysis for objects */
+  nested?: Record<string, FieldAnalysis>;
+  /** List of warnings (e.g., MIXED_TYPES, LOW_PRESENCE) */
+  warnings: string[];
+  /** Sample values per type */
+  samples?: Record<string, unknown>;
+}
+
+/**
+ * Schema analysis result
+ */
+export interface AnalysisResult {
+  /** Collection name */
+  collection: string;
+  /** Number of points sampled */
+  sampleSize: number;
+  /** Total points in collection */
+  totalPoints: number;
+  /** Field analysis results */
+  fields: Record<string, FieldAnalysis>;
+  /** Suggested schema based on analysis */
+  suggestedSchema: Schema;
+  /** Processing time in milliseconds */
+  processingTimeMs: number;
+}
+
+/**
+ * Schema data with metadata
+ */
+export interface SchemaData {
+  /** Schema definition */
+  schema: Schema;
+  /** Enforcement mode */
+  enforcementMode: EnforcementMode;
+  /** ETag for cache synchronization */
+  etag: string;
+}

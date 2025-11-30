@@ -63,6 +63,17 @@ export {
   ApiResponse,
   PaginationInfo,
   BatchResult,
+
+  // Schema types
+  DataType,
+  EnforcementMode,
+  FieldDefinition,
+  Schema,
+  FieldValidationError,
+  VectorValidationError,
+  FieldAnalysis,
+  AnalysisResult,
+  SchemaData,
 } from './models';
 
 // Exception exports
@@ -81,12 +92,16 @@ export {
   NetworkError,
   ConflictError,
   QuotaExceededError,
+  SchemaValidationError,
 
   // Utility functions
   createErrorFromResponse,
   isAetherfyVectorsError,
   isRetryableError,
 } from './exceptions';
+
+// Schema validation exports
+export { detectType, validatePayload, validateVectors } from './schema';
 
 // Utility function exports
 export {
