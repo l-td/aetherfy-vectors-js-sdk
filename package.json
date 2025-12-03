@@ -28,6 +28,8 @@
   ],
   "scripts": {
     "build": "node scripts/build.js",
+    "build:fast": "node scripts/build-fast.js",
+    "build:fast:prod": "node scripts/build-fast.js --production",
     "build:prod": "node scripts/build.js --production",
     "build:watch": "rollup -c -w",
     "dev": "rollup -c -w",
