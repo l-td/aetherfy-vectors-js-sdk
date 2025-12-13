@@ -73,7 +73,12 @@ export function validatePayload(
 
     // Check type
     const actualType = detectType(value);
-    if (actualType !== fieldDef.type) {
+    // Allow integers for float fields (JavaScript doesn't distinguish 25.0 from 25)
+    const isTypeValid =
+      actualType === fieldDef.type ||
+      (fieldDef.type === 'float' && actualType === 'integer');
+
+    if (!isTypeValid) {
       errors.push({
         field: fieldPath,
         code: 'TYPE_MISMATCH',

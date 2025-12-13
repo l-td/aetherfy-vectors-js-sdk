@@ -659,8 +659,10 @@ export class AetherfyVectorsClient {
   clearSchemaCache(collectionName?: string): void {
     if (collectionName) {
       this.schemaCache.delete(collectionName);
+      this.payloadSchemaCache.delete(collectionName);
     } else {
       this.schemaCache.clear();
+      this.payloadSchemaCache.clear();
     }
   }
 
@@ -897,7 +899,7 @@ export class AetherfyVectorsClient {
 
     try {
       const response = await this.httpClient.get(
-        `${this.endpoint}/api/v1/schema/${encodeURIComponent(collectionName)}`
+        `${this.endpoint}/schema/${encodeURIComponent(collectionName)}`
       );
 
       if (response.status === 404) {
@@ -953,11 +955,11 @@ export class AetherfyVectorsClient {
     collectionName: string,
     schema: Schema,
     enforcementMode: EnforcementMode = 'off'
-  ): Promise<string> {
+  ): Promise<{ etag: string }> {
     this.validateCollectionName(collectionName);
 
     const response = await this.httpClient.put(
-      `${this.endpoint}/api/v1/schema/${encodeURIComponent(collectionName)}`,
+      `${this.endpoint}/schema/${encodeURIComponent(collectionName)}`,
       {
         schema,
         enforcement_mode: enforcementMode,
@@ -973,7 +975,7 @@ export class AetherfyVectorsClient {
       etag: data.etag,
     });
 
-    return data.etag;
+    return { etag: data.etag };
   }
 
   /**
@@ -990,7 +992,7 @@ export class AetherfyVectorsClient {
     this.validateCollectionName(collectionName);
 
     await this.httpClient.delete(
-      `${this.endpoint}/api/v1/schema/${encodeURIComponent(collectionName)}`
+      `${this.endpoint}/schema/${encodeURIComponent(collectionName)}`
     );
 
     // Clear cache
@@ -1018,7 +1020,7 @@ export class AetherfyVectorsClient {
     this.validateCollectionName(collectionName);
 
     const response = await this.httpClient.post(
-      `${this.endpoint}/api/v1/schema/${encodeURIComponent(collectionName)}/analyze`,
+      `${this.endpoint}/schema/${encodeURIComponent(collectionName)}/analyze`,
       { sample_size: sampleSize }
     );
 

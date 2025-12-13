@@ -394,3 +394,9 @@ export interface SchemaData {
   /** ETag for cache synchronization */
   etag: string;
 }
+
+/** Response from setSchema operation */
+export interface SchemaResponse {
+  /** ETag of the created/updated schema */
+  etag: string;
+}
