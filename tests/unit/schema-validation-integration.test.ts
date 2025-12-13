@@ -39,7 +39,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock GET /api/v1/schema (payload schema)
       nock('https://vectors.aetherfy.com')
-        .get('/api/v1/schema/test-collection')
+        .get('/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -90,7 +90,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
-        .get('/api/v1/schema/test-collection')
+        .get('/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -131,7 +131,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
-        .get('/api/v1/schema/test-collection')
+        .get('/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -189,7 +189,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
-        .get('/api/v1/schema/test-collection')
+        .get('/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -236,7 +236,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
-        .get('/api/v1/schema/test-collection')
+        .get('/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -283,7 +283,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock GET /api/v1/schema (404 - no schema)
       nock('https://vectors.aetherfy.com')
-        .get('/api/v1/schema/test-collection')
+        .get('/schema/test-collection')
         .reply(404, { error: { message: 'Schema not found' } });
 
       // Mock PUT /collections/test-collection/points
@@ -322,7 +322,7 @@ describe('Schema Validation Integration', () => {
 
       // First attempt: GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
-        .get('/api/v1/schema/test-collection')
+        .get('/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -345,7 +345,7 @@ describe('Schema Validation Integration', () => {
 
       // Retry: GET /api/v1/schema (fetch updated schema)
       nock('https://vectors.aetherfy.com')
-        .get('/api/v1/schema/test-collection')
+        .get('/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -405,7 +405,7 @@ describe('Schema Validation Integration', () => {
 
       // First attempt: GET /api/v1/schema (old schema: price optional)
       nock('https://vectors.aetherfy.com')
-        .get('/api/v1/schema/test-collection')
+        .get('/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -425,7 +425,7 @@ describe('Schema Validation Integration', () => {
 
       // Retry: GET /api/v1/schema (new schema: price required)
       nock('https://vectors.aetherfy.com')
-        .get('/api/v1/schema/test-collection')
+        .get('/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -468,7 +468,7 @@ describe('Schema Validation Integration', () => {
 
       // First upsert: GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
-        .get('/api/v1/schema/test-collection')
+        .get('/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -517,7 +517,7 @@ describe('Schema Validation Integration', () => {
 
       // First upsert: GET /api/v1/schema (404)
       nock('https://vectors.aetherfy.com')
-        .get('/api/v1/schema/test-collection')
+        .get('/schema/test-collection')
         .reply(404, {});
 
       // First upsert: PUT
