@@ -41,6 +41,7 @@ export {
 
   // Core interfaces
   VectorConfig,
+  VectorConfigInput,
   Point,
   SearchResult,
   Collection,

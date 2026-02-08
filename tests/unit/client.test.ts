@@ -221,6 +221,146 @@ describe('AetherfyVectorsClient', () => {
         } as unknown as VectorConfig)
       ).rejects.toThrow('Distance metric must be specified');
     });
+
+    it('should accept distance metric as lowercase string "cosine"', async () => {
+      const scope = nock('https://vectors.aetherfy.com')
+        .post('/collections', body => {
+          return (
+            body.name === 'test' &&
+            body.vectors.distance === 'Cosine'
+          );
+        })
+        .reply(201, { success: true });
+
+      await client.createCollection('test', {
+        size: 128,
+        distance: 'cosine' as any,
+      });
+
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('should accept distance metric as lowercase string "euclidean"', async () => {
+      const scope = nock('https://vectors.aetherfy.com')
+        .post('/collections', body => {
+          return (
+            body.name === 'test' &&
+            body.vectors.distance === 'Euclidean'
+          );
+        })
+        .reply(201, { success: true });
+
+      await client.createCollection('test', {
+        size: 128,
+        distance: 'euclidean' as any,
+      });
+
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('should accept distance metric as lowercase string "euclid" (alias)', async () => {
+      const scope = nock('https://vectors.aetherfy.com')
+        .post('/collections', body => {
+          return (
+            body.name === 'test' &&
+            body.vectors.distance === 'Euclidean'
+          );
+        })
+        .reply(201, { success: true });
+
+      await client.createCollection('test', {
+        size: 128,
+        distance: 'euclid' as any,
+      });
+
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('should accept distance metric as lowercase string "dot"', async () => {
+      const scope = nock('https://vectors.aetherfy.com')
+        .post('/collections', body => {
+          return (
+            body.name === 'test' &&
+            body.vectors.distance === 'Dot'
+          );
+        })
+        .reply(201, { success: true });
+
+      await client.createCollection('test', {
+        size: 128,
+        distance: 'dot' as any,
+      });
+
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('should accept distance metric as lowercase string "manhattan"', async () => {
+      const scope = nock('https://vectors.aetherfy.com')
+        .post('/collections', body => {
+          return (
+            body.name === 'test' &&
+            body.vectors.distance === 'Manhattan'
+          );
+        })
+        .reply(201, { success: true });
+
+      await client.createCollection('test', {
+        size: 128,
+        distance: 'manhattan' as any,
+      });
+
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('should accept distance metric as exact enum string "Cosine"', async () => {
+      const scope = nock('https://vectors.aetherfy.com')
+        .post('/collections', body => {
+          return (
+            body.name === 'test' &&
+            body.vectors.distance === 'Cosine'
+          );
+        })
+        .reply(201, { success: true });
+
+      await client.createCollection('test', {
+        size: 128,
+        distance: 'Cosine' as any,
+      });
+
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('should reject invalid distance metric string', async () => {
+      await expect(
+        client.createCollection('test', {
+          size: 128,
+          distance: 'invalid-metric' as any,
+        })
+      ).rejects.toThrow(ValidationError);
+
+      await expect(
+        client.createCollection('test', {
+          size: 128,
+          distance: 'invalid-metric' as any,
+        })
+      ).rejects.toThrow('Invalid distance metric');
+    });
+
+    it('should reject non-string non-enum distance metric', async () => {
+      await expect(
+        client.createCollection('test', {
+          size: 128,
+          distance: 123 as any,
+        })
+      ).rejects.toThrow(ValidationError);
+
+      await expect(
+        client.createCollection('test', {
+          size: 128,
+          distance: 123 as any,
+        })
+      ).rejects.toThrow('Distance metric must be a DistanceMetric enum or valid string');
+    });
   });
 
   describe('Vector Operations', () => {

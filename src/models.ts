@@ -23,6 +23,17 @@ export interface VectorConfig {
 }
 
 /**
+ * Flexible vector configuration input (accepts string or enum for distance)
+ * Used in public API methods for user convenience
+ */
+export interface VectorConfigInput {
+  /** Dimension size of vectors */
+  size: number;
+  /** Distance metric to use for similarity calculations */
+  distance: DistanceMetric | string;
+}
+
+/**
  * A point (vector) with optional metadata
  */
 export interface Point {
@@ -207,6 +218,16 @@ export interface ClientConfig {
    * @internal
    */
   enableConnectionPooling?: boolean;
+  /**
+   * Workspace name for multi-agent coordination.
+   * - Set to 'auto' to auto-detect from AETHERFY_WORKSPACE environment variable
+   * - Set to a string to use a specific workspace
+   * - Leave undefined for no workspace (collections are not namespaced)
+   *
+   * When set, all collection names are automatically prefixed with the workspace.
+   * Example: workspace='invoice-pipeline', collection='documents' → 'invoice-pipeline/documents'
+   */
+  workspace?: string | 'auto';
 }
 
 /**
