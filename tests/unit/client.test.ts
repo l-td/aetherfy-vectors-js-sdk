@@ -225,10 +225,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as lowercase string "cosine"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post('/collections', body => {
-          return (
-            body.name === 'test' &&
-            body.vectors.distance === 'Cosine'
-          );
+          return body.name === 'test' && body.vectors.distance === 'Cosine';
         })
         .reply(201, { success: true });
 
@@ -243,10 +240,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as lowercase string "euclidean"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post('/collections', body => {
-          return (
-            body.name === 'test' &&
-            body.vectors.distance === 'Euclidean'
-          );
+          return body.name === 'test' && body.vectors.distance === 'Euclidean';
         })
         .reply(201, { success: true });
 
@@ -261,10 +255,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as lowercase string "euclid" (alias)', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post('/collections', body => {
-          return (
-            body.name === 'test' &&
-            body.vectors.distance === 'Euclidean'
-          );
+          return body.name === 'test' && body.vectors.distance === 'Euclidean';
         })
         .reply(201, { success: true });
 
@@ -279,10 +270,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as lowercase string "dot"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post('/collections', body => {
-          return (
-            body.name === 'test' &&
-            body.vectors.distance === 'Dot'
-          );
+          return body.name === 'test' && body.vectors.distance === 'Dot';
         })
         .reply(201, { success: true });
 
@@ -297,10 +285,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as lowercase string "manhattan"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post('/collections', body => {
-          return (
-            body.name === 'test' &&
-            body.vectors.distance === 'Manhattan'
-          );
+          return body.name === 'test' && body.vectors.distance === 'Manhattan';
         })
         .reply(201, { success: true });
 
@@ -315,10 +300,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as exact enum string "Cosine"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post('/collections', body => {
-          return (
-            body.name === 'test' &&
-            body.vectors.distance === 'Cosine'
-          );
+          return body.name === 'test' && body.vectors.distance === 'Cosine';
         })
         .reply(201, { success: true });
 
@@ -359,7 +341,9 @@ describe('AetherfyVectorsClient', () => {
           size: 128,
           distance: 123 as any,
         })
-      ).rejects.toThrow('Distance metric must be a DistanceMetric enum or valid string');
+      ).rejects.toThrow(
+        'Distance metric must be a DistanceMetric enum or valid string'
+      );
     });
   });
 
