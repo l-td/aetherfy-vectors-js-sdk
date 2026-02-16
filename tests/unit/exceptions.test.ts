@@ -13,6 +13,7 @@ import {
   RequestTimeoutError,
   NetworkError,
   ConflictError,
+  CollectionInUseError,
   QuotaExceededError,
   createErrorFromResponse,
   isAetherfyVectorsError,
@@ -208,6 +209,33 @@ describe('Custom Exceptions', () => {
       });
     });
 
+    it('should create CollectionInUseError', () => {
+      const error = new CollectionInUseError('my-collection', [
+        'agent-a',
+        'agent-b',
+      ]);
+      expect(error.message).toBe(
+        "Collection 'my-collection' is in use by agent(s): agent-a, agent-b"
+      );
+      expect(error.name).toBe('CollectionInUseError');
+      expect(error.collectionName).toBe('my-collection');
+      expect(error.agents).toEqual(['agent-a', 'agent-b']);
+    });
+
+    it('should serialize CollectionInUseError to JSON', () => {
+      const error = new CollectionInUseError('my-collection', ['agent-a']);
+      const json = error.toJSON();
+      expect(json).toEqual({
+        name: 'CollectionInUseError',
+        message: "Collection 'my-collection' is in use by agent(s): agent-a",
+        requestId: undefined,
+        statusCode: undefined,
+        details: undefined,
+        collectionName: 'my-collection',
+        agents: ['agent-a'],
+      });
+    });
+
     it('should create QuotaExceededError', () => {
       const error = new QuotaExceededError(
         'Quota exceeded',
@@ -336,6 +364,28 @@ describe('Custom Exceptions', () => {
       );
     });
 
+    it('should create CollectionInUseError for 409 with COLLECTION_IN_USE code', () => {
+      const error = createErrorFromResponse(
+        {
+          error: {
+            code: 'COLLECTION_IN_USE',
+            message: "Collection 'test-col' is in use by agent(s): my-agent",
+            collection_name: 'test-col',
+            agents: ['my-agent', 'other-agent'],
+          },
+        },
+        409,
+        'Conflict'
+      );
+
+      expect(error).toBeInstanceOf(CollectionInUseError);
+      expect((error as CollectionInUseError).collectionName).toBe('test-col');
+      expect((error as CollectionInUseError).agents).toEqual([
+        'my-agent',
+        'other-agent',
+      ]);
+    });
+
     it('should handle message as object in createErrorFromResponse', () => {
       const error = createErrorFromResponse(
         { message: { nested: 'error' } },
@@ -391,6 +441,7 @@ describe('Custom Exceptions', () => {
         new ValidationError(),
         new AuthenticationError(),
         new CollectionNotFoundError('test'),
+        new CollectionInUseError('test', ['agent-a']),
       ];
 
       retryableErrors.forEach(error => {
@@ -420,6 +471,7 @@ describe('Custom Exceptions', () => {
         new RequestTimeoutError(),
         new NetworkError(),
         new ConflictError(),
+        new CollectionInUseError('test', ['agent-a']),
         new QuotaExceededError('Points', 'points', 1000, 500),
       ];
 

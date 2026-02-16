@@ -259,6 +259,31 @@ export class QuotaExceededError extends AetherfyVectorsError {
 }
 
 /**
+ * Collection in use errors (409) - when trying to delete a collection still referenced by agents
+ */
+export class CollectionInUseError extends AetherfyVectorsError {
+  public readonly collectionName: string;
+  public readonly agents: string[];
+
+  constructor(collectionName: string, agents: string[]) {
+    const agentList = agents.join(', ');
+    super(`Collection '${collectionName}' is in use by agent(s): ${agentList}`);
+    this.name = 'CollectionInUseError';
+    this.collectionName = collectionName;
+    this.agents = agents;
+    Object.setPrototypeOf(this, CollectionInUseError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      collectionName: this.collectionName,
+      agents: this.agents,
+    };
+  }
+}
+
+/**
  * Schema validation errors - when payload fails schema validation
  */
 export class SchemaValidationError extends AetherfyVectorsError {
@@ -364,11 +389,21 @@ export function createErrorFromResponse(
         details as Record<string, unknown> | undefined
       );
 
-    case 409:
+    case 409: {
+      const errorObj = responseData?.error as
+        | Record<string, unknown>
+        | undefined;
+      if (errorObj?.code === 'COLLECTION_IN_USE') {
+        return new CollectionInUseError(
+          String(errorObj.collection_name || 'unknown'),
+          (errorObj.agents as string[]) || []
+        );
+      }
       return new ConflictError(
         message,
         responseData?.conflictingResource as string
       );
+    }
 
     case 429:
       return new RateLimitExceededError(

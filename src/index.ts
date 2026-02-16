@@ -92,6 +92,7 @@ export {
   RequestTimeoutError,
   NetworkError,
   ConflictError,
+  CollectionInUseError,
   QuotaExceededError,
   SchemaValidationError,
 

@@ -9,6 +9,7 @@ import {
   ValidationError,
   NetworkError,
   AetherfyVectorsError,
+  CollectionInUseError,
 } from '../../src/exceptions';
 
 describe('AetherfyVectorsClient', () => {
@@ -51,8 +52,8 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should create collection successfully', async () => {
-      nock('https://vectors.aetherfy.com')
-        .post('/collections')
+      const scope = nock('https://vectors.aetherfy.com')
+        .post('/collections', body => body.name === 'test-collection')
         .reply(201, { success: true });
 
       const result = await client.createCollection('test-collection', {
@@ -61,6 +62,7 @@ describe('AetherfyVectorsClient', () => {
       });
 
       expect(result).toBe(true);
+      expect(scope.isDone()).toBe(true);
     });
 
     it('should create collection with description', async () => {
@@ -757,6 +759,36 @@ describe('AetherfyVectorsClient', () => {
       await expect(
         client.deleteCollection('test-collection')
       ).rejects.toThrow();
+    });
+
+    it('should throw CollectionInUseError when deleting a collection in use', async () => {
+      nock('https://vectors.aetherfy.com')
+        .delete('/collections/test-collection')
+        .reply(409, {
+          error: {
+            code: 'COLLECTION_IN_USE',
+            message:
+              "Collection 'test-collection' is in use by agent(s): my-agent",
+            collection_name: 'test-collection',
+            agents: ['my-agent', 'other-agent'],
+          },
+        });
+
+      let caughtError: unknown;
+      try {
+        await client.deleteCollection('test-collection');
+      } catch (err) {
+        caughtError = err;
+      }
+
+      expect(caughtError).toBeInstanceOf(CollectionInUseError);
+      expect((caughtError as CollectionInUseError).collectionName).toBe(
+        'test-collection'
+      );
+      expect((caughtError as CollectionInUseError).agents).toEqual([
+        'my-agent',
+        'other-agent',
+      ]);
     });
 
     it('should handle non-404 errors in collectionExists', async () => {
