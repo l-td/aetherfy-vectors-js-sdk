@@ -239,11 +239,13 @@ export class HttpClient {
     status: number,
     statusText: string
   ): Error {
+    const errorField = responseData?.error;
+    const nestedMessage =
+      errorField && typeof errorField === 'object'
+        ? errorField.message
+        : errorField;
     const message =
-      responseData?.message ||
-      responseData?.error ||
-      statusText ||
-      'Unknown error';
+      responseData?.message || nestedMessage || statusText || 'Unknown error';
     const error = new Error(message);
     Object.assign(error, {
       status,

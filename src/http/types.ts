@@ -31,7 +31,7 @@ export interface HttpClientOptions {
 
 export interface ErrorResponse {
   message?: string;
-  error?: string;
+  error?: string | { code?: string; message?: string };
   details?: Record<string, unknown>;
   requestId?: string;
 }
