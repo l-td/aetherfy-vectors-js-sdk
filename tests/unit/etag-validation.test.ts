@@ -37,6 +37,11 @@ describe('ETag Validation', () => {
         schema_version: 'abc12345',
       });
 
+    // Mock GET schema response (404 = no payload schema defined)
+    const schemaScope = nock('http://localhost:3000')
+      .get('/schema/test-collection')
+      .reply(404, {});
+
     // Mock PUT upsert response
     const putScope = nock('http://localhost:3000')
       .put('/collections/test-collection/points')
@@ -46,8 +51,9 @@ describe('ETag Validation', () => {
     const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
     await client.upsert('test-collection', points);
 
-    // Should have made 2 calls: GET for schema, PUT for upsert
+    // Should have made 3 calls: GET for schema, GET for payload schema (404), PUT for upsert
     expect(getScope.isDone()).toBe(true);
+    expect(schemaScope.isDone()).toBe(true);
     expect(putScope.isDone()).toBe(true);
   });
 

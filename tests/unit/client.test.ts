@@ -377,6 +377,10 @@ describe('AetherfyVectorsClient', () => {
         });
 
       nock('https://vectors.aetherfy.com')
+        .get('/schema/test-collection')
+        .reply(404, {});
+
+      nock('https://vectors.aetherfy.com')
         .put('/collections/test-collection/points')
         .reply(200, { success: true });
 

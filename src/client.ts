@@ -1196,6 +1196,7 @@ export class AetherfyVectorsClient {
     try {
       const schema = await this.getSchema(unscopedName);
       if (schema === null) {
+        this.payloadSchemaCache.set(scopedCollectionName, null);
         return null;
       }
       // getSchema already cached the SchemaData, so retrieve it from cache
