@@ -876,14 +876,6 @@ export class AetherfyVectorsClient {
         return { size, distance: normalizedDistance };
       }
 
-      // Try to match exact enum value (e.g., "Cosine", "Euclidean")
-      const exactMatch = Object.values(DistanceMetric).find(
-        dm => dm === distance
-      );
-      if (exactMatch) {
-        return { size, distance: exactMatch };
-      }
-
       throw new ValidationError(
         `Invalid distance metric: ${distance}. Must be one of: ${Object.values(
           DistanceMetric
@@ -910,15 +902,7 @@ export class AetherfyVectorsClient {
         throw new ValidationError('Each point must have an id');
       }
 
-      if (
-        !('vector' in point) ||
-        !point.vector ||
-        !Array.isArray(point.vector)
-      ) {
-        throw new ValidationError('Each point must have a vector array');
-      }
-
-      this.validateVector(point.vector);
+      this.validateVector(point.vector as number[]);
 
       return {
         id: point.id as string | number,
@@ -929,10 +913,6 @@ export class AetherfyVectorsClient {
   }
 
   private handleError(error: unknown): AetherfyVectorsError {
-    if (error instanceof AetherfyVectorsError) {
-      return error;
-    }
-
     if (
       error &&
       typeof error === 'object' &&
@@ -1010,10 +990,6 @@ export class AetherfyVectorsClient {
       const response = await this.httpClient.get(
         `${this.endpoint}/schema/${encodeURIComponent(scopedName)}`
       );
-
-      if (response.status === 404) {
-        return null;
-      }
 
       const data = response.data as {
         schema: Schema;

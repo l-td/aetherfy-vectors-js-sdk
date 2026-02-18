@@ -232,6 +232,31 @@ describe('Workspace Support', () => {
     });
   });
 
+  describe('getCollection with workspace', () => {
+    it('should unscope collection name in getCollection result', async () => {
+      process.env.AETHERFY_WORKSPACE = 'invoice-pipeline';
+
+      const client = new AetherfyVectorsClient({
+        apiKey: 'afy_test_1234567890123456',
+        workspace: 'auto',
+        enableConnectionPooling: false,
+      });
+
+      nock(baseUrl)
+        .get('/collections/invoice-pipeline%2Fdocuments')
+        .reply(200, {
+          result: {
+            name: 'invoice-pipeline/documents',
+            config: {},
+          },
+        });
+
+      const collection = await client.getCollection('documents');
+
+      expect(collection.name).toBe('documents');
+    });
+  });
+
   describe('Workspace with schema operations', () => {
     it('should scope collection name in getSchema', async () => {
       process.env.AETHERFY_WORKSPACE = 'test-workspace';
