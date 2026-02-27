@@ -103,6 +103,64 @@ const client = new AetherfyVectorsClient({
 });
 ```
 
+## 🤝 Multi-Agent Workspaces
+
+Workspaces let multiple agents share vector collections without name collisions. All collections created through a workspace-scoped client are automatically namespaced — agents in the same workspace see each other's collections; agents in different workspaces are fully isolated.
+
+### Creating a workspace-scoped client
+
+```typescript
+const client = new AetherfyVectorsClient({
+  apiKey: 'afy_live_your_api_key_here',
+  workspace: 'invoice-pipeline', // All operations are scoped to this workspace
+});
+```
+
+### How scoping works
+
+Collection names are automatically prefixed — you always use the short name:
+
+```typescript
+// Create a collection (stored as "invoice-pipeline/documents" internally)
+await client.createCollection('documents', { size: 768, distance: DistanceMetric.COSINE });
+
+// Search — no need to know the full scoped name
+const results = await client.search('documents', queryVector, { limit: 10 });
+
+// List — only returns collections in your workspace
+const collections = await client.getCollections();
+// → [{ name: 'documents', ... }]  (short names, not scoped names)
+```
+
+### Multi-agent example
+
+```typescript
+// Agent A: extractor
+const extractor = new AetherfyVectorsClient({
+  apiKey: process.env.AETHERFY_API_KEY,
+  workspace: 'invoice-pipeline',
+});
+await extractor.createCollection('raw-invoices', { size: 768, distance: DistanceMetric.COSINE });
+await extractor.upsert('raw-invoices', extractedPoints);
+
+// Agent B: classifier — same workspace, sees Agent A's collection
+const classifier = new AetherfyVectorsClient({
+  apiKey: process.env.AETHERFY_API_KEY,
+  workspace: 'invoice-pipeline',
+});
+const results = await classifier.search('raw-invoices', queryVector, { limit: 20 });
+```
+
+### Workspace without scoping (backward-compatible)
+
+```typescript
+// No workspace — collections are stored as-is, not scoped
+const client = new AetherfyVectorsClient({ apiKey: 'afy_live_your_key' });
+await client.createCollection('my-global-collection', { size: 768, distance: DistanceMetric.COSINE });
+```
+
+> **Tip:** Workspaces are created explicitly in the Aetherfy control plane before use (`afy workspaces create invoice-pipeline`). Agents deployed to a workspace automatically receive their workspace name via the `AETHERFY_WORKSPACE` environment variable.
+
 ## 🔧 Core Operations
 
 ### Collection Management
