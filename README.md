@@ -122,7 +122,10 @@ Collection names are automatically prefixed — you always use the short name:
 
 ```typescript
 // Create a collection (stored as "invoice-pipeline/documents" internally)
-await client.createCollection('documents', { size: 768, distance: DistanceMetric.COSINE });
+await client.createCollection('documents', {
+  size: 768,
+  distance: DistanceMetric.COSINE,
+});
 
 // Search — no need to know the full scoped name
 const results = await client.search('documents', queryVector, { limit: 10 });
@@ -140,7 +143,10 @@ const extractor = new AetherfyVectorsClient({
   apiKey: process.env.AETHERFY_API_KEY,
   workspace: 'invoice-pipeline',
 });
-await extractor.createCollection('raw-invoices', { size: 768, distance: DistanceMetric.COSINE });
+await extractor.createCollection('raw-invoices', {
+  size: 768,
+  distance: DistanceMetric.COSINE,
+});
 await extractor.upsert('raw-invoices', extractedPoints);
 
 // Agent B: classifier — same workspace, sees Agent A's collection
@@ -148,7 +154,9 @@ const classifier = new AetherfyVectorsClient({
   apiKey: process.env.AETHERFY_API_KEY,
   workspace: 'invoice-pipeline',
 });
-const results = await classifier.search('raw-invoices', queryVector, { limit: 20 });
+const results = await classifier.search('raw-invoices', queryVector, {
+  limit: 20,
+});
 ```
 
 ### Workspace without scoping (backward-compatible)
@@ -156,7 +164,10 @@ const results = await classifier.search('raw-invoices', queryVector, { limit: 20
 ```typescript
 // No workspace — collections are stored as-is, not scoped
 const client = new AetherfyVectorsClient({ apiKey: 'afy_live_your_key' });
-await client.createCollection('my-global-collection', { size: 768, distance: DistanceMetric.COSINE });
+await client.createCollection('my-global-collection', {
+  size: 768,
+  distance: DistanceMetric.COSINE,
+});
 ```
 
 > **Tip:** Workspaces are created explicitly in the Aetherfy control plane before use (`afy workspaces create invoice-pipeline`). Agents deployed to a workspace automatically receive their workspace name via the `AETHERFY_WORKSPACE` environment variable.

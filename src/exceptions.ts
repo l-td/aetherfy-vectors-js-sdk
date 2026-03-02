@@ -284,10 +284,31 @@ export class CollectionInUseError extends AetherfyVectorsError {
 }
 
 /**
+ * Schema not found errors - when no schema is defined for a collection
+ */
+export class SchemaNotFoundError extends AetherfyVectorsError {
+  public readonly collectionName: string;
+
+  constructor(collectionName: string) {
+    super(`No schema defined for collection '${collectionName}'`);
+    this.name = 'SchemaNotFoundError';
+    this.collectionName = collectionName;
+    Object.setPrototypeOf(this, SchemaNotFoundError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      collectionName: this.collectionName,
+    };
+  }
+}
+
+/**
  * Schema validation errors - when payload fails schema validation
  */
 export class SchemaValidationError extends AetherfyVectorsError {
-  public readonly validationErrors: Array<{
+  public readonly errors: Array<{
     index: number;
     id: string | number;
     errors: Array<{
@@ -300,7 +321,7 @@ export class SchemaValidationError extends AetherfyVectorsError {
   }>;
 
   constructor(
-    validationErrors: Array<{
+    errors: Array<{
       index: number;
       id: string | number;
       errors: Array<{
@@ -313,19 +334,19 @@ export class SchemaValidationError extends AetherfyVectorsError {
     }>
   ) {
     // Create human-readable message
-    const messages = validationErrors.flatMap(ve =>
+    const messages = errors.flatMap(ve =>
       ve.errors.map(e => `Vector ${ve.index}: ${e.message}`)
     );
     super(`Schema validation failed:\n${messages.join('\n')}`);
     this.name = 'SchemaValidationError';
-    this.validationErrors = validationErrors;
+    this.errors = errors;
     Object.setPrototypeOf(this, SchemaValidationError.prototype);
   }
 
   toJSON(): Record<string, unknown> {
     return {
       ...super.toJSON(),
-      validationErrors: this.validationErrors,
+      errors: this.errors,
     };
   }
 }
@@ -383,7 +404,7 @@ export function createErrorFromResponse(
         return new CollectionNotFoundError(String(responseData.collectionName));
       }
       return new AetherfyVectorsError(
-        typeof message === 'string' ? message : 'Unknown error',
+        message,
         requestId,
         status,
         details as Record<string, unknown> | undefined

@@ -10,7 +10,10 @@ import {
   NetworkError,
   AetherfyVectorsError,
   CollectionInUseError,
+  SchemaNotFoundError,
+  SchemaValidationError,
 } from '../../src/exceptions';
+import { HttpClient } from '../../src/http/client';
 
 describe('AetherfyVectorsClient', () => {
   describe('Constructor', () => {
@@ -995,6 +998,25 @@ describe('AetherfyVectorsClient', () => {
       }
     });
 
+    it('should wrap unexpected non-network errors as AetherfyVectorsError', async () => {
+      const spy = jest
+        .spyOn(HttpClient.prototype, 'get')
+        .mockRejectedValueOnce(new Error('Unexpected computation error'));
+
+      try {
+        await client.getCollections();
+        throw new Error('Expected error to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(AetherfyVectorsError);
+        expect(error).not.toBeInstanceOf(NetworkError);
+        expect((error as AetherfyVectorsError).message).toBe(
+          'Unexpected computation error'
+        );
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     it('should handle createCollection errors', async () => {
       nock('https://vectors.aetherfy.com')
         .post('/collections')
@@ -1242,21 +1264,24 @@ describe('AetherfyVectorsClient', () => {
         expect(schema).toBeNull();
       });
 
-      it('should cache schema after fetching', async () => {
+      it('should always fetch from server and update cache', async () => {
+        const schemaReply = {
+          schema: {
+            fields: { price: { type: 'integer', required: true } },
+          },
+          enforcement_mode: 'off',
+          etag: 'abc123',
+        };
+
+        // Two calls require two nock intercepts — always fetches from server
         nock('https://vectors.aetherfy.com')
           .get('/schema/test-collection')
-          .reply(200, {
-            schema: {
-              fields: { price: { type: 'integer', required: true } },
-            },
-            enforcement_mode: 'off',
-            etag: 'abc123',
-          });
+          .reply(200, schemaReply);
+        nock('https://vectors.aetherfy.com')
+          .get('/schema/test-collection')
+          .reply(200, schemaReply);
 
-        // First call - fetches from server
         await client.getSchema('test-collection');
-
-        // Second call - should use cache (no second nock call defined)
         const schema = await client.getSchema('test-collection');
 
         expect(schema).not.toBeNull();
@@ -1287,7 +1312,7 @@ describe('AetherfyVectorsClient', () => {
           'strict'
         );
 
-        expect(result.etag).toBe('new_etag_123');
+        expect(result).toBe('new_etag_123');
       });
 
       it('should default to off enforcement mode', async () => {
@@ -1311,9 +1336,28 @@ describe('AetherfyVectorsClient', () => {
           .delete('/schema/test-collection')
           .reply(200, { success: true });
 
-        await expect(
-          client.deleteSchema('test-collection')
-        ).resolves.not.toThrow();
+        const result = await client.deleteSchema('test-collection');
+        expect(result).toBe(true);
+      });
+
+      it('should throw SchemaNotFoundError when schema does not exist', async () => {
+        nock('https://vectors.aetherfy.com')
+          .delete('/schema/test-collection')
+          .reply(404, { error: { message: 'Schema not found' } });
+
+        await expect(client.deleteSchema('test-collection')).rejects.toThrow(
+          SchemaNotFoundError
+        );
+      });
+
+      it('should propagate non-404 errors from the server', async () => {
+        nock('https://vectors.aetherfy.com')
+          .delete('/schema/test-collection')
+          .reply(500, { error: { message: 'Internal server error' } });
+
+        await expect(client.deleteSchema('test-collection')).rejects.toThrow(
+          AetherfyVectorsError
+        );
       });
 
       it('should clear cache after deletion', async () => {
@@ -1392,29 +1436,52 @@ describe('AetherfyVectorsClient', () => {
         await client.analyzeSchema('test-collection');
         expect(scope.isDone()).toBe(true);
       });
+
+      it('should throw ValidationError when sampleSize is below 100', async () => {
+        await expect(
+          client.analyzeSchema('test-collection', 99)
+        ).rejects.toThrow(ValidationError);
+      });
+
+      it('should throw ValidationError when sampleSize exceeds 10000', async () => {
+        await expect(
+          client.analyzeSchema('test-collection', 10001)
+        ).rejects.toThrow(ValidationError);
+      });
     });
 
     describe('refreshSchema', () => {
-      it('should clear cache and refetch schema', async () => {
-        // Initial schema fetch
+      it('should cache refreshed schema so subsequent upserts use it without re-fetching', async () => {
+        // First upsert — populates schemaCache (vector) and payloadSchemaCache (payload)
+        nock('https://vectors.aetherfy.com')
+          .get('/collections/test-collection')
+          .reply(200, {
+            result: {
+              config: { params: { vectors: { size: 2, distance: 'Cosine' } } },
+            },
+            schema_version: 'v1',
+          });
         nock('https://vectors.aetherfy.com')
           .get('/schema/test-collection')
           .reply(200, {
-            schema: {
-              fields: { old: { type: 'string', required: true } },
-            },
+            schema: { fields: { old: { type: 'string', required: false } } },
             enforcement_mode: 'off',
             etag: 'old_etag',
           });
+        nock('https://vectors.aetherfy.com')
+          .put('/collections/test-collection/points')
+          .reply(200, { status: 'ok' });
 
-        await client.getSchema('test-collection');
+        await client.upsert('test-collection', [
+          { id: '1', vector: [0.1, 0.2], payload: {} },
+        ]);
 
-        // Refresh - should fetch again
+        // refreshSchema clears payloadSchemaCache and re-populates it with the new schema
         nock('https://vectors.aetherfy.com')
           .get('/schema/test-collection')
           .reply(200, {
             schema: {
-              fields: { new: { type: 'integer', required: true } },
+              fields: { required_field: { type: 'integer', required: true } },
             },
             enforcement_mode: 'strict',
             etag: 'new_etag',
@@ -1422,10 +1489,14 @@ describe('AetherfyVectorsClient', () => {
 
         await client.refreshSchema('test-collection');
 
-        // Verify new schema is cached
-        const schema = await client.getSchema('test-collection');
-        expect(schema?.fields.new).toBeDefined();
-        expect(schema?.fields.old).toBeUndefined();
+        // Second upsert — no GET /schema mock: proves the refreshed schema came from cache.
+        // The new strict schema requires 'required_field'; submitting without it
+        // must throw SchemaValidationError, confirming the new schema is enforced.
+        await expect(
+          client.upsert('test-collection', [
+            { id: '2', vector: [0.1, 0.2], payload: {} },
+          ])
+        ).rejects.toThrow(SchemaValidationError);
       });
     });
   });

@@ -15,6 +15,8 @@ import {
   ConflictError,
   CollectionInUseError,
   QuotaExceededError,
+  SchemaNotFoundError,
+  SchemaValidationError,
   createErrorFromResponse,
   isAetherfyVectorsError,
   isRetryableError,
@@ -269,6 +271,39 @@ describe('Custom Exceptions', () => {
         limit: 900,
       });
     });
+
+    it('should serialize SchemaNotFoundError to JSON', () => {
+      const error = new SchemaNotFoundError('products');
+      const json = error.toJSON();
+      expect(json).toEqual({
+        name: 'SchemaNotFoundError',
+        message: "No schema defined for collection 'products'",
+        requestId: undefined,
+        statusCode: undefined,
+        details: undefined,
+        collectionName: 'products',
+      });
+    });
+
+    it('should serialize SchemaValidationError to JSON', () => {
+      const errors = [
+        {
+          index: 0,
+          id: 'point-1',
+          errors: [
+            {
+              field: 'price',
+              code: 'TYPE_MISMATCH',
+              message: "Field 'price' expected integer, got string",
+            },
+          ],
+        },
+      ];
+      const error = new SchemaValidationError(errors);
+      const json = error.toJSON();
+      expect(json.name).toBe('SchemaValidationError');
+      expect(json.errors).toEqual(errors);
+    });
   });
 
   describe('Error Factory', () => {
@@ -417,6 +452,39 @@ describe('Custom Exceptions', () => {
       );
 
       expect(error.message).toBe('Internal Server Error');
+    });
+
+    it('should fall back to Unknown error when responseData and statusText are both empty', () => {
+      const error = createErrorFromResponse({}, 400, '');
+      expect(error.message).toBe('Unknown error');
+    });
+
+    it('should fall back to Unknown error in catch block when statusText is also empty', () => {
+      const circularRef: Record<string, unknown> = {};
+      circularRef.self = circularRef;
+
+      const error = createErrorFromResponse({ message: circularRef }, 500, '');
+      expect(error.message).toBe('Unknown error');
+    });
+
+    it('should create ServiceUnavailableError for 502 status', () => {
+      const error = createErrorFromResponse(
+        { message: 'Bad gateway' },
+        502,
+        'Bad Gateway'
+      );
+      expect(error).toBeInstanceOf(ServiceUnavailableError);
+    });
+
+    it('should use unknown collection name and empty agents for COLLECTION_IN_USE without details', () => {
+      const error = createErrorFromResponse(
+        { error: { code: 'COLLECTION_IN_USE' } },
+        409,
+        'Conflict'
+      );
+      expect(error).toBeInstanceOf(CollectionInUseError);
+      expect((error as CollectionInUseError).collectionName).toBe('unknown');
+      expect((error as CollectionInUseError).agents).toEqual([]);
     });
   });
 

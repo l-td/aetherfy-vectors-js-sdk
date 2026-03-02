@@ -162,11 +162,9 @@ describe('Schema Validation Integration', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(SchemaValidationError);
         const validationError = error as SchemaValidationError;
-        expect(validationError.validationErrors).toHaveLength(1);
-        expect(validationError.validationErrors[0].index).toBe(1);
-        expect(
-          validationError.validationErrors[0].errors.length
-        ).toBeGreaterThan(0);
+        expect(validationError.errors).toHaveLength(1);
+        expect(validationError.errors[0].index).toBe(1);
+        expect(validationError.errors[0].errors.length).toBeGreaterThan(0);
       }
     });
   });

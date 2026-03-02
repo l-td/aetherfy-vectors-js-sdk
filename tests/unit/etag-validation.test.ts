@@ -58,7 +58,7 @@ describe('ETag Validation', () => {
   });
 
   it('should reuse cached schema on subsequent upserts', async () => {
-    // Mock GET collection response (only once)
+    // Mock GET collection response (only once — second upsert uses cache)
     const getScope = nock('http://localhost:3000')
       .get('/collections/test-collection')
       .reply(200, {
@@ -75,6 +75,11 @@ describe('ETag Validation', () => {
         schema_version: 'abc12345',
       });
 
+    // Mock GET payload schema response (only once — second upsert uses cache)
+    const schemaScope = nock('http://localhost:3000')
+      .get('/schema/test-collection')
+      .reply(404, {});
+
     // Mock PUT upsert responses (two times)
     const putScope = nock('http://localhost:3000')
       .put('/collections/test-collection/points')
@@ -83,16 +88,15 @@ describe('ETag Validation', () => {
 
     const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
 
-    // First upsert
+    // First upsert — fetches both vector schema and payload schema, then PUTs
     await client.upsert('test-collection', points);
 
-    // Second upsert
+    // Second upsert — both schemas are cached, only PUTs
     await client.upsert('test-collection', points);
 
-    // Should have made 3 calls total: GET for schema (once), PUT for upsert (twice)
-    // If cache is working, no second GET call
-    expect(getScope.isDone()).toBe(true); // Only 1 GET call (schema was cached)
-    expect(putScope.isDone()).toBe(true); // Two PUT calls
+    expect(getScope.isDone()).toBe(true); // GET /collections called exactly once
+    expect(schemaScope.isDone()).toBe(true); // GET /schema called exactly once
+    expect(putScope.isDone()).toBe(true); // PUT called twice
   });
 
   it('should send ETag in If-Match header', async () => {

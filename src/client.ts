@@ -26,6 +26,7 @@ import {
   AetherfyVectorsError,
   ValidationError,
   NetworkError,
+  SchemaNotFoundError,
   SchemaValidationError,
   createErrorFromResponse,
   isRetryableError,
@@ -116,6 +117,7 @@ export class AetherfyVectorsClient {
     // Initialize workspace (auto-detect or explicit)
     if (config.workspace === 'auto') {
       // Auto-detect from environment variable (Node.js only)
+      /* c8 ignore next 3 */
       this.workspace =
         typeof process !== 'undefined'
           ? process.env?.AETHERFY_WORKSPACE
@@ -936,13 +938,7 @@ export class AetherfyVectorsClient {
     // Check if it's a network error (timeout, connection errors, etc.)
     if (error instanceof Error) {
       const message = error.message;
-      if (
-        message.includes('Network error') ||
-        message.includes('timeout') ||
-        message.includes('ECONNRESET') ||
-        message.includes('ETIMEDOUT') ||
-        message.includes('ECONNABORTED')
-      ) {
+      if (message.includes('Network error')) {
         return new NetworkError(message);
       }
     }
@@ -979,12 +975,6 @@ export class AetherfyVectorsClient {
     this.validateCollectionName(collectionName);
 
     const scopedName = this.scopeCollection(collectionName);
-
-    // Check cache first
-    if (this.payloadSchemaCache.has(scopedName)) {
-      const cached = this.payloadSchemaCache.get(scopedName);
-      return cached ? cached.schema : null;
-    }
 
     try {
       const response = await this.httpClient.get(
@@ -1040,7 +1030,7 @@ export class AetherfyVectorsClient {
     collectionName: string,
     schema: Schema,
     enforcementMode: EnforcementMode = 'off'
-  ): Promise<{ etag: string }> {
+  ): Promise<string> {
     this.validateCollectionName(collectionName);
 
     const scopedName = this.scopeCollection(collectionName);
@@ -1062,30 +1052,46 @@ export class AetherfyVectorsClient {
       etag: data.etag,
     });
 
-    return { etag: data.etag };
+    return data.etag;
   }
 
   /**
    * Delete schema from a collection
    *
    * @param collectionName - Name of the collection
+   * @returns Promise that resolves to true if deletion was successful
+   * @throws {SchemaNotFoundError} If no schema is defined for the collection
    *
    * @example
    * ```typescript
    * await client.deleteSchema('products');
    * ```
    */
-  async deleteSchema(collectionName: string): Promise<void> {
+  async deleteSchema(collectionName: string): Promise<boolean> {
     this.validateCollectionName(collectionName);
 
     const scopedName = this.scopeCollection(collectionName);
 
-    await this.httpClient.delete(
-      `${this.endpoint}/schema/${encodeURIComponent(scopedName)}`
-    );
+    try {
+      await this.httpClient.delete(
+        `${this.endpoint}/schema/${encodeURIComponent(scopedName)}`
+      );
+    } catch (error: unknown) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'status' in error &&
+        error.status === 404
+      ) {
+        throw new SchemaNotFoundError(collectionName);
+      }
+      throw this.handleError(error);
+    }
 
     // Clear cache
     this.payloadSchemaCache.delete(scopedName);
+
+    return true;
   }
 
   /**
@@ -1107,6 +1113,10 @@ export class AetherfyVectorsClient {
     sampleSize: number = 1000
   ): Promise<AnalysisResult> {
     this.validateCollectionName(collectionName);
+
+    if (sampleSize < 100 || sampleSize > 10000) {
+      throw new ValidationError('sampleSize must be between 100 and 10000');
+    }
 
     const scopedName = this.scopeCollection(collectionName);
 

@@ -94,6 +94,7 @@ export {
   ConflictError,
   CollectionInUseError,
   QuotaExceededError,
+  SchemaNotFoundError,
   SchemaValidationError,
 
   // Utility functions
