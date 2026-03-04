@@ -403,6 +403,18 @@ export function createErrorFromResponse(
       if (responseData?.collectionName) {
         return new CollectionNotFoundError(String(responseData.collectionName));
       }
+      // Handle Qdrant-style: {"status": {"error": "Not found: Collection `name` doesn't exist!"}}
+      {
+        const statusError = (responseData?.status as Record<string, unknown>)
+          ?.error;
+        if (typeof statusError === 'string') {
+          const match = statusError.match(/Collection `([^`]+)` doesn't exist/);
+          if (match) {
+            return new CollectionNotFoundError(match[1]);
+          }
+          message = statusError;
+        }
+      }
       return new AetherfyVectorsError(
         message,
         requestId,
