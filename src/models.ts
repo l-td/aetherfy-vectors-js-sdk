@@ -338,6 +338,8 @@ export interface FieldDefinition {
 export interface Schema {
   /** Field definitions */
   fields: Record<string, FieldDefinition>;
+  /** Optional human-readable description (max 500 chars) */
+  description?: string | null;
 }
 
 /**
@@ -414,6 +416,8 @@ export interface SchemaData {
   enforcementMode: EnforcementMode;
   /** ETag for cache synchronization */
   etag: string;
+  /** Optional human-readable description (max 500 chars) */
+  description?: string | null;
 }
 
 /** Response from setSchema operation */

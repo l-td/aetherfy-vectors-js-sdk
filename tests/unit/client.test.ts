@@ -1246,6 +1246,7 @@ describe('AetherfyVectorsClient', () => {
             },
             enforcement_mode: 'strict',
             etag: 'schema_abc123',
+            description: 'Product schema',
           });
 
         const schema = await client.getSchema('test-collection');
@@ -1253,6 +1254,7 @@ describe('AetherfyVectorsClient', () => {
         expect(schema).not.toBeNull();
         expect(schema?.fields.price.type).toBe('integer');
         expect(schema?.fields.name.type).toBe('string');
+        expect(schema?.description).toBe('Product schema');
       });
 
       it('should return null when schema not found', async () => {
@@ -1271,6 +1273,7 @@ describe('AetherfyVectorsClient', () => {
           },
           enforcement_mode: 'off',
           etag: 'abc123',
+          description: null,
         };
 
         // Two calls require two nock intercepts — always fetches from server
@@ -1467,6 +1470,7 @@ describe('AetherfyVectorsClient', () => {
             schema: { fields: { old: { type: 'string', required: false } } },
             enforcement_mode: 'off',
             etag: 'old_etag',
+            description: null,
           });
         nock('https://vectors.aetherfy.com')
           .put('/collections/test-collection/points')
@@ -1485,6 +1489,7 @@ describe('AetherfyVectorsClient', () => {
             },
             enforcement_mode: 'strict',
             etag: 'new_etag',
+            description: null,
           });
 
         await client.refreshSchema('test-collection');

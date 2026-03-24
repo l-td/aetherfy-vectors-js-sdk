@@ -985,16 +985,24 @@ export class AetherfyVectorsClient {
         schema: Schema;
         enforcement_mode: EnforcementMode;
         etag: string;
+        description?: string | null;
+      };
+
+      // Attach description to the schema object
+      const schema: Schema = {
+        ...data.schema,
+        description: data.description ?? null,
       };
 
       // Cache it
       this.payloadSchemaCache.set(scopedName, {
-        schema: data.schema,
+        schema,
         enforcementMode: data.enforcement_mode,
         etag: data.etag,
+        description: data.description ?? null,
       });
 
-      return data.schema;
+      return schema;
     } catch (error: unknown) {
       if (
         error &&
@@ -1029,18 +1037,24 @@ export class AetherfyVectorsClient {
   async setSchema(
     collectionName: string,
     schema: Schema,
-    enforcementMode: EnforcementMode = 'off'
+    enforcementMode: EnforcementMode = 'off',
+    description?: string | null
   ): Promise<string> {
     this.validateCollectionName(collectionName);
 
     const scopedName = this.scopeCollection(collectionName);
 
+    const body: Record<string, unknown> = {
+      schema,
+      enforcement_mode: enforcementMode,
+    };
+    if (description !== undefined) {
+      body.description = description;
+    }
+
     const response = await this.httpClient.put(
       `${this.endpoint}/schema/${encodeURIComponent(scopedName)}`,
-      {
-        schema,
-        enforcement_mode: enforcementMode,
-      }
+      body
     );
 
     const data = response.data as { etag: string };
@@ -1050,6 +1064,7 @@ export class AetherfyVectorsClient {
       schema,
       enforcementMode,
       etag: data.etag,
+      description: description ?? null,
     });
 
     return data.etag;
