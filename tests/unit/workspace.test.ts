@@ -126,7 +126,7 @@ describe('Workspace Support', () => {
         enableConnectionPooling: false,
       });
 
-      // Mock getCollection for schema fetch
+      // Mock getCollection for vector schema fetch
       nock(baseUrl)
         .get('/collections/invoice-pipeline%2Fdocuments')
         .reply(200, {
@@ -142,6 +142,13 @@ describe('Workspace Support', () => {
             },
           },
           schema_version: 'v1',
+        });
+
+      // Mock getSchema for payload schema fetch (returns 404 = no schema)
+      nock(baseUrl)
+        .get('/schema/invoice-pipeline%2Fdocuments')
+        .reply(404, {
+          error: { code: 'SCHEMA_NOT_FOUND', message: 'No schema' },
         });
 
       const upsertScope = nock(baseUrl)

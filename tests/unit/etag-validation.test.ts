@@ -117,6 +117,9 @@ describe('ETag Validation', () => {
         schema_version: 'abc12345',
       });
 
+    // Mock GET payload schema (no schema defined)
+    nock('http://localhost:3000').get('/schema/test-collection').reply(404, {});
+
     // Mock PUT upsert response
     const putScope = nock('http://localhost:3000')
       .put('/collections/test-collection/points')
@@ -224,6 +227,9 @@ describe('ETag Validation', () => {
         schema_version: 'abc12345',
       });
 
+    // Mock GET payload schema (no schema defined)
+    nock('http://localhost:3000').get('/schema/test-collection').reply(404, {});
+
     nock('http://localhost:3000')
       .put('/collections/test-collection/points')
       .reply(200, { success: true });
@@ -234,13 +240,17 @@ describe('ETag Validation', () => {
     await client.upsert('test-collection', points);
 
     // Second upsert - schema changed on server
-    // Mock PUT with 412 response (no GET needed because of cache)
+    // Mock PUT with 412 response (no GET needed because vector schema is cached)
     nock('http://localhost:3000')
       .put('/collections/test-collection/points')
       .reply(412, {
         message: 'Collection schema has changed',
         code: 'SCHEMA_VERSION_MISMATCH',
       });
+
+    // The 412 handler clears caches and calls getCachedPayloadSchema internally.
+    // Mock the schema fetch that happens inside the 412 handler.
+    nock('http://localhost:3000').get('/schema/test-collection').reply(404, {});
 
     // This should throw ValidationError with schema changed message
     try {
@@ -252,7 +262,7 @@ describe('ETag Validation', () => {
       expect((error as Error).message).toContain('test-collection');
     }
 
-    // Verify cache was cleared by checking next call fetches schema again
+    // Verify vector schema cache was cleared by checking next call fetches it again
     const getScope2 = nock('http://localhost:3000')
       .get('/collections/test-collection')
       .reply(200, {
@@ -268,6 +278,9 @@ describe('ETag Validation', () => {
         },
         schema_version: 'new-version',
       });
+
+    // Payload schema cache was populated by the 412 handler (cached null = no schema),
+    // so no GET /schema mock needed for this upsert.
 
     nock('http://localhost:3000')
       .put('/collections/test-collection/points')
@@ -314,6 +327,9 @@ describe('ETag Validation', () => {
         schema_version: 'abc12345',
       });
 
+    // Mock GET payload schema (no schema defined)
+    nock('http://localhost:3000').get('/schema/test-collection').reply(404, {});
+
     // Mock PUT with 400 response
     nock('http://localhost:3000')
       .put('/collections/test-collection/points')
@@ -350,6 +366,9 @@ describe('ETag Validation', () => {
         },
         schema_version: 'abc12345',
       });
+
+    // Mock GET payload schema (no schema defined)
+    nock('http://localhost:3000').get('/schema/test-collection').reply(404, {});
 
     // Mock PUT with 500 response
     nock('http://localhost:3000')
@@ -389,6 +408,9 @@ describe('ETag Validation', () => {
         },
         schema_version: 'abc12345',
       });
+
+    // Mock GET payload schema (no schema defined)
+    nock('http://localhost:3000').get('/schema/test-collection').reply(404, {});
 
     // Mock PUT with 503 response (Service Unavailable)
     nock('http://localhost:3000')
