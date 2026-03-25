@@ -209,7 +209,7 @@ describe('ETag Validation', () => {
     expect(nock.isDone()).toBe(true);
   });
 
-  it('should handle 412 response (schema changed)', async () => {
+  it('should handle 412 response and retry successfully', async () => {
     // First upsert - populate cache
     nock('http://localhost:3000')
       .get('/collections/test-collection')
@@ -239,8 +239,12 @@ describe('ETag Validation', () => {
     // First call succeeds and caches schema
     await client.upsert('test-collection', points);
 
-    // Second upsert - schema changed on server
-    // Mock PUT with 412 response (no GET needed because vector schema is cached)
+    // Second upsert - server returns 412 (schema changed)
+    // The 412 handler will:
+    //   1. Clear both caches
+    //   2. getCachedPayloadSchema → GET /schema (404, caches null)
+    //   3. Retry: fetchAndCacheSchema → GET /collections (new version)
+    //   4. Retry: PUT → 200 (success)
     nock('http://localhost:3000')
       .put('/collections/test-collection/points')
       .reply(412, {
@@ -248,22 +252,9 @@ describe('ETag Validation', () => {
         code: 'SCHEMA_VERSION_MISMATCH',
       });
 
-    // The 412 handler clears caches and calls getCachedPayloadSchema internally.
-    // Mock the schema fetch that happens inside the 412 handler.
     nock('http://localhost:3000').get('/schema/test-collection').reply(404, {});
 
-    // This should throw ValidationError with schema changed message
-    try {
-      await client.upsert('test-collection', points);
-      throw new Error('Should have thrown ValidationError');
-    } catch (error) {
-      expect(error).toBeInstanceOf(ValidationError);
-      expect((error as Error).message).toMatch(/schema.*changed/i);
-      expect((error as Error).message).toContain('test-collection');
-    }
-
-    // Verify vector schema cache was cleared by checking next call fetches it again
-    const getScope2 = nock('http://localhost:3000')
+    nock('http://localhost:3000')
       .get('/collections/test-collection')
       .reply(200, {
         result: {
@@ -279,18 +270,22 @@ describe('ETag Validation', () => {
         schema_version: 'new-version',
       });
 
-    // Payload schema cache was populated by the 412 handler (cached null = no schema),
-    // so no GET /schema mock needed for this upsert.
-
     nock('http://localhost:3000')
       .put('/collections/test-collection/points')
       .reply(200, { success: true });
 
-    // This call should fetch schema again (because cache was cleared)
-    await client.upsert('test-collection', points);
+    // 412 handler retries with refreshed schema and succeeds
+    const result = await client.upsert('test-collection', points);
+    expect(result).toBe(true);
 
-    // Verify schema was fetched (should have 2 GET calls total now)
-    expect(getScope2.isDone()).toBe(true);
+    // Verify the new schema_version is cached: next upsert sends new If-Match
+    const putScope = nock('http://localhost:3000')
+      .put('/collections/test-collection/points')
+      .matchHeader('If-Match', 'new-version')
+      .reply(200, { success: true });
+
+    await client.upsert('test-collection', points);
+    expect(putScope.isDone()).toBe(true);
   });
 
   it('should clear cache for single collection', () => {
