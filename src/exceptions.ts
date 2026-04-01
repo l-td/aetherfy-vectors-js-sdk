@@ -360,11 +360,21 @@ export function createErrorFromResponse(
   statusText: string,
   requestId?: string
 ): AetherfyVectorsError {
+  // Normalise nested { "error": { "code": "...", "message": "..." } } vs flat formats
+  const nestedError =
+    responseData?.error !== null && typeof responseData?.error === 'object'
+      ? (responseData.error as Record<string, unknown>)
+      : undefined;
+  const errorCode = nestedError?.code as string | undefined;
+
   let message: string;
   try {
     const rawMessage =
+      nestedError?.message ||
       responseData?.message ||
-      responseData?.error ||
+      (typeof responseData?.error === 'string'
+        ? responseData.error
+        : undefined) ||
       statusText ||
       'Unknown error';
     if (typeof rawMessage === 'string') {
@@ -381,6 +391,14 @@ export function createErrorFromResponse(
 
   switch (status) {
     case 400:
+      if (errorCode === 'COLLECTION_LIMIT_EXCEEDED') {
+        return new QuotaExceededError(
+          message,
+          'collections',
+          nestedError?.current as number | undefined,
+          nestedError?.limit as number | undefined
+        );
+      }
       return new ValidationError(
         message,
         responseData?.field as string | undefined,
@@ -439,6 +457,14 @@ export function createErrorFromResponse(
     }
 
     case 429:
+      if (errorCode === 'STORAGE_LIMIT_EXCEEDED') {
+        return new QuotaExceededError(
+          message,
+          'storage',
+          nestedError?.current as number | undefined,
+          nestedError?.limit as number | undefined
+        );
+      }
       return new RateLimitExceededError(
         message,
         responseData?.retryAfter as number

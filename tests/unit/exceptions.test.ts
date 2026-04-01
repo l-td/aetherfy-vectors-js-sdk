@@ -351,6 +351,29 @@ describe('Custom Exceptions', () => {
       expect((error as RateLimitExceededError).retryAfter).toBe(30);
     });
 
+    it('should create QuotaExceededError for 429 with STORAGE_LIMIT_EXCEEDED code', () => {
+      const error = createErrorFromResponse(
+        {
+          error: {
+            code: 'STORAGE_LIMIT_EXCEEDED',
+            message: 'Storage limit exceeded. Your free plan allows 512 MB.',
+            current: 536870912,
+            limit: 536870912,
+          },
+        },
+        429,
+        'Too Many Requests'
+      );
+
+      expect(error).toBeInstanceOf(QuotaExceededError);
+      expect(error.message).toBe(
+        'Storage limit exceeded. Your free plan allows 512 MB.'
+      );
+      expect((error as QuotaExceededError).quotaType).toBe('storage');
+      expect((error as QuotaExceededError).current).toBe(536870912);
+      expect((error as QuotaExceededError).limit).toBe(536870912);
+    });
+
     it('should create ServiceUnavailableError for 503 status', () => {
       const error = createErrorFromResponse(
         { message: 'Service down' },
@@ -397,6 +420,30 @@ describe('Custom Exceptions', () => {
       expect((error as ConflictError).conflictingResource).toBe(
         'my-collection'
       );
+    });
+
+    it('should create QuotaExceededError for 400 with COLLECTION_LIMIT_EXCEEDED code', () => {
+      const error = createErrorFromResponse(
+        {
+          error: {
+            code: 'COLLECTION_LIMIT_EXCEEDED',
+            message:
+              'Collection limit reached. Your free plan allows 3 collections.',
+            current: 3,
+            limit: 3,
+          },
+        },
+        400,
+        'Bad Request'
+      );
+
+      expect(error).toBeInstanceOf(QuotaExceededError);
+      expect(error.message).toBe(
+        'Collection limit reached. Your free plan allows 3 collections.'
+      );
+      expect((error as QuotaExceededError).quotaType).toBe('collections');
+      expect((error as QuotaExceededError).current).toBe(3);
+      expect((error as QuotaExceededError).limit).toBe(3);
     });
 
     it('should create CollectionInUseError for 409 with COLLECTION_IN_USE code', () => {
