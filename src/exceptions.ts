@@ -498,10 +498,19 @@ export function isAetherfyVectorsError(
  * Type guard to check if an error is retryable
  */
 export function isRetryableError(error: unknown): boolean {
-  return (
+  if (
     error instanceof ServiceUnavailableError ||
     error instanceof RequestTimeoutError ||
     error instanceof NetworkError ||
     (error instanceof RateLimitExceededError && error.retryAfter !== undefined)
-  );
+  ) {
+    return true;
+  }
+  // The HTTP client layer throws plain Error objects with a 'Network error:' prefix
+  // for transient issues (ECONNRESET, ETIMEDOUT, timeout, etc.) before they can be
+  // converted to typed SDK errors by handleError. Treat those as retryable too.
+  if (error instanceof Error && error.message.startsWith('Network error:')) {
+    return true;
+  }
+  return false;
 }
