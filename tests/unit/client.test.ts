@@ -1018,17 +1018,21 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should handle createCollection errors', async () => {
+      jest.useFakeTimers();
+
       nock('https://vectors.aetherfy.com')
         .post('/collections')
         .times(4)
         .replyWithError(new Error('Connection failed'));
 
-      await expect(
-        client.createCollection('test-collection', {
-          size: 128,
-          distance: DistanceMetric.COSINE,
-        })
-      ).rejects.toThrow();
+      const promise = client.createCollection('test-collection', {
+        size: 128,
+        distance: DistanceMetric.COSINE,
+      });
+      await jest.runAllTimersAsync();
+      await expect(promise).rejects.toThrow();
+
+      jest.useRealTimers();
     });
 
     it('should handle invalid collection schema from server', async () => {
@@ -1196,6 +1200,8 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should handle upsert errors that are not 500 status', async () => {
+      jest.useFakeTimers();
+
       nock('https://vectors.aetherfy.com')
         .get('/collections/test-collection')
         .reply(200, {
@@ -1217,11 +1223,13 @@ describe('AetherfyVectorsClient', () => {
         .times(4)
         .replyWithError(new Error('Database connection failed'));
 
-      await expect(
-        client.upsert('test-collection', [
-          { id: '1', vector: [0.1, 0.2, 0.3], payload: {} },
-        ])
-      ).rejects.toThrow(NetworkError);
+      const promise = client.upsert('test-collection', [
+        { id: '1', vector: [0.1, 0.2, 0.3], payload: {} },
+      ]);
+      await jest.runAllTimersAsync();
+      await expect(promise).rejects.toThrow(NetworkError);
+
+      jest.useRealTimers();
     });
   });
 
