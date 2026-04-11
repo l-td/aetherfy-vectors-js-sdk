@@ -348,7 +348,14 @@ export class AetherfyVectorsClient {
     // Get vector schema (from cache or fetch)
     let schema = this.getCachedSchema(scopedName);
     if (!schema) {
-      schema = await this.fetchAndCacheSchema(scopedName);
+      try {
+        schema = await this.fetchAndCacheSchema(scopedName);
+      } catch (error: unknown) {
+        if (error instanceof AetherfyVectorsError) {
+          throw error;
+        }
+        throw this.handleError(error);
+      }
     }
 
     // Validate vector dimensions
