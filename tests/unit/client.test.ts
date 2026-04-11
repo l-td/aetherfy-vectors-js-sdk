@@ -1020,6 +1020,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle createCollection errors', async () => {
       nock('https://vectors.aetherfy.com')
         .post('/collections')
+        .times(4)
         .replyWithError(new Error('Connection failed'));
 
       await expect(
@@ -1213,6 +1214,7 @@ describe('AetherfyVectorsClient', () => {
 
       nock('https://vectors.aetherfy.com')
         .put('/collections/test-collection/points')
+        .times(4)
         .replyWithError(new Error('Database connection failed'));
 
       await expect(
