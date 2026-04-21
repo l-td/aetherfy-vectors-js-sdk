@@ -18,6 +18,8 @@ Global vector database with automatic replication and sub-50ms latency worldwide
 
 ## 🚀 Installation
 
+Requires Node.js **>= 20**. Ships CommonJS, ESM, and UMD browser builds with first-class TypeScript types.
+
 ```bash
 npm install aetherfy-vectors
 # or
@@ -170,7 +172,40 @@ await client.createCollection('my-global-collection', {
 });
 ```
 
-> **Tip:** Workspaces are created explicitly in the Aetherfy control plane before use (`afy workspaces create invoice-pipeline`). Agents deployed to a workspace automatically receive their workspace name via the `AETHERFY_WORKSPACE` environment variable.
+> **Tip:** Workspaces are created explicitly in the Aetherfy control plane before use (`afy workspaces create invoice-pipeline`). Agents deployed to a workspace automatically receive their workspace name via the `AETHERFY_WORKSPACE` environment variable. Pass `workspace: 'auto'` to opt into auto-detection.
+
+## 🧩 Payload Schemas
+
+Collections can carry an optional payload schema that the SDK validates against **before** upsert — catching malformed payloads client-side without a round trip. Schemas are cached and automatically revalidated when they change server-side (via ETag).
+
+```typescript
+import { Schema, EnforcementMode } from 'aetherfy-vectors';
+
+const schema: Schema = {
+  fields: {
+    title:   { type: 'string',  required: true },
+    price:   { type: 'float',   required: true },
+    tags:    { type: 'array',   required: false, elementType: 'string' },
+    inStock: { type: 'boolean', required: false },
+  },
+  description: 'Product catalog payloads',
+};
+
+// enforcement: 'off' (no validation), 'warn' (log warnings), 'strict' (throw on violation)
+const etag = await client.setSchema('products', schema, 'strict');
+
+const current = await client.getSchema('products'); // null if no schema is defined
+await client.deleteSchema('products');
+```
+
+### Infer a schema from existing data
+
+```typescript
+const analysis = await client.analyzeSchema('products', 1000); // sampleSize: 100–10000
+await client.setSchema('products', analysis.suggestedSchema, 'warn');
+```
+
+Schema violations throw `SchemaValidationError` with a detailed per-field errors array. If the server reports a stale schema (`412 Precondition Failed`), the SDK auto-refreshes the cache and retries. Use `refreshSchema(name)` or `clearSchemaCache(name?)` for manual control.
 
 ## 🔧 Core Operations
 
@@ -337,10 +372,22 @@ The SDK works in browsers with important security considerations:
 ```typescript
 import {
   AetherfyVectorsClient,
+  AetherfyVectorsError,      // base class — catch this for a generic fallback
   AuthenticationError,
   RateLimitExceededError,
   ValidationError,
   CollectionNotFoundError,
+  PointNotFoundError,
+  ServiceUnavailableError,
+  RequestTimeoutError,
+  NetworkError,
+  ConflictError,
+  CollectionInUseError,
+  QuotaExceededError,
+  SchemaNotFoundError,
+  SchemaValidationError,
+  isAetherfyVectorsError,
+  isRetryableError,
 } from 'aetherfy-vectors';
 
 try {
@@ -354,6 +401,12 @@ try {
     console.error('Invalid request:', error.message);
   } else if (error instanceof CollectionNotFoundError) {
     console.error(`Collection ${error.collectionName} not found`);
+  } else if (error instanceof SchemaValidationError) {
+    console.error('Schema violations:', error.details);
+  } else if (error instanceof QuotaExceededError) {
+    console.error(`Quota '${error.quotaType}' exceeded: ${error.current}/${error.limit}`);
+  } else if (isAetherfyVectorsError(error) && isRetryableError(error)) {
+    // Retry with backoff…
   }
 }
 ```
@@ -401,6 +454,14 @@ if (isBrowser()) {
 }
 ```
 
+### Resource Cleanup
+
+Long-lived processes (e.g. CLIs, tests) should close the underlying HTTP pool so Node can exit cleanly:
+
+```typescript
+client.destroy();
+```
+
 ## 📚 API Reference
 
 ### AetherfyVectorsClient
@@ -417,10 +478,17 @@ if (isBrowser()) {
 | `retrieve(collection, ids, options)`            | Get vectors by ID          | `Promise<Record<string, any>[]>` |
 | `search(collection, vector, options)`           | Similarity search          | `Promise<SearchResult[]>`        |
 | `count(collection, options)`                    | Count vectors              | `Promise<number>`                |
+| `getSchema(collection)`                         | Get payload schema         | `Promise<Schema \| null>`        |
+| `setSchema(collection, schema, mode?, desc?)`   | Define/update schema       | `Promise<string>` (ETag)         |
+| `deleteSchema(collection)`                      | Remove schema              | `Promise<boolean>`               |
+| `analyzeSchema(collection, sampleSize?)`        | Infer schema from data     | `Promise<AnalysisResult>`        |
+| `refreshSchema(collection)`                     | Force schema cache refresh | `Promise<void>`                  |
+| `clearSchemaCache(collection?)`                 | Clear schema cache         | `void`                           |
 | `getPerformanceAnalytics(timeRange, region)`    | Performance metrics        | `Promise<PerformanceAnalytics>`  |
 | `getCollectionAnalytics(collection, timeRange)` | Collection metrics         | `Promise<CollectionAnalytics>`   |
 | `getUsageStats()`                               | Account usage              | `Promise<UsageStats>`            |
 | `testConnection()`                              | Test API connection        | `Promise<boolean>`               |
+| `destroy()`                                     | Close HTTP connections     | `void`                           |
 
 ### Distance Metrics
 
