@@ -183,9 +183,9 @@ import { Schema, EnforcementMode } from 'aetherfy-vectors';
 
 const schema: Schema = {
   fields: {
-    title:   { type: 'string',  required: true },
-    price:   { type: 'float',   required: true },
-    tags:    { type: 'array',   required: false, elementType: 'string' },
+    title: { type: 'string', required: true },
+    price: { type: 'float', required: true },
+    tags: { type: 'array', required: false, elementType: 'string' },
     inStock: { type: 'boolean', required: false },
   },
   description: 'Product catalog payloads',
@@ -372,7 +372,7 @@ The SDK works in browsers with important security considerations:
 ```typescript
 import {
   AetherfyVectorsClient,
-  AetherfyVectorsError,      // base class — catch this for a generic fallback
+  AetherfyVectorsError, // base class — catch this for a generic fallback
   AuthenticationError,
   RateLimitExceededError,
   ValidationError,
@@ -404,7 +404,9 @@ try {
   } else if (error instanceof SchemaValidationError) {
     console.error('Schema violations:', error.details);
   } else if (error instanceof QuotaExceededError) {
-    console.error(`Quota '${error.quotaType}' exceeded: ${error.current}/${error.limit}`);
+    console.error(
+      `Quota '${error.quotaType}' exceeded: ${error.current}/${error.limit}`
+    );
   } else if (isAetherfyVectorsError(error) && isRetryableError(error)) {
     // Retry with backoff…
   }

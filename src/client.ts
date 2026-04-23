@@ -10,6 +10,8 @@ import {
   SearchOptions,
   RetrieveOptions,
   CountOptions,
+  ScrollOptions,
+  ScrollResult,
   Filter,
   PerformanceAnalytics,
   CollectionAnalytics,
@@ -89,7 +91,15 @@ export class AetherfyVectorsClient {
   private authManager: APIKeyManager;
   private analytics: AnalyticsClient;
   private endpoint: string;
-  private workspace?: string;
+  /**
+   * The active workspace, or `undefined` if workspace scoping is disabled.
+   * Set at construction time (either explicitly or via the
+   * AETHERFY_WORKSPACE env var when `workspace: 'auto'`). Read-only.
+   *
+   * Exposed so higher-level clients (e.g. MemoryClient) can surface the
+   * active workspace without reaching into internals.
+   */
+  readonly workspace?: string;
   private schemaCache: Map<
     string,
     { size: number; distance: string; etag: string }
@@ -640,6 +650,56 @@ export class AetherfyVectorsClient {
       );
 
       return response.data.result || [];
+    } catch (error: unknown) {
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Scroll through points in a collection (Qdrant-compatible pagination).
+   *
+   * Unlike `search`, scroll iterates over points without vector similarity —
+   * used for bulk reads, history fetches, and payload-filtered iteration.
+   *
+   * @param collectionName - Name of the collection
+   * @param options - Scroll options (limit, offset, filter, with_payload, with_vectors)
+   * @returns Promise resolving to `{ points, nextPageOffset }`
+   */
+  async scroll(
+    collectionName: string,
+    options: ScrollOptions = {}
+  ): Promise<ScrollResult> {
+    this.validateCollectionName(collectionName);
+
+    const scopedName = this.scopeCollection(collectionName);
+
+    const body: Record<string, unknown> = {
+      limit: options.limit ?? 10,
+      with_payload: options.withPayload ?? true,
+      with_vector: options.withVectors ?? false,
+    };
+    if (options.offset !== undefined) body.offset = options.offset;
+    if (options.scrollFilter) body.filter = options.scrollFilter;
+
+    try {
+      const response = await this.httpClient.post<{
+        result: {
+          points: ScrollResult['points'];
+          next_page_offset: string | number | null;
+        };
+      }>(
+        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/scroll`,
+        body
+      );
+
+      const result = response.data.result ?? {
+        points: [] as ScrollResult['points'],
+        next_page_offset: null,
+      };
+      return {
+        points: result.points ?? [],
+        nextPageOffset: result.next_page_offset ?? null,
+      };
     } catch (error: unknown) {
       throw this.handleError(error);
     }

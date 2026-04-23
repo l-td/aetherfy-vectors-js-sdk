@@ -156,6 +156,34 @@ export type {
 // Re-export HTTP client for advanced usage
 export { HttpClient } from './http/client';
 
+// ---------------------------------------------------------------------------
+// Memory SDK — agent-memory primitives layered on AetherfyVectorsClient.
+// ---------------------------------------------------------------------------
+export {
+  MemoryClient,
+  Namespace,
+  Thread,
+  DEFAULT_VECTOR_SIZE,
+  AetherfyMemoryError,
+  EmbeddingNotSupportedError,
+  InvalidNameError,
+  NamespaceAlreadyExistsError,
+  NamespaceNotFoundError,
+  ThreadAlreadyExistsError,
+  ThreadNotFoundError,
+} from './memory';
+export type {
+  Message,
+  MemoryClientConfig,
+  CreateScopeOptions,
+  NamespaceAddOptions,
+  NamespaceSearchOptions,
+  NamespaceRetrieveOptions,
+  NamespaceSetSchemaOptions,
+  ThreadAddOptions,
+  ThreadHistoryOptions,
+} from './memory';
+
 // Version information
 export const VERSION = '1.0.0';
 

@@ -190,6 +190,37 @@ export interface CountOptions {
 }
 
 /**
+ * Options for scroll operations (Qdrant-compatible pagination)
+ */
+export interface ScrollOptions {
+  /** Maximum points per page (default 10) */
+  limit?: number;
+  /** Pagination cursor returned by a previous scroll call */
+  offset?: string | number;
+  /** Payload filter conditions */
+  scrollFilter?: Filter;
+  /** Include payload in results (default true) */
+  withPayload?: boolean;
+  /** Include vectors in results (default false) */
+  withVectors?: boolean;
+}
+
+/**
+ * Result of a scroll operation.
+ *
+ * - `points`: points in this page
+ * - `nextPageOffset`: cursor for the next call, or `null` on the last page
+ */
+export interface ScrollResult {
+  points: Array<{
+    id: string | number;
+    vector?: number[];
+    payload?: Record<string, unknown>;
+  }>;
+  nextPageOffset: string | number | null;
+}
+
+/**
  * Batch operation result
  */
 export interface BatchResult {
