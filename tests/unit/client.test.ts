@@ -165,6 +165,137 @@ describe('AetherfyVectorsClient', () => {
       expect(result).toBe(true);
     });
 
+    it('createCollection prepopulates schemaCache from request body', async () => {
+      // Closes the create→read consistency window: backend's
+      // GET /collections/<name> hits Qdrant, which is eventually
+      // consistent w.r.t. its own writes, so a read immediately after
+      // a 2xx create can briefly return 4xx. Cache prepopulation
+      // routes the next collectionExists/upsert through local state.
+      nock('https://vectors.aetherfy.com')
+        .post('/collections')
+        .reply(201, { success: true });
+
+      await client.createCollection('fresh-coll', {
+        size: 384,
+        distance: DistanceMetric.COSINE,
+      });
+
+      // collectionExists must succeed *without* any GET being mocked.
+      // node-setup disables net connect, so an unmocked GET would throw
+      // — this is the load-bearing assertion: cache covered the call.
+      const exists = await client.collectionExists('fresh-coll');
+      expect(exists).toBe(true);
+    });
+
+    it('deleteCollection clears the schemaCache (subsequent exists hits the network)', async () => {
+      // Seed the cache via create...
+      nock('https://vectors.aetherfy.com')
+        .post('/collections')
+        .reply(201, { success: true });
+      await client.createCollection('doomed', {
+        size: 128,
+        distance: DistanceMetric.COSINE,
+      });
+
+      // ...then delete. Cache must be dropped so a fresh exists check
+      // actually hits the wire (otherwise a recreate-with-different-shape
+      // would silently use stale size/distance/etag).
+      nock('https://vectors.aetherfy.com')
+        .delete('/collections/doomed')
+        .reply(204);
+      await client.deleteCollection('doomed');
+
+      // Now collectionExists *must* make the GET. We mock it to return
+      // 404 so the call is observable AND the result is correct.
+      const scope = nock('https://vectors.aetherfy.com')
+        .get('/collections/doomed')
+        .reply(404, { message: 'Collection not found' });
+      const exists = await client.collectionExists('doomed');
+
+      expect(exists).toBe(false);
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('collectionExists fast-path returns true with no HTTP when cached', async () => {
+      // Direct cache seed — isolates the fast path from create_collection.
+      // node-setup's disableNetConnect ensures any HTTP attempt would throw.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (client as any).schemaCache.set('already-known', {
+        size: 128,
+        distance: 'Cosine',
+      });
+
+      const exists = await client.collectionExists('already-known');
+      expect(exists).toBe(true);
+    });
+
+    it('upsert 404 evicts both caches (self-healing after cross-client delete)', async () => {
+      // Pre-seed both caches as if a prior create/upsert had populated them.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const c = client as any;
+      c.schemaCache.set('ghost', { size: 4, distance: 'Cosine' });
+      c.payloadSchemaCache.set('ghost', {
+        schema: null,
+        enforcementMode: 'off',
+        etag: null,
+        description: null,
+      });
+
+      // The PUT /points returns 404 — the collection is gone upstream
+      // (e.g. cross-client delete). The SDK must drop the local caches
+      // so subsequent calls go back to the network.
+      nock('https://vectors.aetherfy.com')
+        .put('/collections/ghost/points')
+        .reply(404, { message: 'Collection not found' });
+
+      await expect(
+        client.upsert('ghost', [{ id: 'p1', vector: [0.1, 0.2, 0.3, 0.4] }])
+      ).rejects.toThrow();
+
+      expect(c.schemaCache.has('ghost')).toBe(false);
+      expect(c.payloadSchemaCache.has('ghost')).toBe(false);
+    });
+
+    it('getCollection 404 evicts both caches', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const c = client as any;
+      c.schemaCache.set('ghost', { size: 128, distance: 'Cosine' });
+      c.payloadSchemaCache.set('ghost', {
+        schema: null,
+        enforcementMode: 'off',
+        etag: null,
+        description: null,
+      });
+
+      nock('https://vectors.aetherfy.com')
+        .get('/collections/ghost')
+        .reply(404, { message: 'Collection not found' });
+
+      await expect(client.getCollection('ghost')).rejects.toThrow();
+
+      expect(c.schemaCache.has('ghost')).toBe(false);
+      expect(c.payloadSchemaCache.has('ghost')).toBe(false);
+    });
+
+    it('non-404 errors do NOT evict caches (transient failures preserve cache)', async () => {
+      // 503 is transient — the collection is still upstream. Wiping the
+      // cache here would force a needless round trip on the next call.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const c = client as any;
+      c.schemaCache.set('intact', { size: 4, distance: 'Cosine' });
+
+      nock('https://vectors.aetherfy.com')
+        .put('/collections/intact/points')
+        .reply(503, { message: 'Service Unavailable' });
+
+      await expect(
+        client.upsert('intact', [{ id: 'p1', vector: [0.1, 0.2, 0.3, 0.4] }])
+      ).rejects.toThrow();
+
+      // Cache survives the transient error.
+      expect(c.schemaCache.has('intact')).toBe(true);
+    });
+
     it('should get collection information', async () => {
       const mockCollection = {
         name: 'test-collection',
@@ -574,8 +705,13 @@ describe('AetherfyVectorsClient', () => {
         },
       ];
 
+      // Pinned URL — retrieve has its own dedicated endpoint now.
+      // Server-side, /points is unambiguously upsert (and stream-parsed),
+      // and /points/retrieve is the dedicated retrieve URL. An accidental
+      // revert to /points here would silently route retrieve through the
+      // streaming upsert path on the backend.
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points')
+        .post('/collections/test-collection/points/retrieve')
         .reply(200, { result: mockPoints });
 
       const result = await client.retrieve('test-collection', [
@@ -588,7 +724,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should retrieve points with custom options', async () => {
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points')
+        .post('/collections/test-collection/points/retrieve')
         .reply(200, { result: [] });
 
       await client.retrieve('test-collection', ['point1'], {
@@ -873,7 +1009,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle errors in retrieve operation', async () => {
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points')
+        .post('/collections/test-collection/points/retrieve')
         .reply(503, {
           message: 'Service unavailable',
           code: 'SERVICE_UNAVAILABLE',
@@ -1480,6 +1616,181 @@ describe('AetherfyVectorsClient', () => {
         await expect(
           client.analyzeSchema('test-collection', 10001)
         ).rejects.toThrow(ValidationError);
+      });
+
+      it('404 evicts both caches and re-throws (collection gone upstream)', async () => {
+        // Seed both caches as if the collection had been used before.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const c = client as any;
+        c.schemaCache.set('test-collection', { size: 4, distance: 'Cosine' });
+        c.payloadSchemaCache.set('test-collection', {
+          schema: null,
+          enforcementMode: 'off',
+          etag: null,
+          description: null,
+        });
+
+        nock('https://vectors.aetherfy.com')
+          .post('/schema/test-collection/analyze')
+          .reply(404, { message: 'Collection not found' });
+
+        await expect(
+          client.analyzeSchema('test-collection', 1000)
+        ).rejects.toThrow();
+
+        // Both caches dropped — uniform "404 → evict" semantics.
+        expect(c.schemaCache.has('test-collection')).toBe(false);
+        expect(c.payloadSchemaCache.has('test-collection')).toBe(false);
+      });
+    });
+
+    describe('setSchema 4xx eviction', () => {
+      it('404 evicts both caches and re-throws', async () => {
+        // PUT /schema/<name> on a non-existent collection 404s
+        // unambiguously; the catch path drops the local caches so
+        // a subsequent call doesn't keep believing the collection exists.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const c = client as any;
+        c.schemaCache.set('test-collection', { size: 4, distance: 'Cosine' });
+        c.payloadSchemaCache.set('test-collection', {
+          schema: null,
+          enforcementMode: 'off',
+          etag: null,
+          description: null,
+        });
+
+        nock('https://vectors.aetherfy.com')
+          .put('/schema/test-collection')
+          .reply(404, { message: 'Collection not found' });
+
+        await expect(
+          client.setSchema(
+            'test-collection',
+            { fields: { name: { type: 'string', required: false } } },
+            'off'
+          )
+        ).rejects.toThrow();
+
+        expect(c.schemaCache.has('test-collection')).toBe(false);
+        expect(c.payloadSchemaCache.has('test-collection')).toBe(false);
+      });
+    });
+
+    describe('schema 404 disambiguation', () => {
+      it('getSchema 404 with COLLECTION_NOT_FOUND evicts both caches', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const c = client as any;
+        c.schemaCache.set('test-collection', { size: 4, distance: 'Cosine' });
+        c.payloadSchemaCache.set('test-collection', {
+          schema: null,
+          enforcementMode: 'off',
+          etag: null,
+          description: null,
+        });
+
+        nock('https://vectors.aetherfy.com')
+          .get('/schema/test-collection')
+          .reply(404, {
+            error: { code: 'COLLECTION_NOT_FOUND', message: 'gone' },
+          });
+
+        const schema = await client.getSchema('test-collection');
+        expect(schema).toBeNull();
+        // Collection is gone — caches dropped.
+        expect(c.schemaCache.has('test-collection')).toBe(false);
+        expect(c.payloadSchemaCache.has('test-collection')).toBe(false);
+      });
+
+      it('getSchema 404 with SCHEMA_NOT_DEFINED keeps caches', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const c = client as any;
+        c.schemaCache.set('test-collection', { size: 4, distance: 'Cosine' });
+        c.payloadSchemaCache.set('test-collection', {
+          schema: null,
+          enforcementMode: 'off',
+          etag: null,
+          description: null,
+        });
+
+        nock('https://vectors.aetherfy.com')
+          .get('/schema/test-collection')
+          .reply(404, {
+            error: { code: 'SCHEMA_NOT_DEFINED', message: 'no schema set' },
+          });
+
+        const schema = await client.getSchema('test-collection');
+        expect(schema).toBeNull();
+        // Collection is fine, just no schema set — caches preserved.
+        expect(c.schemaCache.has('test-collection')).toBe(true);
+        expect(c.payloadSchemaCache.has('test-collection')).toBe(true);
+      });
+
+      it('deleteSchema 404 with COLLECTION_NOT_FOUND evicts and raises SchemaNotFoundError', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const c = client as any;
+        c.schemaCache.set('test-collection', { size: 4, distance: 'Cosine' });
+        c.payloadSchemaCache.set('test-collection', {
+          schema: null,
+          enforcementMode: 'off',
+          etag: null,
+          description: null,
+        });
+
+        nock('https://vectors.aetherfy.com')
+          .delete('/schema/test-collection')
+          .reply(404, {
+            error: { code: 'COLLECTION_NOT_FOUND', message: 'gone' },
+          });
+
+        await expect(client.deleteSchema('test-collection')).rejects.toThrow(
+          SchemaNotFoundError
+        );
+        expect(c.schemaCache.has('test-collection')).toBe(false);
+        expect(c.payloadSchemaCache.has('test-collection')).toBe(false);
+      });
+
+      it('deleteSchema 404 with SCHEMA_NOT_DEFINED keeps caches and raises SchemaNotFoundError', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const c = client as any;
+        c.schemaCache.set('test-collection', { size: 4, distance: 'Cosine' });
+        c.payloadSchemaCache.set('test-collection', {
+          schema: null,
+          enforcementMode: 'off',
+          etag: null,
+          description: null,
+        });
+
+        nock('https://vectors.aetherfy.com')
+          .delete('/schema/test-collection')
+          .reply(404, {
+            error: { code: 'SCHEMA_NOT_DEFINED', message: 'no schema set' },
+          });
+
+        await expect(client.deleteSchema('test-collection')).rejects.toThrow(
+          SchemaNotFoundError
+        );
+        // Caches preserved — collection is still around.
+        expect(c.schemaCache.has('test-collection')).toBe(true);
+        expect(c.payloadSchemaCache.has('test-collection')).toBe(true);
+      });
+    });
+
+    describe('upsert schema-fetch error path', () => {
+      it('non-AetherfyVectorsError from fetchAndCacheSchema is wrapped via handleError and re-thrown', async () => {
+        // The catch at upsert's schema-fetch site has two branches:
+        //   - error instanceof AetherfyVectorsError → re-throw as-is
+        //   - else → wrap via handleError and throw
+        // The else-branch covers raw network errors. We trigger it by
+        // forcing nock to error the GET with a non-HTTP failure.
+        nock('https://vectors.aetherfy.com')
+          .get('/collections/test-collection')
+          .replyWithError('socket hang up');
+
+        await expect(
+          client.upsert('test-collection', [
+            { id: 'p1', vector: [0.1, 0.2, 0.3, 0.4] },
+          ])
+        ).rejects.toThrow();
       });
     });
 

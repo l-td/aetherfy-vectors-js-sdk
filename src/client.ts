@@ -105,7 +105,7 @@ export class AetherfyVectorsClient {
   readonly workspace?: string;
   private schemaCache: Map<
     string,
-    { size: number; distance: string; etag: string }
+    { size: number; distance: string; etag?: string }
   >;
   private payloadSchemaCache: Map<string, SchemaData | null>;
 
@@ -213,7 +213,24 @@ export class AetherfyVectorsClient {
         })
       );
 
-      return response.status === 200 || response.status === 201;
+      const ok = response.status === 200 || response.status === 201;
+      if (ok) {
+        // Prepopulate the schema cache from the request we just authored.
+        // The backend's GET /collections/<name> hits Qdrant, which is
+        // eventually consistent w.r.t. its own writes — a read immediately
+        // after a successful create can briefly return 4xx. Seeding the
+        // cache here makes the next upsert/exists call hit local state
+        // instead of racing the read-after-write window. We have ground
+        // truth (size + distance) directly from the caller, so no extra
+        // network round trip is needed. etag stays undefined: upsert's
+        // `if (schema.etag)` guard treats it as "no If-Match header,"
+        // which is correct until a real GET assigns a schema_version.
+        this.schemaCache.set(scopedName, {
+          size: config.size,
+          distance: config.distance,
+        });
+      }
+      return ok;
     } catch (error: unknown) {
       throw this.handleError(error);
     }
@@ -235,8 +252,18 @@ export class AetherfyVectorsClient {
         `${this.endpoint}/collections/${encodeURIComponent(scopedName)}`
       );
 
-      return response.status === 200 || response.status === 204;
+      const ok = response.status === 200 || response.status === 204;
+      if (ok) {
+        // Drop both caches so a subsequent recreate-with-different-shape
+        // doesn't see stale size/distance/etag/payload-schema entries.
+        this.schemaCache.delete(scopedName);
+        this.payloadSchemaCache.delete(scopedName);
+      }
+      return ok;
     } catch (error: unknown) {
+      // Cover the "already gone" case (cross-client delete that beat us)
+      // so we don't leave stale entries when our DELETE hits a 404.
+      this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);
     }
   }
@@ -281,6 +308,17 @@ export class AetherfyVectorsClient {
 
     const scopedName = this.scopeCollection(collectionName);
 
+    // Fast path: if this client just created (or recently used) the
+    // collection, the schema cache holds proof of existence. Skip the
+    // network round trip and the read-after-write race against Qdrant's
+    // eventual consistency. deleteCollection() clears the cache, so a
+    // stale `true` after a remote delete is bounded to cross-client
+    // deletes only — and any subsequent operation will surface the real
+    // 404 from the backend.
+    if (this.getCachedSchema(scopedName) !== undefined) {
+      return true;
+    }
+
     try {
       await this.httpClient.get(
         `${this.endpoint}/collections/${encodeURIComponent(scopedName)}`
@@ -294,6 +332,10 @@ export class AetherfyVectorsClient {
       ) {
         const httpError = error as { status?: number; statusCode?: number };
         if (httpError.status === 404 || httpError.statusCode === 404) {
+          // No-op when cache is already empty (we got past the
+          // fast-path check above), but the call keeps the contract
+          // "collection-scoped 404 → caches dropped" uniform.
+          this.evictCachesIfNotFound(scopedName, error);
           return false;
         }
       }
@@ -325,6 +367,7 @@ export class AetherfyVectorsClient {
 
       return result;
     } catch (error: unknown) {
+      this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);
     }
   }
@@ -364,6 +407,10 @@ export class AetherfyVectorsClient {
       try {
         schema = await this.fetchAndCacheSchema(scopedName);
       } catch (error: unknown) {
+        // The schema GET is a collection-scoped read; a 404 here means
+        // the collection is gone (likely a cross-client delete), so
+        // self-heal both caches before re-throwing.
+        this.evictCachesIfNotFound(scopedName, error);
         if (error instanceof AetherfyVectorsError) {
           throw error;
         }
@@ -434,6 +481,11 @@ export class AetherfyVectorsClient {
 
       return response.status === 200;
     } catch (error: unknown) {
+      // Self-heal first: if the upstream returned 404, the collection
+      // is gone (cross-client delete). Drop both caches before the
+      // specific-status handlers below decide how to re-throw. No-op
+      // for any non-404 error.
+      this.evictCachesIfNotFound(scopedName, error);
       // Handle specific HTTP error statuses from HttpClient
       if (error && typeof error === 'object' && 'status' in error) {
         const httpError = error as {
@@ -564,6 +616,7 @@ export class AetherfyVectorsClient {
 
       return response.status === 200;
     } catch (error: unknown) {
+      this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);
     }
   }
@@ -603,6 +656,7 @@ export class AetherfyVectorsClient {
       );
       return response.data;
     } catch (error: unknown) {
+      this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);
     }
   }
@@ -630,6 +684,7 @@ export class AetherfyVectorsClient {
       );
       return response.data;
     } catch (error: unknown) {
+      this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);
     }
   }
@@ -657,6 +712,7 @@ export class AetherfyVectorsClient {
       );
       return response.data;
     } catch (error: unknown) {
+      this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);
     }
   }
@@ -683,10 +739,14 @@ export class AetherfyVectorsClient {
     }
 
     try {
+      // Dedicated retrieve URL — POST /collections/<name>/points was
+      // previously dual-purpose (upsert vs retrieve, distinguished by
+      // body shape). Backend now serves retrieve at /points/retrieve so
+      // /points can be unambiguously upsert (and stream-parsed).
       const response = await this.httpClient.post<{
         result: Point[];
       }>(
-        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points`,
+        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/retrieve`,
         {
           ids,
           with_payload: options.withPayload ?? true,
@@ -696,6 +756,7 @@ export class AetherfyVectorsClient {
 
       return response.data.result || [];
     } catch (error: unknown) {
+      this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);
     }
   }
@@ -747,6 +808,7 @@ export class AetherfyVectorsClient {
 
       return response.data.result || [];
     } catch (error: unknown) {
+      this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);
     }
   }
@@ -797,6 +859,7 @@ export class AetherfyVectorsClient {
         nextPageOffset: result.next_page_offset ?? null,
       };
     } catch (error: unknown) {
+      this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);
     }
   }
@@ -901,6 +964,7 @@ export class AetherfyVectorsClient {
 
       return response.data.result.count;
     } catch (error: unknown) {
+      this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);
     }
   }
@@ -987,9 +1051,60 @@ export class AetherfyVectorsClient {
 
   // Private helper methods
 
+  /**
+   * Self-healing: drop both caches for a collection iff the error is HTTP 404.
+   *
+   * A 404 on a collection-scoped op means the collection is gone upstream
+   * (cross-client delete or never existed). Without eviction, the local
+   * caches keep lying — collectionExists() returns true forever, and
+   * every subsequent op re-pays the 404. Calling this in catch blocks
+   * before rethrowing is enough: the next call goes back to the network
+   * and gets the truth.
+   *
+   * Don't call this on /schema/<name> 404s — there, 404 also covers the
+   * legitimate "no payload schema set" state on an existing collection.
+   */
+  private evictCachesIfNotFound(scopedName: string, error: unknown): void {
+    if (
+      error &&
+      typeof error === 'object' &&
+      ('status' in error || 'statusCode' in error)
+    ) {
+      const httpError = error as { status?: number; statusCode?: number };
+      if (httpError.status === 404 || httpError.statusCode === 404) {
+        this.schemaCache.delete(scopedName);
+        this.payloadSchemaCache.delete(scopedName);
+      }
+    }
+  }
+
+  /**
+   * Pull error.code out of an HttpClient-thrown error.
+   *
+   * The backend uses two response shapes:
+   *   - nested:  { error: { code, message } }
+   *   - flat:    { error_code, message }
+   * HttpClient stashes the parsed body on error.responseData. Both
+   * shapes are checked here so SDK code can read the code without
+   * caring which one the backend produced for a given path.
+   *
+   * Used to disambiguate /schema/<name> 404s where the same status
+   * covers two cases (collection gone vs. no schema set).
+   */
+  private errorCodeOf(error: unknown): string | undefined {
+    if (!error || typeof error !== 'object') return undefined;
+    const data = (error as { responseData?: Record<string, unknown> })
+      .responseData;
+    if (!data || typeof data !== 'object') return undefined;
+    const nested = (data.error as { code?: string } | undefined)?.code;
+    if (nested) return nested;
+    const flat = data.error_code as string | undefined;
+    return flat;
+  }
+
   private getCachedSchema(
     collectionName: string
-  ): { size: number; distance: string; etag: string } | undefined {
+  ): { size: number; distance: string; etag?: string } | undefined {
     return this.schemaCache.get(collectionName);
   }
 
@@ -1245,6 +1360,17 @@ export class AetherfyVectorsClient {
         'status' in error &&
         error.status === 404
       ) {
+        // Backend disambiguates the two 404 cases via error.code:
+        //   COLLECTION_NOT_FOUND → collection is gone, evict caches
+        //   SCHEMA_NOT_DEFINED → collection exists but no schema (legit)
+        // Without the code (older backend or unstructured body) we
+        // treat 404 as "no schema set" without evicting, matching the
+        // pre-disambiguation behavior. Eviction only fires when the
+        // backend explicitly tells us the collection is gone.
+        if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
+          this.schemaCache.delete(scopedName);
+          this.payloadSchemaCache.delete(scopedName);
+        }
         return null;
       }
       throw this.handleError(error);
@@ -1287,10 +1413,19 @@ export class AetherfyVectorsClient {
       body.description = description;
     }
 
-    const response = await this.httpClient.put(
-      `${this.endpoint}/schema/${encodeURIComponent(scopedName)}`,
-      body
-    );
+    let response;
+    try {
+      response = await this.httpClient.put(
+        `${this.endpoint}/schema/${encodeURIComponent(scopedName)}`,
+        body
+      );
+    } catch (error: unknown) {
+      // PUT /schema/<name> on a non-existent collection 404s
+      // unambiguously (the schema endpoint requires the collection),
+      // so a 404 here means the collection is gone — self-heal.
+      this.evictCachesIfNotFound(scopedName, error);
+      throw error;
+    }
 
     const data = response.data as { etag: string };
 
@@ -1333,6 +1468,15 @@ export class AetherfyVectorsClient {
         'status' in error &&
         error.status === 404
       ) {
+        // Disambiguate via backend's error.code:
+        //   COLLECTION_NOT_FOUND → collection is gone, evict caches.
+        //   SCHEMA_NOT_DEFINED → collection exists, no schema set.
+        // Both surface as SchemaNotFoundError to the caller — the
+        // difference is whether we self-heal the local caches.
+        if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
+          this.schemaCache.delete(scopedName);
+          this.payloadSchemaCache.delete(scopedName);
+        }
         throw new SchemaNotFoundError(collectionName);
       }
       throw this.handleError(error);
@@ -1370,10 +1514,16 @@ export class AetherfyVectorsClient {
 
     const scopedName = this.scopeCollection(collectionName);
 
-    const response = await this.httpClient.post(
-      `${this.endpoint}/schema/${encodeURIComponent(scopedName)}/analyze`,
-      { sample_size: sampleSize }
-    );
+    let response;
+    try {
+      response = await this.httpClient.post(
+        `${this.endpoint}/schema/${encodeURIComponent(scopedName)}/analyze`,
+        { sample_size: sampleSize }
+      );
+    } catch (error: unknown) {
+      this.evictCachesIfNotFound(scopedName, error);
+      throw error;
+    }
 
     const data = response.data as {
       collection: string;
