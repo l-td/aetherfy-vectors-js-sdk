@@ -36,6 +36,7 @@ import {
   isRetryableError,
 } from './exceptions';
 import { retryWithBackoff, validatePointId } from './utils';
+import { assertAllowedOptionKeys } from './utils/options';
 import { validateVectors } from './schema';
 
 /**
@@ -832,6 +833,17 @@ export class AetherfyVectorsClient {
     collectionName: string,
     options: ScrollIterOptions = {}
   ): AsyncGenerator<ScrollPoint, void, undefined> {
+    // Runtime kwarg allowlist — mirrors Python's no-**kwargs contract so
+    // `as any` casts and untyped JS callers can't silently ignore unknown
+    // options (e.g. `{ batchSize: 256, limit: 100 }` would otherwise page
+    // at 256 with `limit` dropped).
+    assertAllowedOptionKeys(
+      options as Record<string, unknown>,
+      ['batchSize', 'scrollFilter', 'withPayload', 'withVectors'],
+      'scrollIter',
+      'Pass batchSize to control page size; limit and offset are owned by the iterator.'
+    );
+
     const {
       batchSize = 256,
       scrollFilter,

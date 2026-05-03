@@ -106,4 +106,15 @@ describe('Thread.iterHistory', () => {
     expect(client.scrollIter).toHaveBeenCalledTimes(1);
     expect(client.scroll).not.toHaveBeenCalled();
   });
+
+  it('rejects { batchSize: 100 } as any — runtime kwarg allowlist (only `order` allowed)', async () => {
+    const { th, client } = makeThread();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const gen = th.iterHistory({ batchSize: 100 } as any);
+    const err = await gen.next().catch(e => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/Thread\.iterHistory:/);
+    expect((err as Error).message).toMatch(/batchSize/);
+    expect(client.scrollIter).not.toHaveBeenCalled();
+  });
 });

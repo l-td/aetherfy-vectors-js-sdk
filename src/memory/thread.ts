@@ -10,6 +10,7 @@
  */
 
 import { AetherfyVectorsClient } from '../client';
+import { assertAllowedOptionKeys } from '../utils/options';
 import { EmbeddingNotSupportedError } from './errors';
 import { generateId, Message, messageFromPoint } from './models';
 import { Namespace } from './namespace';
@@ -137,6 +138,12 @@ export class Thread extends Namespace {
   async *iterHistory(
     options: { order?: 'asc' | 'desc' } = {}
   ): AsyncGenerator<Message, void, undefined> {
+    assertAllowedOptionKeys(
+      options as Record<string, unknown>,
+      ['order'],
+      'Thread.iterHistory',
+      'iterHistory walks the entire thread; pass order to control sort direction.'
+    );
     const order = options.order ?? 'asc';
     if (order !== 'asc' && order !== 'desc') {
       throw new Error("order must be 'asc' or 'desc'");

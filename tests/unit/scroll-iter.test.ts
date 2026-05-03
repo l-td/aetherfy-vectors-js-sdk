@@ -133,4 +133,27 @@ describe('AetherfyVectorsClient.scrollIter', () => {
 
     expect(scrollSpy.mock.calls[0][1]).toMatchObject({ limit: 256 });
   });
+
+  it('rejects { limit: 100 } as any — runtime kwarg allowlist', async () => {
+    const client = makeClient();
+    const scrollSpy = jest.spyOn(client, 'scroll');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const gen = client.scrollIter('col', { limit: 100 } as any);
+    const err = await gen.next().catch(e => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/scrollIter:/);
+    expect((err as Error).message).toMatch(/limit/);
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects { offset: "x" } as any — runtime kwarg allowlist', async () => {
+    const client = makeClient();
+    const scrollSpy = jest.spyOn(client, 'scroll');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const gen = client.scrollIter('col', { offset: 'x' } as any);
+    const err = await gen.next().catch(e => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/offset/);
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
 });

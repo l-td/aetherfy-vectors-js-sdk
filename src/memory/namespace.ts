@@ -21,6 +21,7 @@ import {
   ScrollPoint,
   SearchResult,
 } from '../models';
+import { assertAllowedOptionKeys } from '../utils/options';
 import { EmbeddingNotSupportedError } from './errors';
 import { generateId } from './models';
 
@@ -172,6 +173,12 @@ export class Namespace {
   async *iter(
     options: NamespaceIterOptions = {}
   ): AsyncGenerator<ScrollPoint, void, undefined> {
+    assertAllowedOptionKeys(
+      options as Record<string, unknown>,
+      ['batchSize', 'filter', 'withPayload', 'withVectors'],
+      'Namespace.iter',
+      'Pass batchSize to control page size; limit and offset are owned by the iterator.'
+    );
     yield* this.client.scrollIter(this.collection, {
       batchSize: options.batchSize,
       scrollFilter: options.filter,

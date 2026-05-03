@@ -92,4 +92,15 @@ describe('Namespace.iter', () => {
       withVectors: true,
     });
   });
+
+  it('rejects { limit: 50 } as any — runtime kwarg allowlist', async () => {
+    const { ns, client } = makeNamespace();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const gen = ns.iter({ limit: 50 } as any);
+    const err = await gen.next().catch(e => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/Namespace\.iter:/);
+    expect((err as Error).message).toMatch(/limit/);
+    expect(client.scrollIter).not.toHaveBeenCalled();
+  });
 });
