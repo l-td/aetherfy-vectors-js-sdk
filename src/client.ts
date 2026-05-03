@@ -12,6 +12,8 @@ import {
   CountOptions,
   ScrollOptions,
   ScrollResult,
+  ScrollPoint,
+  ScrollIterOptions,
   Filter,
   PerformanceAnalytics,
   CollectionAnalytics,
@@ -33,7 +35,7 @@ import {
   createErrorFromResponse,
   isRetryableError,
 } from './exceptions';
-import { retryWithBackoff } from './utils';
+import { retryWithBackoff, validatePointId } from './utils';
 import { validateVectors } from './schema';
 
 /**
@@ -565,6 +567,99 @@ export class AetherfyVectorsClient {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // Payload mutation
+  //
+  // Three helpers correspond to the three Qdrant payload endpoints exposed
+  // by the backend (and the dashboard's WS3 proxies). Server-side caps:
+  // body.points.length <= 512 (PRS limit, vectordb WS1).
+  // ---------------------------------------------------------------------
+
+  /**
+   * Set (additive merge) payload keys on a list of points.
+   *
+   * POST /collections/{name}/points/payload — keys not on the point are
+   * added; keys that already exist are overwritten with the new value;
+   * keys present on the point but not in `payload` are left untouched.
+   *
+   * @param collectionName - Target collection.
+   * @param payload - Payload object to merge into each point's payload.
+   * @param points - Point IDs to update. Server caps at 512.
+   */
+  async setPayload(
+    collectionName: string,
+    payload: Record<string, unknown>,
+    points: Array<string | number>
+  ): Promise<unknown> {
+    this.validateCollectionName(collectionName);
+    points.forEach(validatePointId);
+    const scopedName = this.scopeCollection(collectionName);
+
+    try {
+      const response = await this.httpClient.post(
+        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/payload`,
+        { payload, points }
+      );
+      return response.data;
+    } catch (error: unknown) {
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Replace the entire payload on a list of points.
+   *
+   * PUT /collections/{name}/points/payload — keys present on the point but
+   * absent from `payload` are REMOVED. Use this when the payload should be
+   * exactly `payload` after the call.
+   */
+  async overwritePayload(
+    collectionName: string,
+    payload: Record<string, unknown>,
+    points: Array<string | number>
+  ): Promise<unknown> {
+    this.validateCollectionName(collectionName);
+    points.forEach(validatePointId);
+    const scopedName = this.scopeCollection(collectionName);
+
+    try {
+      const response = await this.httpClient.put(
+        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/payload`,
+        { payload, points }
+      );
+      return response.data;
+    } catch (error: unknown) {
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Delete specific payload keys from a list of points.
+   *
+   * DELETE /collections/{name}/points/payload — only the named keys are
+   * removed; other keys on each point's payload are preserved. Requires
+   * the HttpClient.delete() body parameter (extended in this commit).
+   */
+  async deletePayload(
+    collectionName: string,
+    keys: string[],
+    points: Array<string | number>
+  ): Promise<unknown> {
+    this.validateCollectionName(collectionName);
+    points.forEach(validatePointId);
+    const scopedName = this.scopeCollection(collectionName);
+
+    try {
+      const response = await this.httpClient.delete(
+        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/payload`,
+        { keys, points }
+      );
+      return response.data;
+    } catch (error: unknown) {
+      throw this.handleError(error);
+    }
+  }
+
   /**
    * Retrieve points by their IDs
    *
@@ -702,6 +797,67 @@ export class AetherfyVectorsClient {
       };
     } catch (error: unknown) {
       throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Auto-paginating scroll. Yields each point one at a time, fetches the
+   * next page transparently, stops when nextPageOffset is null.
+   *
+   * Why this exists: `scroll()` is single-shot. Without this, callers reach
+   * for `scroll({ limit: very_large })` which (a) blows past the server-side
+   * 1000-point cap, (b) creates a 10MB+ response that hits the
+   * RESPONSE_TOO_LARGE 413 from the backend, and (c) loads everything into
+   * memory at once. The iterator gives them a paging helper that's correct
+   * by default.
+   *
+   * `limit` and `offset` are not exposed — they're owned by the iterator.
+   * Callers control page size via `batchSize`. TypeScript's options type
+   * enforces the kwarg allowlist at compile time.
+   *
+   * @param collectionName - Collection to iterate.
+   * @param options - Iteration options. `batchSize` defaults to 256
+   *   (server cap 1000). Pass `scrollFilter`, `withPayload`, `withVectors`
+   *   as for `scroll()`.
+   * @returns AsyncGenerator yielding each point in order.
+   *
+   * @example
+   * ```typescript
+   * for await (const point of client.scrollIter('my-col', { batchSize: 128 })) {
+   *   console.log(point.id);
+   * }
+   * ```
+   */
+  async *scrollIter(
+    collectionName: string,
+    options: ScrollIterOptions = {}
+  ): AsyncGenerator<ScrollPoint, void, undefined> {
+    const {
+      batchSize = 256,
+      scrollFilter,
+      withPayload = true,
+      withVectors = false,
+    } = options;
+    if (!(batchSize >= 1 && batchSize <= 1000)) {
+      throw new RangeError(
+        `batchSize must be 1-1000 (server cap), got ${batchSize}`
+      );
+    }
+
+    let cursor: string | number | undefined = undefined;
+    while (true) {
+      const page = await this.scroll(collectionName, {
+        limit: batchSize,
+        offset: cursor,
+        scrollFilter,
+        withPayload,
+        withVectors,
+      });
+      for (const point of page.points) {
+        yield point;
+      }
+      if (page.nextPageOffset == null) return;
+      cursor = page.nextPageOffset;
     }
   }
 

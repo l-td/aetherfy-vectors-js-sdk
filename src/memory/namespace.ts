@@ -18,10 +18,22 @@ import {
   Filter,
   Point,
   Schema,
+  ScrollPoint,
   SearchResult,
 } from '../models';
 import { EmbeddingNotSupportedError } from './errors';
 import { generateId } from './models';
+
+export interface NamespaceIterOptions {
+  /** Points per server round-trip. Default 256, server cap 1000. */
+  batchSize?: number;
+  /** Optional payload filter, same shape as `search`. */
+  filter?: Filter;
+  /** Include payload in results (default true). */
+  withPayload?: boolean;
+  /** Include vectors in results (default false; large). */
+  withVectors?: boolean;
+}
 
 /** Parameters for adding a memory to a Namespace. */
 export interface NamespaceAddOptions {
@@ -88,6 +100,30 @@ export class Namespace {
     return pointId;
   }
 
+  /**
+   * Replace the metadata sub-key of an existing memory.
+   *
+   * Atomically writes `payload.metadata = metadata`. Reserved fields
+   * (`text` for Namespace, plus `role`/`content`/`ts` for Thread) are
+   * untouched. To merge into existing metadata, retrieve + merge +
+   * setMetadata explicitly:
+   *
+   * ```ts
+   * const [point] = await ns.retrieve([id]);
+   * const current = (point?.payload?.metadata ?? {}) as Record<string, unknown>;
+   * await ns.setMetadata(id, { ...current, reviewed: true });
+   * ```
+   *
+   * The non-atomic compose pattern is intentional — it keeps races visible
+   * at the call site rather than hidden inside an SDK helper.
+   */
+  async setMetadata(
+    id: string | number,
+    metadata: Record<string, unknown>
+  ): Promise<unknown> {
+    return this.client.setPayload(this.collection, { metadata }, [id]);
+  }
+
   // -------------------------------------------------------------------
   // Read
   // -------------------------------------------------------------------
@@ -122,6 +158,25 @@ export class Namespace {
     return this.client.count(this.collection, {
       countFilter: options.filter,
       exact: options.exact,
+    });
+  }
+
+  /**
+   * Iterate all points in this namespace.
+   *
+   * Yields each point one at a time, paging transparently through the
+   * underlying scrollIter. Returns cleanly when the namespace is exhausted.
+   * Use this for archival, export, or batch-enrichment workflows that
+   * exceed what `search` and `retrieve` cover.
+   */
+  async *iter(
+    options: NamespaceIterOptions = {}
+  ): AsyncGenerator<ScrollPoint, void, undefined> {
+    yield* this.client.scrollIter(this.collection, {
+      batchSize: options.batchSize,
+      scrollFilter: options.filter,
+      withPayload: options.withPayload,
+      withVectors: options.withVectors,
     });
   }
 

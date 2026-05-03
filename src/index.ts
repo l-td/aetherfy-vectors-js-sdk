@@ -51,6 +51,8 @@ export {
   SearchOptions,
   RetrieveOptions,
   CountOptions,
+  ScrollIterOptions,
+  ScrollPoint,
   ClientConfig,
 
   // Analytics interfaces
@@ -180,6 +182,7 @@ export type {
   NamespaceSearchOptions,
   NamespaceRetrieveOptions,
   NamespaceSetSchemaOptions,
+  NamespaceIterOptions,
   ThreadAddOptions,
   ThreadHistoryOptions,
 } from './memory';

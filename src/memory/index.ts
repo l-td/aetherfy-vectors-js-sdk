@@ -39,6 +39,7 @@ export type {
   NamespaceSearchOptions,
   NamespaceRetrieveOptions,
   NamespaceSetSchemaOptions,
+  NamespaceIterOptions,
 } from './namespace';
 
 export { Thread } from './thread';

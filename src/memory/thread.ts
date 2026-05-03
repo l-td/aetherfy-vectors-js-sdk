@@ -124,4 +124,39 @@ export class Thread extends Namespace {
 
     return messages.slice(0, limit);
   }
+
+  /**
+   * Iterate all messages in this thread, sorted by timestamp.
+   *
+   * Unlike `history({ limit })` which caps at 5000 for the client-side
+   * sort, `iterHistory()` walks the entire thread by paging through the
+   * underlying scroll iterator and sorting in memory. For threads larger
+   * than 5000 messages the in-memory sort can be expensive; use
+   * `history({ limit })` if you only need the most recent slice.
+   */
+  async *iterHistory(
+    options: { order?: 'asc' | 'desc' } = {}
+  ): AsyncGenerator<Message, void, undefined> {
+    const order = options.order ?? 'asc';
+    if (order !== 'asc' && order !== 'desc') {
+      throw new Error("order must be 'asc' or 'desc'");
+    }
+
+    // Reuse Namespace.iter for paging — same scrollIter under the hood.
+    // Skip points without payload or without ts (matches history()).
+    const messages: Message[] = [];
+    for await (const point of this.iter({
+      withPayload: true,
+      withVectors: false,
+    })) {
+      const msg = messageFromPoint(point);
+      if (msg) messages.push(msg);
+    }
+
+    messages.sort((a, b) => (order === 'asc' ? a.ts - b.ts : b.ts - a.ts));
+
+    for (const msg of messages) {
+      yield msg;
+    }
+  }
 }

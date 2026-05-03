@@ -206,18 +206,41 @@ export interface ScrollOptions {
 }
 
 /**
+ * A point as returned by scroll operations. Distinct from `Point` because
+ * `vector` and `payload` are optional — the caller controls whether they
+ * come back via the with_vectors / with_payload flags.
+ */
+export interface ScrollPoint {
+  id: string | number;
+  vector?: number[];
+  payload?: Record<string, unknown>;
+}
+
+/**
  * Result of a scroll operation.
  *
  * - `points`: points in this page
  * - `nextPageOffset`: cursor for the next call, or `null` on the last page
  */
 export interface ScrollResult {
-  points: Array<{
-    id: string | number;
-    vector?: number[];
-    payload?: Record<string, unknown>;
-  }>;
+  points: ScrollPoint[];
   nextPageOffset: string | number | null;
+}
+
+/**
+ * Options for the auto-paginating scrollIter() generator. Shape matches
+ * `ScrollOptions` minus `limit` and `offset` (both owned by the iterator);
+ * `batchSize` controls the per-page fetch.
+ */
+export interface ScrollIterOptions {
+  /** Points per server round-trip. Default 256, server cap 1000. */
+  batchSize?: number;
+  /** Payload filter conditions, same shape as scroll's `scrollFilter`. */
+  scrollFilter?: Filter;
+  /** Include payload in results (default true). */
+  withPayload?: boolean;
+  /** Include vectors in results (default false). */
+  withVectors?: boolean;
 }
 
 /**

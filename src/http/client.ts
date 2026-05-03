@@ -222,13 +222,17 @@ export class HttpClient {
   }
 
   /**
-   * DELETE request helper
+   * DELETE request helper. Accepts an optional body — the vectordb backend
+   * ships endpoints (e.g. /points/payload) where DELETE carries the keys to
+   * remove plus the points to remove them from. Browsers and Node both
+   * support DELETE-with-body; axios passes it through `data`.
    */
   async delete<T>(
     url: string,
+    body?: unknown,
     headers?: Record<string, string>
   ): Promise<HttpResponse<T>> {
-    return this.request<T>({ url, method: 'DELETE', headers });
+    return this.request<T>({ url, method: 'DELETE', body, headers });
   }
 
   /**
