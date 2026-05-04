@@ -622,20 +622,12 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should validate points array is not empty', async () => {
+      // Only empty-array is rejected client-side. The backend's
+      // streaming-parser count cap is the single source of truth; the
+      // SDK does not duplicate it. Mirrors Python SDK's posture.
       await expect(client.upsert('test-collection', [])).rejects.toThrow(
         'Points array cannot be empty'
       );
-    });
-
-    it('should validate batch size limit', async () => {
-      const largePointsArray = Array(1001).fill({
-        id: 'point1',
-        vector: [0.1, 0.2, 0.3],
-      });
-
-      await expect(
-        client.upsert('test-collection', largePointsArray)
-      ).rejects.toThrow('Batch size cannot exceed 1000 points');
     });
 
     it('should validate point has vector array', async () => {
@@ -723,8 +715,20 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should retrieve points with custom options', async () => {
+      // Body-shape pin: caller-facing option is withVectors (plural,
+      // camelCase) but the wire field is with_vector (singular). The
+      // dedicated /points/retrieve route reads body.with_vector strictly;
+      // a typo'd plural silently dropped vectors from the response.
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points/retrieve')
+        .post('/collections/test-collection/points/retrieve', body => {
+          return (
+            Array.isArray(body.ids) &&
+            body.ids[0] === 'point1' &&
+            body.with_payload === false &&
+            body.with_vector === true &&
+            !('with_vectors' in body)
+          );
+        })
         .reply(200, { result: [] });
 
       await client.retrieve('test-collection', ['point1'], {

@@ -3,7 +3,7 @@
  *
  * Pins:
  *   - Delegates to scroll() (no duplicate HTTP path).
- *   - batchSize is range-validated (1..1000, server cap from vectordb WS1).
+ *   - batchSize is range-validated (1..1000, the server's scroll cap).
  *   - Generator stops cleanly when nextPageOffset becomes null.
  *   - TypeScript typing enforces the kwarg allowlist; runtime tests confirm
  *     limit/offset are not accepted (covered by compile-time checking, not

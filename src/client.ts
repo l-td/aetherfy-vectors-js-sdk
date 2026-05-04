@@ -624,9 +624,8 @@ export class AetherfyVectorsClient {
   // ---------------------------------------------------------------------
   // Payload mutation
   //
-  // Three helpers correspond to the three Qdrant payload endpoints exposed
-  // by the backend (and the dashboard's WS3 proxies). Server-side caps:
-  // body.points.length <= 512 (PRS limit, vectordb WS1).
+  // Three helpers correspond to the three Qdrant payload endpoints
+  // exposed by the backend. Server-side cap: body.points.length <= 512.
   // ---------------------------------------------------------------------
 
   /**
@@ -692,9 +691,8 @@ export class AetherfyVectorsClient {
   /**
    * Delete specific payload keys from a list of points.
    *
-   * DELETE /collections/{name}/points/payload — only the named keys are
-   * removed; other keys on each point's payload are preserved. Requires
-   * the HttpClient.delete() body parameter (extended in this commit).
+   * POST /collections/{name}/points/payload/delete — only the named keys
+   * are removed; other keys on each point's payload are preserved.
    */
   async deletePayload(
     collectionName: string,
@@ -706,8 +704,11 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.httpClient.delete(
-        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/payload`,
+      // Qdrant's URL is POST /points/payload/delete (not DELETE
+      // /points/payload). Match the upstream contract directly so the
+      // proxy has nothing to translate.
+      const response = await this.httpClient.post(
+        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/payload/delete`,
         { keys, points }
       );
       return response.data;
@@ -750,7 +751,11 @@ export class AetherfyVectorsClient {
         {
           ids,
           with_payload: options.withPayload ?? true,
-          with_vectors: options.withVectors ?? false,
+          // Qdrant's wire field is singular; matches Python SDK at
+          // aetherfy_vectors/client.py (with_vectors caller arg →
+          // with_vector body field). The dedicated /points/retrieve
+          // route reads body.with_vector strictly.
+          with_vector: options.withVectors ?? false,
         }
       );
 
@@ -1186,9 +1191,10 @@ export class AetherfyVectorsClient {
       throw new ValidationError('Points array cannot be empty');
     }
 
-    if (points.length > 1000) {
-      throw new ValidationError('Batch size cannot exceed 1000 points');
-    }
+    // No client-side count cap. The backend (streamingPointsParser
+    // DEFAULT_MAX_POINTS, proxy validator) is the authority — duplicating
+    // the cap here just creates two-place truth that drifts. Matches the
+    // Python SDK's posture (aetherfy_vectors/client.py#upsert).
   }
 
   private normalizeVectorConfig(

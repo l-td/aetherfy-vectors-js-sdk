@@ -2,7 +2,7 @@
  * Unit tests for client.setPayload / overwritePayload / deletePayload.
  *
  * Pins:
- *   - HTTP method + path + body shape match the WS3 dashboard proxies.
+ *   - HTTP method + path + body shape match the backend's payload endpoints.
  *   - Validators (collection name, point IDs) fire before the request.
  *   - HttpClient.delete() carries a body — extended in this commit.
  */
@@ -94,13 +94,11 @@ describe('AetherfyVectorsClient payload methods', () => {
   });
 
   describe('deletePayload', () => {
-    it('DELETEs to /points/payload with { keys, points } in the body', async () => {
+    it('POSTs to /points/payload/delete with { keys, points } in the body', async () => {
       const client = makeClient();
 
-      // The DELETE body extension is the production-grade fix this commit
-      // introduces. nock matches the DELETE method + body together.
       nock(ENDPOINT)
-        .delete('/collections/col/points/payload', {
+        .post('/collections/col/points/payload/delete', {
           keys: ['old_tag', 'old_meta'],
           points: ['p1', 'p2'],
         })
@@ -125,7 +123,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
 
       nock(ENDPOINT)
-        .delete('/collections/col/points/payload')
+        .post('/collections/col/points/payload/delete')
         .reply(500, { error: { code: 'INTERNAL_ERROR', message: 'oops' } });
 
       await expect(
