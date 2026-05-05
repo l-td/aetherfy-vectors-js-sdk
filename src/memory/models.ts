@@ -52,11 +52,17 @@ export function messageFromPoint(point: {
 }
 
 /**
- * UUID-like point ID generator (32 hex chars).
+ * Canonical UUID point ID generator (8-4-4-4-12 hex with hyphens).
+ *
+ * Returns the same canonical form Qdrant emits on read. The hyphenated
+ * form is what scroll/retrieve return; emitting the un-hyphenated 32-char
+ * form here would make round-trip ID equality (caller tracks SDK-returned
+ * IDs and compares against scroll output) silently fail.
  *
  * Uses `crypto.randomUUID` when available (Node ≥14.17, modern browsers);
- * falls back to `Math.random` — point IDs don't need cryptographic
- * uniqueness, only per-collection uniqueness.
+ * falls back to `Math.random` formatted into the canonical layout. The
+ * fallback is non-cryptographic — point IDs need only per-collection
+ * uniqueness, not unforgeability.
  * @internal
  */
 export function generateId(): string {
@@ -64,12 +70,15 @@ export function generateId(): string {
     typeof globalThis !== 'undefined'
       ? (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
       : undefined;
-  if (g?.randomUUID) return g.randomUUID().replace(/-/g, '');
-  let out = '';
+  if (g?.randomUUID) return g.randomUUID();
+  let hex = '';
   for (let i = 0; i < 8; i++) {
-    out += Math.floor(Math.random() * 0xffffffff)
+    hex += Math.floor(Math.random() * 0xffffffff)
       .toString(16)
       .padStart(8, '0');
   }
-  return out.slice(0, 32);
+  return (
+    `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-` +
+    `${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+  );
 }
