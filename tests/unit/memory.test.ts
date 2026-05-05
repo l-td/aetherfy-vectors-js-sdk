@@ -426,6 +426,57 @@ describe('Namespace operations', () => {
     expect(mock.upsert.mock.calls[0][1][0].id).toBe('fixed-id-1');
   });
 
+  it('addMany([]) returns [] without a round trip', async () => {
+    const mock = buildMockClient();
+    const ns = await openNs(mock);
+    const ids = await ns.addMany([]);
+    expect(ids).toEqual([]);
+    expect(mock.upsert).not.toHaveBeenCalled();
+  });
+
+  it('addMany batches all items into one upsert and returns IDs in input order', async () => {
+    const mock = buildMockClient();
+    const ns = await openNs(mock);
+    const ids = await ns.addMany([
+      { text: 'a', vector: [0.1], metadata: { i: 0 } },
+      { text: 'b', vector: [0.2], id: 'fixed-1' },
+      { text: 'c', vector: [0.3] },
+    ]);
+    expect(ids).toHaveLength(3);
+    expect(ids[1]).toBe('fixed-1');
+    expect(mock.upsert).toHaveBeenCalledTimes(1);
+    const [coll, points] = mock.upsert.mock.calls[0];
+    expect(coll).toBe('customer-42');
+    expect(points).toHaveLength(3);
+    expect(points.map(p => p.payload)).toEqual([
+      { text: 'a', metadata: { i: 0 } },
+      { text: 'b' },
+      { text: 'c' },
+    ]);
+  });
+
+  it('addMany throws EmbeddingNotSupportedError pinpointing the bad index', async () => {
+    const mock = buildMockClient();
+    const ns = await openNs(mock);
+    await expect(
+      ns.addMany([
+        { text: 'good', vector: [0.1] },
+        { text: 'bad' }, // missing vector
+      ])
+    ).rejects.toThrow(EmbeddingNotSupportedError);
+    await expect(
+      ns.addMany([{ text: 'good', vector: [0.1] }, { text: 'bad' }])
+    ).rejects.toThrow(/addMany\[1\]/);
+    expect(mock.upsert).not.toHaveBeenCalled();
+  });
+
+  it('addMany rejects non-array input with TypeError', async () => {
+    const mock = buildMockClient();
+    const ns = await openNs(mock);
+    // @ts-expect-error — testing runtime guard
+    await expect(ns.addMany('not-an-array')).rejects.toThrow(TypeError);
+  });
+
   it('search delegates with translated options', async () => {
     const mock = buildMockClient();
     const ns = await openNs(mock);
@@ -617,6 +668,77 @@ describe('Thread operations', () => {
       unknown
     >;
     expect(typeof payload.ts).toBe('number');
+  });
+
+  it('appendMany([]) returns [] without a round trip', async () => {
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    const ids = await t.appendMany([]);
+    expect(ids).toEqual([]);
+    expect(mock.upsert).not.toHaveBeenCalled();
+  });
+
+  it('appendMany batches messages with role/content/ts payloads', async () => {
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    const ids = await t.appendMany([
+      { role: 'user', content: 'hi', vector: [0.1], ts: 1000 },
+      {
+        role: 'assistant',
+        content: 'hello',
+        vector: [0.2],
+        ts: 1001,
+        id: 'fixed',
+      },
+    ]);
+    expect(ids).toEqual([ids[0], 'fixed']);
+    expect(mock.upsert).toHaveBeenCalledTimes(1);
+    const [coll, points] = mock.upsert.mock.calls[0];
+    expect(coll).toBe('__thread__conv-99');
+    expect(points).toHaveLength(2);
+    expect(points[0].payload).toEqual({
+      role: 'user',
+      content: 'hi',
+      ts: 1000,
+    });
+    expect(points[1].payload).toEqual({
+      role: 'assistant',
+      content: 'hello',
+      ts: 1001,
+    });
+  });
+
+  it('appendMany generates a per-message ts when omitted (not one shared)', async () => {
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    await t.appendMany([
+      { role: 'user', content: 'a', vector: [0.1] },
+      { role: 'user', content: 'b', vector: [0.1] },
+    ]);
+    const points = mock.upsert.mock.calls[0][1] as Array<{
+      payload: Record<string, unknown>;
+    }>;
+    expect(typeof points[0].payload.ts).toBe('number');
+    expect(typeof points[1].payload.ts).toBe('number');
+  });
+
+  it('appendMany pinpoints the bad index in errors', async () => {
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    await expect(
+      t.appendMany([
+        { role: 'user', content: 'good', vector: [0.1] },
+        { role: '', content: 'bad', vector: [0.1] },
+      ])
+    ).rejects.toThrow(/appendMany\[1\]/);
+    expect(mock.upsert).not.toHaveBeenCalled();
+  });
+
+  it('addMany on a Thread throws guidance toward appendMany', async () => {
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    await expect(t.addMany([])).rejects.toThrow(/appendMany/);
+    expect(mock.upsert).not.toHaveBeenCalled();
   });
 
   it('history returns messages ordered ascending by ts', async () => {

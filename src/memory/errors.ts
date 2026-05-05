@@ -75,12 +75,12 @@ export class InvalidNameError extends AetherfyMemoryError {
  * Until then, callers must compute embeddings client-side and pass `vector`.
  */
 export class EmbeddingNotSupportedError extends AetherfyMemoryError {
-  constructor() {
-    super(
+  constructor(context?: string) {
+    const base =
       'vector is required. Server-side embedding (add with text only) is ' +
-        'planned for a future release; for now, compute the embedding ' +
-        'client-side and pass vector=...'
-    );
+      'planned for a future release; for now, compute the embedding ' +
+      'client-side and pass vector=...';
+    super(context ? `${context}: ${base}` : base);
     this.name = 'EmbeddingNotSupportedError';
     Object.setPrototypeOf(this, EmbeddingNotSupportedError.prototype);
   }

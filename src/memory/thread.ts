@@ -13,7 +13,7 @@ import { AetherfyVectorsClient } from '../client';
 import { assertAllowedOptionKeys } from '../utils/options';
 import { EmbeddingNotSupportedError } from './errors';
 import { generateId, Message, messageFromPoint } from './models';
-import { Namespace } from './namespace';
+import { Namespace, NamespaceAddOptions } from './namespace';
 
 export interface ThreadAddOptions {
   role: string;
@@ -81,6 +81,65 @@ export class Thread extends Namespace {
       { id: pointId, vector, payload },
     ]);
     return pointId;
+  }
+
+  /**
+   * Append many messages in a single round trip.
+   *
+   * Each message is validated like `add` (vector required, non-empty
+   * role, string content). Missing IDs get a UUID per message; missing
+   * timestamps get `Date.now()/1000` per message (each gets its own —
+   * NOT one shared timestamp, otherwise history ordering for messages
+   * appended in the same call would be undefined).
+   *
+   * Returns IDs in input order. Empty input returns `[]` without a
+   * round trip. Server handles streaming-chunking; this method does
+   * not chunk client-side.
+   */
+  async appendMany(messages: ThreadAddOptions[]): Promise<string[]> {
+    if (!Array.isArray(messages)) {
+      throw new TypeError('appendMany requires an array of ThreadAddOptions');
+    }
+    if (messages.length === 0) return [];
+
+    const points = messages.map((msg, idx) => {
+      const { role, content, vector, metadata, id, ts } = msg;
+      if (!vector) {
+        throw new EmbeddingNotSupportedError(`appendMany[${idx}]`);
+      }
+      if (typeof role !== 'string' || role.length === 0) {
+        throw new Error(`appendMany[${idx}]: role must be a non-empty string`);
+      }
+      if (typeof content !== 'string') {
+        throw new Error(`appendMany[${idx}]: content must be a string`);
+      }
+      const pointId = id !== undefined ? String(id) : generateId();
+      const timestamp = ts ?? Date.now() / 1000;
+      const payload: Record<string, unknown> = { role, content, ts: timestamp };
+      if (metadata) payload.metadata = metadata;
+      return { id: pointId, vector, payload };
+    });
+
+    await this.client.upsert(this.collection, points);
+    return points.map(p => p.id);
+  }
+
+  /**
+   * Inherited Namespace.addMany would write `text`/`metadata` payloads
+   * into a thread-shaped collection — the Thread schema is
+   * `role`/`content`/`ts`/`metadata`. Calling addMany on a Thread is
+   * almost always a mistake; redirect to appendMany.
+   *
+   * Keeps the parent's parameter signature so JS callers reach the
+   * runtime guidance regardless of typing strictness; narrows the
+   * return to `Promise<never>` since this function never resolves.
+   */
+  async addMany(_items: NamespaceAddOptions[]): Promise<never> {
+    throw new Error(
+      'Thread.addMany is not supported (writes wrong payload shape). ' +
+        'Use Thread.appendMany(messages) — each message takes ' +
+        '{role, content, vector, metadata?, id?, ts?}.'
+    );
   }
 
   // -------------------------------------------------------------------

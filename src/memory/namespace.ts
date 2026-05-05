@@ -102,6 +102,41 @@ export class Namespace {
   }
 
   /**
+   * Add many memories in a single round trip.
+   *
+   * Each item is validated like `add` (vector required), and missing
+   * IDs get a UUID generated per item. Returns IDs in input order so
+   * callers can correlate.
+   *
+   * Server handles streaming-chunking of the resulting upsert, so this
+   * method does NOT itself chunk — pass however many items you want.
+   *
+   * Empty input returns `[]` without a round trip (degenerate-input
+   * tolerance for dynamically-built lists).
+   */
+  async addMany(items: NamespaceAddOptions[]): Promise<string[]> {
+    if (!Array.isArray(items)) {
+      throw new TypeError('addMany requires an array of NamespaceAddOptions');
+    }
+    if (items.length === 0) return [];
+
+    const points = items.map((item, idx) => {
+      const { vector, text, metadata, id } = item;
+      if (!vector) {
+        throw new EmbeddingNotSupportedError(`addMany[${idx}]`);
+      }
+      const pointId = id !== undefined ? String(id) : generateId();
+      const payload: Record<string, unknown> = {};
+      if (text !== undefined) payload.text = text;
+      if (metadata) payload.metadata = metadata;
+      return { id: pointId, vector, payload };
+    });
+
+    await this.client.upsert(this.collection, points);
+    return points.map(p => p.id);
+  }
+
+  /**
    * Replace the metadata sub-key of an existing memory.
    *
    * Atomically writes `payload.metadata = metadata`. Reserved fields
