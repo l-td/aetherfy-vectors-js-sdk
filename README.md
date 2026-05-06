@@ -105,6 +105,170 @@ const client = new AetherfyVectorsClient({
 });
 ```
 
+## 🔁 Iterating Large Collections
+
+For bulk reads, use `scrollIter()` rather than `scroll({ limit: … })`.
+The async iterator pages transparently and stays within the server's
+per-request caps (1000 points/call, 10 MB/response):
+
+```typescript
+import type { ScrollIterOptions, ScrollPoint } from 'aetherfy-vectors';
+
+for await (const point of client.scrollIter('my_collection', { batchSize: 256 })) {
+  process(point);
+}
+
+// With a filter and selective payload/vector return
+const opts: ScrollIterOptions = {
+  batchSize: 512,
+  scrollFilter: { must: [{ key: 'status', match: { value: 'active' } }] },
+  withPayload: true,
+  withVectors: false,
+};
+for await (const point of client.scrollIter('my_collection', opts)) {
+  process(point);
+}
+```
+
+`batchSize` is the page size for one HTTP round trip (max 1000
+server-side). The iterator handles cursor management, page exhaustion,
+and pagination errors — no offset bookkeeping in user code.
+
+> **TypeScript callers** get compile-time errors on unknown options
+> keys (e.g. passing `limit` instead of `batchSize`). Untyped JS callers
+> hit a runtime kwarg-allowlist guard that throws with a guidance
+> message — passing `{ batchSize: 256, limit: 100 }` would otherwise
+> silently page at 256 with `limit` dropped.
+
+## ✏️ Editing Payload on Existing Points
+
+Three operations on the payload of points that already exist — no need
+to re-upsert vectors:
+
+```typescript
+// MERGE: add or update keys, leave others alone
+await client.setPayload('my_collection', { reviewed: true, reviewer: 'alice' }, [pointId]);
+
+// OVERWRITE: replace the entire payload object
+await client.overwritePayload('my_collection', { category: 'X' }, [pointId]);
+
+// DELETE: remove specific keys, leave others alone
+await client.deletePayload('my_collection', ['draft_field', 'stale_score'], [pointId]);
+```
+
+Each call accepts up to **512 points** in one round trip; for larger
+mutations, batch on the caller side. Semantics map exactly to qdrant's
+`set_payload` / `overwrite_payload` / `delete_payload`.
+
+## 🧠 Memory SDK — Iter, Bulk-load, setMetadata
+
+The Memory layer (`MemoryClient`) layers `Namespace` and `Thread`
+abstractions on top of `AetherfyVectorsClient`. Three additions worth
+knowing once you go past `add()` / `search()`:
+
+### Iterating a namespace or a thread
+
+```typescript
+import { MemoryClient } from 'aetherfy-vectors';
+import type { NamespaceIterOptions } from 'aetherfy-vectors';
+
+const memory = new MemoryClient({ apiKey: 'afy_live_…', workspace: 'my-bot' });
+const ns = await memory.namespace('customer-42');
+
+for await (const point of ns.iter({ batchSize: 256 })) {
+  process(point);
+}
+
+// Threads have iterHistory() — yields messages in ts order across the
+// whole conversation. Distinct from history({ limit: N }), which caps
+// at 5000 in memory for the most-recent slice.
+const thread = await memory.thread('conv-99');
+for await (const msg of thread.iterHistory({ order: 'asc' })) {
+  console.log(msg.role, msg.content);
+}
+```
+
+Use `history({ limit: N })` for "show me the last N messages" (bounded,
+fast). Use `iterHistory()` for "walk every message in this thread"
+(paged, memory-bounded by the iterator).
+
+### Bulk-loading memories
+
+`addMany()` and `appendMany()` batch into a single `client.upsert` so
+N items become 1 round trip. IDs are returned in input order; missing
+IDs are auto-generated as canonical UUIDs (the same format `iter()` and
+`retrieve()` yield back, so equality comparisons just work).
+
+```typescript
+const items = [
+  { text: 'first',  vector: embed('first'),  metadata: { src: 'a' } },
+  { text: 'second', vector: embed('second'), metadata: { src: 'b' } },
+];
+const ids = await ns.addMany(items);  // single round trip; preserves input order
+
+// Threads use appendMany — role/content/ts payloads, ts auto-set per
+// message when omitted (each message gets its own ts, not one shared).
+const msgs = [
+  { role: 'user',      content: 'hi',    vector: embed('hi') },
+  { role: 'assistant', content: 'hello', vector: embed('hello') },
+];
+const msgIds = await thread.appendMany(msgs);
+```
+
+`Thread.addMany()` is overridden to throw with guidance toward
+`appendMany()` — `addMany` would write `text`/`metadata` payloads into
+a `role`/`content`/`ts` schema, which is almost always a mistake. Reach
+for `appendMany()` on threads.
+
+### setMetadata — atomic replace, explicit-compose merge
+
+`setMetadata()` atomically writes `payload.metadata = …` on an existing
+memory. Reserved fields (`text` for Namespace; `role`/`content`/`ts`
+for Thread) are untouched.
+
+```typescript
+await ns.setMetadata(pointId, { reviewed: true, score: 0.92 });
+```
+
+There is intentionally **no** `mergeMetadata()` helper. To merge into
+existing metadata, retrieve, mutate locally, and write back — the
+explicit-compose pattern keeps races visible at the call site rather
+than hidden inside an SDK helper:
+
+```typescript
+const [point] = await ns.retrieve([pointId]);
+const current = (point?.payload?.metadata ?? {}) as Record<string, unknown>;
+await ns.setMetadata(pointId, { ...current, reviewed: true });
+```
+
+If two callers run this concurrently, one update wins and the other
+sees its read be stale — by design, you see that race in your own code
+rather than have the SDK hide it.
+
+## 📐 Limits
+
+Two axes constrain a single call: per-request size (PRS) and requests
+per minute (RPM). Both axes return a 4xx with a structured `error.code`
+when they fire — no surprise 5xx, no silent truncation.
+
+| Class | Endpoint | Cap |
+|-------|----------|-----|
+| READS | `scroll` · `search` · `retrieve` | ≤ 1000 points/call · ≤ 10 MB/response |
+| WRITES | `upsert` | ≤ 10 K vectors/call · streaming |
+|        | payload edits · batch delete | ≤ 512 points/call |
+
+> **Upserts stream** — there is no body-size cap on the public upsert
+> URL. The 10 K vectors/call is a defensive request-level ceiling, not
+> a body limit; one call can upload millions of bytes via byte-target
+> chunking on the receiving end. For bulk reads, use `scrollIter()` —
+> it pages transparently and stays within both quotas.
+
+`requests_per_minute` is a sliding-window minutely cap derived from
+your subscription tier. When it fires, the SDK throws
+`RateLimitExceededError` with a structured `retryAfter` (seconds);
+PRS violations throw `ValidationError` (400) or surface as 413
+`RESPONSE_TOO_LARGE` for oversized response bodies.
+
 ## 🤝 Multi-Agent Workspaces
 
 Workspaces let multiple agents share vector collections without name collisions. All collections created through a workspace-scoped client are automatically namespaced — agents in the same workspace see each other's collections; agents in different workspaces are fully isolated.
