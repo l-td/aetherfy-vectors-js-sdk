@@ -119,8 +119,16 @@ export class AetherfyVectorsClient {
     const apiKey = APIKeyManager.resolveApiKey(config.apiKey);
     this.authManager = new APIKeyManager(apiKey);
 
-    // Set up endpoint and HTTP client
-    this.endpoint = config.endpoint || AetherfyVectorsClient.DEFAULT_ENDPOINT;
+    // Resolve endpoint: explicit config > AETHERFY_VECTORS_URL env var
+    // (control-plane sets this on Fly machines for private regional routing) >
+    // default public endpoint.
+    /* c8 ignore next 4 */
+    const envEndpoint =
+      typeof process !== 'undefined'
+        ? process.env?.AETHERFY_VECTORS_URL
+        : undefined;
+    this.endpoint =
+      config.endpoint || envEndpoint || AetherfyVectorsClient.DEFAULT_ENDPOINT;
     this.httpClient = new HttpClient({
       timeout: config.timeout || AetherfyVectorsClient.DEFAULT_TIMEOUT,
       defaultHeaders: this.authManager.getAuthHeaders(),

@@ -41,6 +41,53 @@ describe('AetherfyVectorsClient', () => {
         enableConnectionPooling: false,
       });
       expect(client).toBeInstanceOf(AetherfyVectorsClient);
+      expect((client as unknown as { endpoint: string }).endpoint).toBe(
+        'https://custom.endpoint.com'
+      );
+    });
+
+    it('should use AETHERFY_VECTORS_URL env var when no endpoint provided', () => {
+      // Set by control-plane on Fly machines so deployed agents reach the
+      // regional backend privately over the WireGuard tunnel.
+      process.env.AETHERFY_VECTORS_URL = 'http://10.0.10.243:3000';
+      try {
+        const client = new AetherfyVectorsClient({
+          apiKey: 'afy_test_1234567890123456',
+          enableConnectionPooling: false,
+        });
+        expect((client as unknown as { endpoint: string }).endpoint).toBe(
+          'http://10.0.10.243:3000'
+        );
+      } finally {
+        delete process.env.AETHERFY_VECTORS_URL;
+      }
+    });
+
+    it('should prefer explicit endpoint over AETHERFY_VECTORS_URL env var', () => {
+      process.env.AETHERFY_VECTORS_URL = 'http://10.0.10.243:3000';
+      try {
+        const client = new AetherfyVectorsClient({
+          apiKey: 'afy_test_1234567890123456',
+          endpoint: 'https://override.example.com',
+          enableConnectionPooling: false,
+        });
+        expect((client as unknown as { endpoint: string }).endpoint).toBe(
+          'https://override.example.com'
+        );
+      } finally {
+        delete process.env.AETHERFY_VECTORS_URL;
+      }
+    });
+
+    it('should fall back to default endpoint when neither is set', () => {
+      delete process.env.AETHERFY_VECTORS_URL;
+      const client = new AetherfyVectorsClient({
+        apiKey: 'afy_test_1234567890123456',
+        enableConnectionPooling: false,
+      });
+      expect((client as unknown as { endpoint: string }).endpoint).toBe(
+        'https://vectors.aetherfy.com'
+      );
     });
   });
 

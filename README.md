@@ -114,7 +114,9 @@ per-request caps (1000 points/call, 10 MB/response):
 ```typescript
 import type { ScrollIterOptions, ScrollPoint } from 'aetherfy-vectors';
 
-for await (const point of client.scrollIter('my_collection', { batchSize: 256 })) {
+for await (const point of client.scrollIter('my_collection', {
+  batchSize: 256,
+})) {
   process(point);
 }
 
@@ -147,13 +149,21 @@ to re-upsert vectors:
 
 ```typescript
 // MERGE: add or update keys, leave others alone
-await client.setPayload('my_collection', { reviewed: true, reviewer: 'alice' }, [pointId]);
+await client.setPayload(
+  'my_collection',
+  { reviewed: true, reviewer: 'alice' },
+  [pointId]
+);
 
 // OVERWRITE: replace the entire payload object
 await client.overwritePayload('my_collection', { category: 'X' }, [pointId]);
 
 // DELETE: remove specific keys, leave others alone
-await client.deletePayload('my_collection', ['draft_field', 'stale_score'], [pointId]);
+await client.deletePayload(
+  'my_collection',
+  ['draft_field', 'stale_score'],
+  [pointId]
+);
 ```
 
 Each call accepts up to **512 points** in one round trip; for larger
@@ -201,15 +211,15 @@ IDs are auto-generated as canonical UUIDs (the same format `iter()` and
 
 ```typescript
 const items = [
-  { text: 'first',  vector: embed('first'),  metadata: { src: 'a' } },
+  { text: 'first', vector: embed('first'), metadata: { src: 'a' } },
   { text: 'second', vector: embed('second'), metadata: { src: 'b' } },
 ];
-const ids = await ns.addMany(items);  // single round trip; preserves input order
+const ids = await ns.addMany(items); // single round trip; preserves input order
 
 // Threads use appendMany — role/content/ts payloads, ts auto-set per
 // message when omitted (each message gets its own ts, not one shared).
 const msgs = [
-  { role: 'user',      content: 'hi',    vector: embed('hi') },
+  { role: 'user', content: 'hi', vector: embed('hi') },
   { role: 'assistant', content: 'hello', vector: embed('hello') },
 ];
 const msgIds = await thread.appendMany(msgs);
@@ -251,11 +261,11 @@ Two axes constrain a single call: per-request size (PRS) and requests
 per minute (RPM). Both axes return a 4xx with a structured `error.code`
 when they fire — no surprise 5xx, no silent truncation.
 
-| Class | Endpoint | Cap |
-|-------|----------|-----|
-| READS | `scroll` · `search` · `retrieve` | ≤ 1000 points/call · ≤ 10 MB/response |
-| WRITES | `upsert` | ≤ 10 K vectors/call · streaming |
-|        | payload edits · batch delete | ≤ 512 points/call |
+| Class  | Endpoint                         | Cap                                   |
+| ------ | -------------------------------- | ------------------------------------- |
+| READS  | `scroll` · `search` · `retrieve` | ≤ 1000 points/call · ≤ 10 MB/response |
+| WRITES | `upsert`                         | ≤ 10 K vectors/call · streaming       |
+|        | payload edits · batch delete     | ≤ 512 points/call                     |
 
 > **Upserts stream** — there is no body-size cap on the public upsert
 > URL. The 10 K vectors/call is a defensive request-level ceiling, not
