@@ -95,6 +95,7 @@ export {
   NetworkError,
   ConflictError,
   CollectionInUseError,
+  CollectionInOtherRegionError,
   QuotaExceededError,
   SchemaNotFoundError,
   SchemaValidationError,

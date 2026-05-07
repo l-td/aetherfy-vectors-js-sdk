@@ -105,6 +105,35 @@ const client = new AetherfyVectorsClient({
 });
 ```
 
+### 4. Local development across regions
+
+Production agents have `AETHERFY_VECTORS_URL` injected by the control-plane —
+that's the URL they reach the regional backend through, and it takes
+precedence over `region`. For local development (no env var injected),
+you can pin a client to a specific Fly region — but `region` requires
+the async factory rather than `new`, because the SDK has to call
+`GET /api/v1/regions` to resolve the per-region URL:
+
+```typescript
+const client = await AetherfyVectorsClient.create({
+  apiKey: 'afy_test_...',
+  region: 'fra', // 'iad' | 'fra' | 'sin'
+});
+```
+
+`create()` mirrors Python's `AetherfyVectorsClient(api_key=..., region='fra')`
+contract: when the call resolves, the client is fully ready — endpoint,
+analytics, and `.region` are all final. Discovery errors surface at the
+`create()` call site instead of being deferred to your first method call.
+
+If you call `new AetherfyVectorsClient({region: 'fra'})` without an
+override (`endpoint=` or `AETHERFY_VECTORS_URL`), the constructor
+throws telling you to use `create()` — async discovery isn't safe
+inside a sync constructor and silent deferral is a footgun.
+
+If both `AETHERFY_VECTORS_URL` and `region` are set, the env var wins
+and a warning is logged — production-agent protection rule.
+
 ## 🔁 Iterating Large Collections
 
 For bulk reads, use `scrollIter()` rather than `scroll({ limit: … })`.

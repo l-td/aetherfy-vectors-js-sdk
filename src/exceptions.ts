@@ -210,9 +210,11 @@ export class ConflictError extends AetherfyVectorsError {
 
   constructor(
     message: string = 'Resource conflict',
-    conflictingResource?: string
+    conflictingResource?: string,
+    statusCode?: number,
+    details?: Record<string, unknown>
   ) {
-    super(message);
+    super(message, undefined, statusCode, details);
     this.name = 'ConflictError';
     this.conflictingResource = conflictingResource;
     Object.setPrototypeOf(this, ConflictError.prototype);
@@ -222,6 +224,52 @@ export class ConflictError extends AetherfyVectorsError {
     return {
       ...super.toJSON(),
       conflictingResource: this.conflictingResource,
+    };
+  }
+}
+
+/**
+ * Raised when a collection name is created in one region but already
+ * exists in a different region (vectordb's WS9 reject policy). Carries
+ * the rejection's typed fields so callers can offer a different name
+ * or pin to the existing region without parsing error message strings.
+ */
+export class CollectionInOtherRegionError extends AetherfyVectorsError {
+  public readonly collectionName: string;
+  public readonly existingRegions: string[];
+  public readonly requestingRegion: string;
+
+  constructor(
+    collectionName: string,
+    existingRegions: string[],
+    requestingRegion: string,
+    message?: string
+  ) {
+    super(
+      message ||
+        `Collection '${collectionName}' already exists in region ${existingRegions.join(', ')}. ` +
+          `Collection names are unique per account; pick a different name or use the existing one.`,
+      undefined,
+      409,
+      {
+        collection_name: collectionName,
+        existing_regions: existingRegions,
+        requesting_region: requestingRegion,
+      }
+    );
+    this.name = 'CollectionInOtherRegionError';
+    this.collectionName = collectionName;
+    this.existingRegions = existingRegions;
+    this.requestingRegion = requestingRegion;
+    Object.setPrototypeOf(this, CollectionInOtherRegionError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      collectionName: this.collectionName,
+      existingRegions: this.existingRegions,
+      requestingRegion: this.requestingRegion,
     };
   }
 }
@@ -450,9 +498,21 @@ export function createErrorFromResponse(
           (errorObj.agents as string[]) || []
         );
       }
+      if (errorObj?.code === 'COLLECTION_EXISTS_IN_OTHER_REGION') {
+        return new CollectionInOtherRegionError(
+          String(errorObj.collection_name || 'unknown'),
+          Array.isArray(errorObj.existing_regions)
+            ? (errorObj.existing_regions as string[])
+            : [],
+          String(errorObj.requesting_region || ''),
+          typeof errorObj.message === 'string' ? errorObj.message : undefined
+        );
+      }
       return new ConflictError(
         message,
-        responseData?.conflictingResource as string
+        responseData?.conflictingResource as string,
+        409,
+        details as Record<string, unknown> | undefined
       );
     }
 

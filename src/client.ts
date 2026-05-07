@@ -89,11 +89,21 @@ import { validateVectors } from './schema';
 export class AetherfyVectorsClient {
   private static readonly DEFAULT_ENDPOINT = 'https://vectors.aetherfy.com';
   private static readonly DEFAULT_TIMEOUT = 30000;
+  private static readonly VALID_FLY_REGIONS: ReadonlySet<string> = new Set([
+    'iad',
+    'fra',
+    'sin',
+  ]);
+  /**
+   * The Fly region for this client (when `region` was provided to
+   * `create()`). null otherwise. Read-only after construction.
+   */
+  public readonly region: 'iad' | 'fra' | 'sin' | null = null;
 
   private httpClient: HttpClient;
   private authManager: APIKeyManager;
   private analytics: AnalyticsClient;
-  private endpoint: string;
+  private readonly endpoint: string;
   /**
    * The active workspace, or `undefined` if workspace scoping is disabled.
    * Set at construction time (either explicitly or via the
@@ -110,7 +120,21 @@ export class AetherfyVectorsClient {
   private payloadSchemaCache: Map<string, SchemaData | null>;
 
   /**
-   * Create a new Aetherfy Vectors client
+   * Construct a client with a pre-resolved endpoint.
+   *
+   * Use {@link AetherfyVectorsClient.create} when you need region= /
+   * /api/v1/regions discovery — `create()` runs the async discovery
+   * before constructing, so by the time you have a client every
+   * field (endpoint, analytics, region) is already final.
+   *
+   * `new` works for the synchronous resolution paths:
+   *   - Explicit `endpoint=`
+   *   - `AETHERFY_VECTORS_URL` env var
+   *   - Default global endpoint
+   *
+   * Passing `region=` to `new` throws — region= requires `create()`.
+   * The constructor cannot do async discovery, and silently deferring
+   * to first method call (the previous behavior) is a footgun.
    *
    * @param config - Configuration options
    */
@@ -119,21 +143,58 @@ export class AetherfyVectorsClient {
     const apiKey = APIKeyManager.resolveApiKey(config.apiKey);
     this.authManager = new APIKeyManager(apiKey);
 
-    // Resolve endpoint: explicit config > AETHERFY_VECTORS_URL env var
-    // (control-plane sets this on Fly machines for private regional routing) >
-    // default public endpoint.
-    /* c8 ignore next 4 */
-    const envEndpoint =
-      typeof process !== 'undefined'
-        ? process.env?.AETHERFY_VECTORS_URL
-        : undefined;
-    this.endpoint =
-      config.endpoint || envEndpoint || AetherfyVectorsClient.DEFAULT_ENDPOINT;
     this.httpClient = new HttpClient({
       timeout: config.timeout || AetherfyVectorsClient.DEFAULT_TIMEOUT,
       defaultHeaders: this.authManager.getAuthHeaders(),
       enableConnectionPooling: config.enableConnectionPooling,
     });
+
+    // Resolve endpoint synchronously. region= cannot be honored here —
+    // that's create()'s job — so reject it explicitly to avoid the
+    // previous "looks like it works but discovery isn't done yet"
+    // footgun. The exception to this rule: create() calls the
+    // constructor with a pre-resolved endpoint (and region= cleared);
+    // see `_constructWithResolvedEndpoint`.
+    /* c8 ignore next 4 */
+    const envEndpoint =
+      typeof process !== 'undefined'
+        ? process.env?.AETHERFY_VECTORS_URL
+        : undefined;
+
+    if (config.region) {
+      if (!AetherfyVectorsClient.VALID_FLY_REGIONS.has(config.region)) {
+        throw new Error(
+          `region must be one of iad, fra, sin (got ${String(config.region)})`
+        );
+      }
+      // env var wins over region= regardless of how the caller got
+      // here — production-agent protection.
+      if (envEndpoint) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `Both AETHERFY_VECTORS_URL and region=${config.region} are set; ` +
+            'using AETHERFY_VECTORS_URL — region= is a local-dev parameter, ' +
+            'env var wins in production agents'
+        );
+        this.endpoint = envEndpoint;
+      } else if (config.endpoint) {
+        this.endpoint = config.endpoint;
+      } else {
+        // Direct `new` with region= and no env-var/endpoint override:
+        // this is the footgun case. Tell the caller to use create().
+        throw new Error(
+          'region= requires async region discovery. Use ' +
+            '`await AetherfyVectorsClient.create({...})` instead of `new`.'
+        );
+      }
+      this.region = config.region;
+    } else if (config.endpoint) {
+      this.endpoint = config.endpoint;
+    } else if (envEndpoint) {
+      this.endpoint = envEndpoint;
+    } else {
+      this.endpoint = AetherfyVectorsClient.DEFAULT_ENDPOINT;
+    }
 
     // Initialize workspace (auto-detect or explicit)
     if (config.workspace === 'auto') {
@@ -147,18 +208,114 @@ export class AetherfyVectorsClient {
       this.workspace = config.workspace;
     }
 
-    // Initialize schema cache for ETag-based validation
     this.schemaCache = new Map();
-
-    // Initialize payload schema cache
     this.payloadSchemaCache = new Map();
 
-    // Initialize analytics client
+    // Initialize analytics client. By now `this.endpoint` is final —
+    // either it was passed in synchronously, or create() ran discovery
+    // and is constructing us with the resolved URL.
     this.analytics = new AnalyticsClient(
       this.httpClient,
       this.endpoint,
       this.authManager.getAuthHeaders()
     );
+  }
+
+  /**
+   * Async factory — the canonical way to construct a client with
+   * region= or any other future async configuration. Mirrors Python's
+   * `AetherfyVectorsClient(api_key=..., region='fra')` contract:
+   * when you have a client, it's fully ready.
+   *
+   * Resolution order (same as Python):
+   *   1. Explicit `config.endpoint`.
+   *   2. `AETHERFY_VECTORS_URL` env var.
+   *   3. `config.region` → `GET /api/v1/regions` discovery.
+   *   4. Default global endpoint.
+   *
+   * When the env var and `region=` are both set, the env var wins and
+   * a warning is logged — production-agent protection.
+   *
+   * @example
+   * ```typescript
+   * const client = await AetherfyVectorsClient.create({
+   *   apiKey: 'afy_test_...',
+   *   region: 'fra',
+   * });
+   * ```
+   */
+  static async create(
+    config: ClientConfig = {}
+  ): Promise<AetherfyVectorsClient> {
+    // Validate eagerly — same semantics as Python's __init__.
+    if (
+      config.region !== undefined &&
+      config.region !== null &&
+      !AetherfyVectorsClient.VALID_FLY_REGIONS.has(config.region)
+    ) {
+      throw new Error(
+        `region must be one of iad, fra, sin (got ${String(config.region)})`
+      );
+    }
+
+    /* c8 ignore next 4 */
+    const envEndpoint =
+      typeof process !== 'undefined'
+        ? process.env?.AETHERFY_VECTORS_URL
+        : undefined;
+
+    // If region= is irrelevant (no region OR an override is present),
+    // delegate to the sync constructor — nothing to discover.
+    if (!config.region || config.endpoint || envEndpoint) {
+      return new AetherfyVectorsClient(config);
+    }
+
+    // region= without override: run discovery on the default global
+    // endpoint, then construct with the resolved per-region URL.
+    const apiKey = APIKeyManager.resolveApiKey(config.apiKey);
+    const tempAuth = new APIKeyManager(apiKey);
+    const tempHttp = new HttpClient({
+      timeout: config.timeout || AetherfyVectorsClient.DEFAULT_TIMEOUT,
+      defaultHeaders: tempAuth.getAuthHeaders(),
+      enableConnectionPooling: config.enableConnectionPooling,
+    });
+    const url = `${AetherfyVectorsClient.DEFAULT_ENDPOINT.replace(/\/$/, '')}/api/v1/regions`;
+    let response;
+    try {
+      response = await tempHttp.get<Record<string, string>>(
+        url,
+        tempAuth.getAuthHeaders()
+      );
+    } catch (err) {
+      tempHttp.destroy();
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      throw new AetherfyVectorsError(
+        `Could not resolve region '${config.region}' via discovery: ${msg}. ` +
+          'Check that the default endpoint is reachable, or pass endpoint= directly.'
+      );
+    }
+    tempHttp.destroy();
+    if (response.status !== 200) {
+      throw new AetherfyVectorsError(
+        `Region discovery returned ${response.status} from ${url}. ` +
+          'Check that your API key is valid for the discovery endpoint.'
+      );
+    }
+    const cache = (response.data as Record<string, string>) ?? {};
+    if (!(config.region in cache)) {
+      throw new AetherfyVectorsError(
+        `Region '${config.region}' not configured at the discovery endpoint ` +
+          `(available: ${JSON.stringify(Object.keys(cache).sort())}).`
+      );
+    }
+    // Construct with the resolved URL pinned as endpoint=. The
+    // constructor sees both `region` and `endpoint`, takes the
+    // endpoint path, and still assigns this.region for caller-visible
+    // identification.
+    return new AetherfyVectorsClient({
+      ...config,
+      endpoint: cache[config.region],
+    });
   }
 
   /**
