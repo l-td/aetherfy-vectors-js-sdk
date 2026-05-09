@@ -31,7 +31,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const expectedBody = { payload: { tag: 'new' }, points: ['p1', 'p2'] };
 
       nock(ENDPOINT)
-        .post('/collections/col/points/payload', expectedBody)
+        .post('/api/v1/collections/col/points/payload', expectedBody)
         .reply(200, { result: { status: 'ok' } });
 
       const out = await client.setPayload('col', { tag: 'new' }, ['p1', 'p2']);
@@ -50,7 +50,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
 
       nock(ENDPOINT)
-        .post('/collections/col/points/payload')
+        .post('/api/v1/collections/col/points/payload')
         .reply(429, {
           error: { code: 'RATE_LIMIT_EXCEEDED', message: 'slow down' },
         });
@@ -66,7 +66,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
 
       nock(ENDPOINT)
-        .put('/collections/col/points/payload', {
+        .put('/api/v1/collections/col/points/payload', {
           payload: { only: 'this' },
           points: ['p1'],
         })
@@ -82,7 +82,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
 
       nock(ENDPOINT)
-        .put('/collections/col/points/payload')
+        .put('/api/v1/collections/col/points/payload')
         .reply(503, {
           error: { code: 'SERVICE_UNAVAILABLE', message: 'try later' },
         });
@@ -98,7 +98,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
 
       nock(ENDPOINT)
-        .post('/collections/col/points/payload/delete', {
+        .post('/api/v1/collections/col/points/payload/delete', {
           keys: ['old_tag', 'old_meta'],
           points: ['p1', 'p2'],
         })
@@ -123,7 +123,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
 
       nock(ENDPOINT)
-        .post('/collections/col/points/payload/delete')
+        .post('/api/v1/collections/col/points/payload/delete')
         .reply(500, { error: { code: 'INTERNAL_ERROR', message: 'oops' } });
 
       await expect(

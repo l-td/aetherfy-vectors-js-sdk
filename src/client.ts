@@ -279,7 +279,10 @@ export class AetherfyVectorsClient {
       defaultHeaders: tempAuth.getAuthHeaders(),
       enableConnectionPooling: config.enableConnectionPooling,
     });
-    const url = `${AetherfyVectorsClient.DEFAULT_ENDPOINT.replace(/\/$/, '')}/api/v1/regions`;
+    const url = AetherfyVectorsClient.buildApiUrl(
+      AetherfyVectorsClient.DEFAULT_ENDPOINT,
+      '/regions'
+    );
     let response;
     try {
       response = await tempHttp.get<Record<string, string>>(
@@ -316,6 +319,33 @@ export class AetherfyVectorsClient {
       ...config,
       endpoint: cache[config.region],
     });
+  }
+
+  /**
+   * Build a fully-qualified API URL from the bare endpoint host.
+   *
+   * `this.endpoint` is a bare host (e.g. `https://vectors-use1.aetherfy.com`)
+   * — the API version prefix is owned by the SDK so the discovery
+   * payload, the AETHERFY_VECTORS_URL env var, and any `endpoint=`
+   * override all stay clean. Every operation routes through here so
+   * the prefix lives in exactly one place.
+   *
+   * Mirrors `aetherfy_vectors.utils.build_api_url` in the Python SDK
+   * — both must produce `<host>/api/v1/<path>`.
+   */
+  private apiUrl(path: string): string {
+    return AetherfyVectorsClient.buildApiUrl(this.endpoint, path);
+  }
+
+  /**
+   * Static counterpart of {@link apiUrl} — used by `create()`'s
+   * region-discovery code which has no `this`. Kept symmetric so the
+   * `/api/v1` prefix is added in exactly one place across the SDK.
+   */
+  private static buildApiUrl(host: string, path: string): string {
+    const base = host.replace(/\/$/, '');
+    const p = path.startsWith('/') ? path : `/${path}`;
+    return `${base}/api/v1${p}`;
   }
 
   /**
@@ -371,7 +401,7 @@ export class AetherfyVectorsClient {
 
     try {
       const response = await this.executeWithRetry(async () =>
-        this.httpClient.post(`${this.endpoint}/collections`, {
+        this.httpClient.post(this.apiUrl('/collections'), {
           name: scopedName,
           vectors: config,
           description: description || null,
@@ -414,7 +444,7 @@ export class AetherfyVectorsClient {
 
     try {
       const response = await this.httpClient.delete(
-        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}`
+        this.apiUrl(`/collections/${encodeURIComponent(scopedName)}`)
       );
 
       const ok = response.status === 200 || response.status === 204;
@@ -441,7 +471,7 @@ export class AetherfyVectorsClient {
   async getCollections(): Promise<Collection[]> {
     try {
       const response = await this.httpClient.get<{ collections: Collection[] }>(
-        `${this.endpoint}/collections`
+        this.apiUrl('/collections')
       );
 
       const collections = response.data.collections || [];
@@ -486,7 +516,7 @@ export class AetherfyVectorsClient {
 
     try {
       await this.httpClient.get(
-        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}`
+        this.apiUrl(`/collections/${encodeURIComponent(scopedName)}`)
       );
       return true;
     } catch (error: unknown) {
@@ -521,7 +551,7 @@ export class AetherfyVectorsClient {
 
     try {
       const response = await this.httpClient.get<{ result: Collection }>(
-        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}`
+        this.apiUrl(`/collections/${encodeURIComponent(scopedName)}`)
       );
 
       // Unscope the collection name in the result
@@ -638,7 +668,7 @@ export class AetherfyVectorsClient {
 
       const response = await this.executeWithRetry(async () =>
         this.httpClient.put(
-          `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points`,
+          this.apiUrl(`/collections/${encodeURIComponent(scopedName)}/points`),
           { points: formattedPoints },
           headers
         )
@@ -704,7 +734,9 @@ export class AetherfyVectorsClient {
             }
 
             const response = await this.httpClient.put(
-              `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points`,
+              this.apiUrl(
+                `/collections/${encodeURIComponent(scopedName)}/points`
+              ),
               { points: formattedPoints },
               retryHeaders
             );
@@ -775,7 +807,9 @@ export class AetherfyVectorsClient {
 
     try {
       const response = await this.httpClient.post(
-        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/delete`,
+        this.apiUrl(
+          `/collections/${encodeURIComponent(scopedName)}/points/delete`
+        ),
         body
       );
 
@@ -815,7 +849,9 @@ export class AetherfyVectorsClient {
 
     try {
       const response = await this.httpClient.post(
-        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/payload`,
+        this.apiUrl(
+          `/collections/${encodeURIComponent(scopedName)}/points/payload`
+        ),
         { payload, points }
       );
       return response.data;
@@ -843,7 +879,9 @@ export class AetherfyVectorsClient {
 
     try {
       const response = await this.httpClient.put(
-        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/payload`,
+        this.apiUrl(
+          `/collections/${encodeURIComponent(scopedName)}/points/payload`
+        ),
         { payload, points }
       );
       return response.data;
@@ -873,7 +911,9 @@ export class AetherfyVectorsClient {
       // /points/payload). Match the upstream contract directly so the
       // proxy has nothing to translate.
       const response = await this.httpClient.post(
-        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/payload/delete`,
+        this.apiUrl(
+          `/collections/${encodeURIComponent(scopedName)}/points/payload/delete`
+        ),
         { keys, points }
       );
       return response.data;
@@ -912,7 +952,9 @@ export class AetherfyVectorsClient {
       const response = await this.httpClient.post<{
         result: Point[];
       }>(
-        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/retrieve`,
+        this.apiUrl(
+          `/collections/${encodeURIComponent(scopedName)}/points/retrieve`
+        ),
         {
           ids,
           with_payload: options.withPayload ?? true,
@@ -963,7 +1005,9 @@ export class AetherfyVectorsClient {
     try {
       const response = await this.executeWithRetry(async () =>
         this.httpClient.post<{ result: SearchResult[] }>(
-          `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/search`,
+          this.apiUrl(
+            `/collections/${encodeURIComponent(scopedName)}/points/search`
+          ),
           {
             vector: queryVector,
             limit: options.limit ?? 10,
@@ -1016,7 +1060,9 @@ export class AetherfyVectorsClient {
           next_page_offset: string | number | null;
         };
       }>(
-        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/scroll`,
+        this.apiUrl(
+          `/collections/${encodeURIComponent(scopedName)}/points/scroll`
+        ),
         body
       );
 
@@ -1125,7 +1171,9 @@ export class AetherfyVectorsClient {
       const response = await this.httpClient.post<{
         result: { count: number };
       }>(
-        `${this.endpoint}/collections/${encodeURIComponent(scopedName)}/points/count`,
+        this.apiUrl(
+          `/collections/${encodeURIComponent(scopedName)}/points/count`
+        ),
         {
           filter: options.countFilter,
           exact: options.exact ?? false,
@@ -1293,7 +1341,7 @@ export class AetherfyVectorsClient {
         };
       };
       schema_version: string;
-    }>(`${this.endpoint}/collections/${encodeURIComponent(collectionName)}`);
+    }>(this.apiUrl(`/collections/${encodeURIComponent(collectionName)}`));
 
     const result = response.data.result;
     const schemaVersion = response.data.schema_version;
@@ -1499,7 +1547,7 @@ export class AetherfyVectorsClient {
 
     try {
       const response = await this.httpClient.get(
-        `${this.endpoint}/schema/${encodeURIComponent(scopedName)}`
+        this.apiUrl(`/schema/${encodeURIComponent(scopedName)}`)
       );
 
       const data = response.data as {
@@ -1587,7 +1635,7 @@ export class AetherfyVectorsClient {
     let response;
     try {
       response = await this.httpClient.put(
-        `${this.endpoint}/schema/${encodeURIComponent(scopedName)}`,
+        this.apiUrl(`/schema/${encodeURIComponent(scopedName)}`),
         body
       );
     } catch (error: unknown) {
@@ -1630,7 +1678,7 @@ export class AetherfyVectorsClient {
 
     try {
       await this.httpClient.delete(
-        `${this.endpoint}/schema/${encodeURIComponent(scopedName)}`
+        this.apiUrl(`/schema/${encodeURIComponent(scopedName)}`)
       );
     } catch (error: unknown) {
       if (
@@ -1688,7 +1736,7 @@ export class AetherfyVectorsClient {
     let response;
     try {
       response = await this.httpClient.post(
-        `${this.endpoint}/schema/${encodeURIComponent(scopedName)}/analyze`,
+        this.apiUrl(`/schema/${encodeURIComponent(scopedName)}/analyze`),
         { sample_size: sampleSize }
       );
     } catch (error: unknown) {

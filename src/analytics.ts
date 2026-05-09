@@ -31,6 +31,19 @@ export class AnalyticsClient {
   }
 
   /**
+   * Build a fully-qualified analytics URL.
+   *
+   * `baseUrl` is a bare host — the SDK owns the `/api/v1` prefix so
+   * the discovery payload, env vars, and `endpoint=` overrides stay
+   * clean. Mirrors `AetherfyVectorsClient.apiUrl`.
+   */
+  private apiUrl(path: string): string {
+    const base = this.baseUrl.replace(/\/$/, '');
+    const p = path.startsWith('/') ? path : `/${path}`;
+    return `${base}/api/v1${p}`;
+  }
+
+  /**
    * Get global performance analytics
    *
    * @param timeRange - Time range for analytics ('1h', '24h', '7d', '30d')
@@ -55,7 +68,7 @@ export class AnalyticsClient {
       });
 
       const response = await this.httpClient.get<PerformanceAnalytics>(
-        `${this.baseUrl}/analytics/performance?${params}`
+        `${this.apiUrl('/analytics/performance')}?${params}`
       );
 
       return response.data;
@@ -88,7 +101,7 @@ export class AnalyticsClient {
       });
 
       const response = await this.httpClient.get<CollectionAnalytics>(
-        `${this.baseUrl}/analytics/collections/${encodeURIComponent(collectionName)}?${params}`
+        `${this.apiUrl(`/analytics/collections/${encodeURIComponent(collectionName)}`)}?${params}`
       );
 
       return response.data;
@@ -113,7 +126,7 @@ export class AnalyticsClient {
   async getUsageStats(): Promise<UsageStats> {
     try {
       const response = await this.httpClient.get<UsageStats>(
-        `${this.baseUrl}/analytics/usage`
+        this.apiUrl('/analytics/usage')
       );
 
       return response.data;
@@ -138,7 +151,7 @@ export class AnalyticsClient {
 
       const response = await this.httpClient.get<{
         regions: Record<string, Record<string, number>>;
-      }>(`${this.baseUrl}/analytics/regions?${params}`);
+      }>(`${this.apiUrl('/analytics/regions')}?${params}`);
 
       return response.data.regions || {};
     } catch (error: unknown) {
@@ -159,7 +172,7 @@ export class AnalyticsClient {
       });
 
       const response = await this.httpClient.get<CacheStats>(
-        `${this.baseUrl}/analytics/cache?${params}`
+        `${this.apiUrl('/analytics/cache')}?${params}`
       );
 
       return response.data;
@@ -190,7 +203,7 @@ export class AnalyticsClient {
 
       const response = await this.httpClient.get<{
         collections: TopCollectionEntry[];
-      }>(`${this.baseUrl}/analytics/collections/top?${params}`);
+      }>(`${this.apiUrl('/analytics/collections/top')}?${params}`);
 
       return response.data.collections || [];
     } catch (error: unknown) {
@@ -206,7 +219,7 @@ export class AnalyticsClient {
   async getRegions(): Promise<RegionInfo[]> {
     try {
       const response = await this.httpClient.get<{ regions: RegionInfo[] }>(
-        `${this.baseUrl}/analytics/regions/info`
+        this.apiUrl('/analytics/regions/info')
       );
 
       return response.data.regions || [];

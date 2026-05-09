@@ -103,7 +103,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should create collection successfully', async () => {
       const scope = nock('https://vectors.aetherfy.com')
-        .post('/collections', body => body.name === 'test-collection')
+        .post('/api/v1/collections', body => body.name === 'test-collection')
         .reply(201, { success: true });
 
       const result = await client.createCollection('test-collection', {
@@ -117,7 +117,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should create collection with description', async () => {
       const scope = nock('https://vectors.aetherfy.com')
-        .post('/collections', body => {
+        .post('/api/v1/collections', body => {
           return (
             body.name === 'test-collection' &&
             body.description === 'Test collection for embeddings'
@@ -140,7 +140,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should create collection without description sends null', async () => {
       const scope = nock('https://vectors.aetherfy.com')
-        .post('/collections', body => {
+        .post('/api/v1/collections', body => {
           return body.name === 'test-collection' && body.description === null;
         })
         .reply(201, { success: true });
@@ -177,7 +177,7 @@ describe('AetherfyVectorsClient', () => {
       ];
 
       nock('https://vectors.aetherfy.com')
-        .get('/collections')
+        .get('/api/v1/collections')
         .reply(200, { collections: mockCollections });
 
       const collections = await client.getCollections();
@@ -187,7 +187,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should check if collection exists', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, { name: 'test-collection' });
 
       const exists = await client.collectionExists('test-collection');
@@ -196,7 +196,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should return false for non-existent collection', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/non-existent')
+        .get('/api/v1/collections/non-existent')
         .reply(404, { message: 'Collection not found' });
 
       const exists = await client.collectionExists('non-existent');
@@ -205,7 +205,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should delete collection', async () => {
       nock('https://vectors.aetherfy.com')
-        .delete('/collections/test-collection')
+        .delete('/api/v1/collections/test-collection')
         .reply(204);
 
       const result = await client.deleteCollection('test-collection');
@@ -219,7 +219,7 @@ describe('AetherfyVectorsClient', () => {
       // a 2xx create can briefly return 4xx. Cache prepopulation
       // routes the next collectionExists/upsert through local state.
       nock('https://vectors.aetherfy.com')
-        .post('/collections')
+        .post('/api/v1/collections')
         .reply(201, { success: true });
 
       await client.createCollection('fresh-coll', {
@@ -237,7 +237,7 @@ describe('AetherfyVectorsClient', () => {
     it('deleteCollection clears the schemaCache (subsequent exists hits the network)', async () => {
       // Seed the cache via create...
       nock('https://vectors.aetherfy.com')
-        .post('/collections')
+        .post('/api/v1/collections')
         .reply(201, { success: true });
       await client.createCollection('doomed', {
         size: 128,
@@ -248,14 +248,14 @@ describe('AetherfyVectorsClient', () => {
       // actually hits the wire (otherwise a recreate-with-different-shape
       // would silently use stale size/distance/etag).
       nock('https://vectors.aetherfy.com')
-        .delete('/collections/doomed')
+        .delete('/api/v1/collections/doomed')
         .reply(204);
       await client.deleteCollection('doomed');
 
       // Now collectionExists *must* make the GET. We mock it to return
       // 404 so the call is observable AND the result is correct.
       const scope = nock('https://vectors.aetherfy.com')
-        .get('/collections/doomed')
+        .get('/api/v1/collections/doomed')
         .reply(404, { message: 'Collection not found' });
       const exists = await client.collectionExists('doomed');
 
@@ -292,7 +292,7 @@ describe('AetherfyVectorsClient', () => {
       // (e.g. cross-client delete). The SDK must drop the local caches
       // so subsequent calls go back to the network.
       nock('https://vectors.aetherfy.com')
-        .put('/collections/ghost/points')
+        .put('/api/v1/collections/ghost/points')
         .reply(404, { message: 'Collection not found' });
 
       await expect(
@@ -315,7 +315,7 @@ describe('AetherfyVectorsClient', () => {
       });
 
       nock('https://vectors.aetherfy.com')
-        .get('/collections/ghost')
+        .get('/api/v1/collections/ghost')
         .reply(404, { message: 'Collection not found' });
 
       await expect(client.getCollection('ghost')).rejects.toThrow();
@@ -332,7 +332,7 @@ describe('AetherfyVectorsClient', () => {
       c.schemaCache.set('intact', { size: 4, distance: 'Cosine' });
 
       nock('https://vectors.aetherfy.com')
-        .put('/collections/intact/points')
+        .put('/api/v1/collections/intact/points')
         .reply(503, { message: 'Service Unavailable' });
 
       await expect(
@@ -351,7 +351,7 @@ describe('AetherfyVectorsClient', () => {
       };
 
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, { result: mockCollection });
 
       const collection = await client.getCollection('test-collection');
@@ -407,7 +407,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should accept distance metric as lowercase string "cosine"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
-        .post('/collections', body => {
+        .post('/api/v1/collections', body => {
           return body.name === 'test' && body.vectors.distance === 'Cosine';
         })
         .reply(201, { success: true });
@@ -422,7 +422,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should accept distance metric as lowercase string "euclidean"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
-        .post('/collections', body => {
+        .post('/api/v1/collections', body => {
           return body.name === 'test' && body.vectors.distance === 'Euclidean';
         })
         .reply(201, { success: true });
@@ -437,7 +437,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should accept distance metric as lowercase string "euclid" (alias)', async () => {
       const scope = nock('https://vectors.aetherfy.com')
-        .post('/collections', body => {
+        .post('/api/v1/collections', body => {
           return body.name === 'test' && body.vectors.distance === 'Euclidean';
         })
         .reply(201, { success: true });
@@ -452,7 +452,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should accept distance metric as lowercase string "dot"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
-        .post('/collections', body => {
+        .post('/api/v1/collections', body => {
           return body.name === 'test' && body.vectors.distance === 'Dot';
         })
         .reply(201, { success: true });
@@ -467,7 +467,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should accept distance metric as lowercase string "manhattan"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
-        .post('/collections', body => {
+        .post('/api/v1/collections', body => {
           return body.name === 'test' && body.vectors.distance === 'Manhattan';
         })
         .reply(201, { success: true });
@@ -482,7 +482,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should accept distance metric as exact enum string "Cosine"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
-        .post('/collections', body => {
+        .post('/api/v1/collections', body => {
           return body.name === 'test' && body.vectors.distance === 'Cosine';
         })
         .reply(201, { success: true });
@@ -542,7 +542,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should upsert points successfully', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -558,11 +558,11 @@ describe('AetherfyVectorsClient', () => {
         });
 
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(404, {});
 
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(200, { success: true });
 
       const points = [
@@ -579,7 +579,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should validate point data', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -630,7 +630,7 @@ describe('AetherfyVectorsClient', () => {
       ];
 
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points/search')
+        .post('/api/v1/collections/test-collection/points/search')
         .reply(200, { result: mockResults });
 
       const queryVector = [0.1, 0.2, 0.3];
@@ -679,7 +679,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should validate point has vector array', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -708,7 +708,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should delete points by IDs', async () => {
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points/delete')
+        .post('/api/v1/collections/test-collection/points/delete')
         .reply(200, { success: true });
 
       const result = await client.delete('test-collection', [
@@ -721,7 +721,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should delete points by filter', async () => {
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points/delete')
+        .post('/api/v1/collections/test-collection/points/delete')
         .reply(200, { success: true });
 
       const filter = { must: [{ key: 'category', match: { value: 'test' } }] };
@@ -750,7 +750,7 @@ describe('AetherfyVectorsClient', () => {
       // revert to /points here would silently route retrieve through the
       // streaming upsert path on the backend.
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points/retrieve')
+        .post('/api/v1/collections/test-collection/points/retrieve')
         .reply(200, { result: mockPoints });
 
       const result = await client.retrieve('test-collection', [
@@ -767,7 +767,7 @@ describe('AetherfyVectorsClient', () => {
       // dedicated /points/retrieve route reads body.with_vector strictly;
       // a typo'd plural silently dropped vectors from the response.
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points/retrieve', body => {
+        .post('/api/v1/collections/test-collection/points/retrieve', body => {
           return (
             Array.isArray(body.ids) &&
             body.ids[0] === 'point1' &&
@@ -791,7 +791,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should count points in collection', async () => {
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points/count')
+        .post('/api/v1/collections/test-collection/points/count')
         .reply(200, { result: { count: 42 } });
 
       const count = await client.count('test-collection');
@@ -801,7 +801,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should count points with filter and exact option', async () => {
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points/count')
+        .post('/api/v1/collections/test-collection/points/count')
         .reply(200, { result: { count: 10 } });
 
       const filter = { must: [{ key: 'category', match: { value: 'test' } }] };
@@ -833,7 +833,7 @@ describe('AetherfyVectorsClient', () => {
       };
 
       nock('https://vectors.aetherfy.com')
-        .get('/analytics/performance?time_range=24h')
+        .get('/api/v1/analytics/performance?time_range=24h')
         .reply(200, mockAnalytics);
 
       const analytics = await client.getPerformanceAnalytics('24h');
@@ -850,7 +850,7 @@ describe('AetherfyVectorsClient', () => {
       };
 
       nock('https://vectors.aetherfy.com')
-        .get('/analytics/usage')
+        .get('/api/v1/analytics/usage')
         .reply(200, mockUsage);
 
       const usage = await client.getUsageStats();
@@ -868,7 +868,7 @@ describe('AetherfyVectorsClient', () => {
       };
 
       nock('https://vectors.aetherfy.com')
-        .get('/analytics/collections/test-collection?time_range=7d')
+        .get('/api/v1/analytics/collections/test-collection?time_range=7d')
         .reply(200, mockAnalytics);
 
       const analytics = await client.getCollectionAnalytics(
@@ -897,7 +897,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should test connection successfully', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections')
+        .get('/api/v1/collections')
         .reply(200, { collections: [] });
 
       const connected = await client.testConnection();
@@ -906,7 +906,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should return false on connection failure', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections')
+        .get('/api/v1/collections')
         .replyWithError(new Error('Network Error'));
 
       const connected = await client.testConnection();
@@ -929,7 +929,7 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should handle HTTP errors with proper status codes', async () => {
-      nock('https://vectors.aetherfy.com').get('/collections').reply(
+      nock('https://vectors.aetherfy.com').get('/api/v1/collections').reply(
         401,
         {
           message: 'Unauthorized access',
@@ -945,7 +945,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle errors in deleteCollection', async () => {
       nock('https://vectors.aetherfy.com')
-        .delete('/collections/test-collection')
+        .delete('/api/v1/collections/test-collection')
         .reply(500, {
           message: 'Internal server error',
         });
@@ -957,7 +957,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should throw CollectionInUseError when deleting a collection in use', async () => {
       nock('https://vectors.aetherfy.com')
-        .delete('/collections/test-collection')
+        .delete('/api/v1/collections/test-collection')
         .reply(409, {
           error: {
             code: 'COLLECTION_IN_USE',
@@ -987,7 +987,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle non-404 errors in collectionExists', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(500, {
           message: 'Internal server error',
         });
@@ -999,7 +999,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle non-retryable HTTP errors in upsert', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -1015,7 +1015,7 @@ describe('AetherfyVectorsClient', () => {
         });
 
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(400, {
           message: 'Bad request',
           code: 'VALIDATION_ERROR',
@@ -1034,7 +1034,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle non-retryable HTTP errors in search', async () => {
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points/search')
+        .post('/api/v1/collections/test-collection/points/search')
         .reply(404, {
           message: 'Collection not found',
           code: 'NOT_FOUND',
@@ -1047,7 +1047,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle errors in delete operation', async () => {
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points/delete')
+        .post('/api/v1/collections/test-collection/points/delete')
         .reply(500, {
           message: 'Server error',
           code: 'INTERNAL_ERROR',
@@ -1060,7 +1060,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle errors in retrieve operation', async () => {
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points/retrieve')
+        .post('/api/v1/collections/test-collection/points/retrieve')
         .reply(503, {
           message: 'Service unavailable',
           code: 'SERVICE_UNAVAILABLE',
@@ -1073,7 +1073,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle errors in count operation', async () => {
       nock('https://vectors.aetherfy.com')
-        .post('/collections/test-collection/points/count')
+        .post('/api/v1/collections/test-collection/points/count')
         .reply(403, {
           message: 'Forbidden',
           code: 'FORBIDDEN',
@@ -1084,7 +1084,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle errors in getCollection operation', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/non-existent')
+        .get('/api/v1/collections/non-existent')
         .reply(404, {
           message: 'Collection not found',
           code: 'NOT_FOUND',
@@ -1095,7 +1095,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should convert generic network error to NetworkError', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections')
+        .get('/api/v1/collections')
         .replyWithError(new Error('Network Error'));
 
       try {
@@ -1114,7 +1114,7 @@ describe('AetherfyVectorsClient', () => {
       Object.assign(error, { code: 'ECONNABORTED' });
 
       nock('https://vectors.aetherfy.com')
-        .get('/collections')
+        .get('/api/v1/collections')
         .replyWithError(error);
 
       try {
@@ -1133,7 +1133,7 @@ describe('AetherfyVectorsClient', () => {
       Object.assign(error, { code: 'ECONNRESET' });
 
       nock('https://vectors.aetherfy.com')
-        .get('/collections')
+        .get('/api/v1/collections')
         .replyWithError(error);
 
       try {
@@ -1152,7 +1152,7 @@ describe('AetherfyVectorsClient', () => {
       Object.assign(error, { code: 'ETIMEDOUT' });
 
       nock('https://vectors.aetherfy.com')
-        .get('/collections')
+        .get('/api/v1/collections')
         .replyWithError(error);
 
       try {
@@ -1171,7 +1171,7 @@ describe('AetherfyVectorsClient', () => {
       Object.assign(error, { code: 'ECONNABORTED' });
 
       nock('https://vectors.aetherfy.com')
-        .get('/collections')
+        .get('/api/v1/collections')
         .replyWithError(error);
 
       try {
@@ -1209,7 +1209,7 @@ describe('AetherfyVectorsClient', () => {
 
       try {
         nock('https://vectors.aetherfy.com')
-          .post('/collections')
+          .post('/api/v1/collections')
           .times(4)
           .replyWithError(new Error('Connection failed'));
 
@@ -1228,7 +1228,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle invalid collection schema from server', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/invalid-schema')
+        .get('/api/v1/collections/invalid-schema')
         .reply(200, {
           result: {
             config: {
@@ -1249,7 +1249,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle points without vector array', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -1278,7 +1278,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle points with null vector', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -1308,7 +1308,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle points with non-array vector', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -1338,7 +1338,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should pass through AetherfyVectorsError unchanged', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(500, {
           message: 'Server error',
           code: 'INTERNAL_ERROR',
@@ -1353,9 +1353,11 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should handle AetherfyVectorsError passthrough', async () => {
-      nock('https://vectors.aetherfy.com').get('/collections').reply(500, {
-        message: 'Server error',
-      });
+      nock('https://vectors.aetherfy.com')
+        .get('/api/v1/collections')
+        .reply(500, {
+          message: 'Server error',
+        });
 
       await expect(client.getCollections()).rejects.toThrow(
         AetherfyVectorsError
@@ -1364,7 +1366,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle generic network errors', async () => {
       nock('https://vectors.aetherfy.com')
-        .get('/collections')
+        .get('/api/v1/collections')
         .replyWithError(new Error('Connection failed'));
 
       await expect(client.getCollections()).rejects.toThrow(NetworkError);
@@ -1374,7 +1376,7 @@ describe('AetherfyVectorsClient', () => {
       const error = new Error('Connection ECONNABORTED');
 
       nock('https://vectors.aetherfy.com')
-        .get('/collections')
+        .get('/api/v1/collections')
         .replyWithError(error);
 
       await expect(client.getCollections()).rejects.toThrow(NetworkError);
@@ -1384,7 +1386,7 @@ describe('AetherfyVectorsClient', () => {
       const error = new Error('Request timeout');
 
       nock('https://vectors.aetherfy.com')
-        .get('/collections')
+        .get('/api/v1/collections')
         .replyWithError(error);
 
       await expect(client.getCollections()).rejects.toThrow(NetworkError);
@@ -1394,7 +1396,7 @@ describe('AetherfyVectorsClient', () => {
       // Warm both schema caches with real timers before activating fake timers,
       // so the upsert under fake timers only exercises the PUT retry path.
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -1409,10 +1411,10 @@ describe('AetherfyVectorsClient', () => {
           schema_version: 'v1',
         });
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(404, { error: { message: 'Schema not found' } });
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(200, { status: 'ok' });
 
       await client.upsert('test-collection', [
@@ -1423,7 +1425,7 @@ describe('AetherfyVectorsClient', () => {
 
       try {
         nock('https://vectors.aetherfy.com')
-          .put('/collections/test-collection/points')
+          .put('/api/v1/collections/test-collection/points')
           .times(4)
           .replyWithError(new Error('Database connection failed'));
 
@@ -1453,7 +1455,7 @@ describe('AetherfyVectorsClient', () => {
     describe('getSchema', () => {
       it('should fetch schema successfully', async () => {
         nock('https://vectors.aetherfy.com')
-          .get('/schema/test-collection')
+          .get('/api/v1/schema/test-collection')
           .reply(200, {
             schema: {
               fields: {
@@ -1476,7 +1478,7 @@ describe('AetherfyVectorsClient', () => {
 
       it('should return null when schema not found', async () => {
         nock('https://vectors.aetherfy.com')
-          .get('/schema/test-collection')
+          .get('/api/v1/schema/test-collection')
           .reply(404, { error: { message: 'Schema not found' } });
 
         const schema = await client.getSchema('test-collection');
@@ -1495,10 +1497,10 @@ describe('AetherfyVectorsClient', () => {
 
         // Two calls require two nock intercepts — always fetches from server
         nock('https://vectors.aetherfy.com')
-          .get('/schema/test-collection')
+          .get('/api/v1/schema/test-collection')
           .reply(200, schemaReply);
         nock('https://vectors.aetherfy.com')
-          .get('/schema/test-collection')
+          .get('/api/v1/schema/test-collection')
           .reply(200, schemaReply);
 
         await client.getSchema('test-collection');
@@ -1512,7 +1514,7 @@ describe('AetherfyVectorsClient', () => {
     describe('setSchema', () => {
       it('should set schema successfully', async () => {
         nock('https://vectors.aetherfy.com')
-          .put('/schema/test-collection', {
+          .put('/api/v1/schema/test-collection', {
             schema: {
               fields: {
                 price: { type: 'integer', required: true },
@@ -1537,7 +1539,7 @@ describe('AetherfyVectorsClient', () => {
 
       it('should default to off enforcement mode', async () => {
         const scope = nock('https://vectors.aetherfy.com')
-          .put('/schema/test-collection', body => {
+          .put('/api/v1/schema/test-collection', body => {
             return body.enforcement_mode === 'off';
           })
           .reply(200, { etag: 'etag_456' });
@@ -1553,7 +1555,7 @@ describe('AetherfyVectorsClient', () => {
     describe('deleteSchema', () => {
       it('should delete schema successfully', async () => {
         nock('https://vectors.aetherfy.com')
-          .delete('/schema/test-collection')
+          .delete('/api/v1/schema/test-collection')
           .reply(200, { success: true });
 
         const result = await client.deleteSchema('test-collection');
@@ -1562,7 +1564,7 @@ describe('AetherfyVectorsClient', () => {
 
       it('should throw SchemaNotFoundError when schema does not exist', async () => {
         nock('https://vectors.aetherfy.com')
-          .delete('/schema/test-collection')
+          .delete('/api/v1/schema/test-collection')
           .reply(404, { error: { message: 'Schema not found' } });
 
         await expect(client.deleteSchema('test-collection')).rejects.toThrow(
@@ -1572,7 +1574,7 @@ describe('AetherfyVectorsClient', () => {
 
       it('should propagate non-404 errors from the server', async () => {
         nock('https://vectors.aetherfy.com')
-          .delete('/schema/test-collection')
+          .delete('/api/v1/schema/test-collection')
           .reply(500, { error: { message: 'Internal server error' } });
 
         await expect(client.deleteSchema('test-collection')).rejects.toThrow(
@@ -1583,7 +1585,7 @@ describe('AetherfyVectorsClient', () => {
       it('should clear cache after deletion', async () => {
         // First set a schema (which caches it)
         nock('https://vectors.aetherfy.com')
-          .put('/schema/test-collection')
+          .put('/api/v1/schema/test-collection')
           .reply(200, { etag: 'abc' });
 
         await client.setSchema('test-collection', {
@@ -1592,14 +1594,14 @@ describe('AetherfyVectorsClient', () => {
 
         // Delete it
         nock('https://vectors.aetherfy.com')
-          .delete('/schema/test-collection')
+          .delete('/api/v1/schema/test-collection')
           .reply(200, { success: true });
 
         await client.deleteSchema('test-collection');
 
         // Try to get it - should fetch from server (cache cleared)
         nock('https://vectors.aetherfy.com')
-          .get('/schema/test-collection')
+          .get('/api/v1/schema/test-collection')
           .reply(404, {});
 
         const schema = await client.getSchema('test-collection');
@@ -1610,7 +1612,7 @@ describe('AetherfyVectorsClient', () => {
     describe('analyzeSchema', () => {
       it('should analyze schema successfully', async () => {
         nock('https://vectors.aetherfy.com')
-          .post('/schema/test-collection/analyze', {
+          .post('/api/v1/schema/test-collection/analyze', {
             sample_size: 1000,
           })
           .reply(200, {
@@ -1641,7 +1643,7 @@ describe('AetherfyVectorsClient', () => {
 
       it('should use default sample size', async () => {
         const scope = nock('https://vectors.aetherfy.com')
-          .post('/schema/test-collection/analyze', body => {
+          .post('/api/v1/schema/test-collection/analyze', body => {
             return body.sample_size === 1000;
           })
           .reply(200, {
@@ -1682,7 +1684,7 @@ describe('AetherfyVectorsClient', () => {
         });
 
         nock('https://vectors.aetherfy.com')
-          .post('/schema/test-collection/analyze')
+          .post('/api/v1/schema/test-collection/analyze')
           .reply(404, { message: 'Collection not found' });
 
         await expect(
@@ -1711,7 +1713,7 @@ describe('AetherfyVectorsClient', () => {
         });
 
         nock('https://vectors.aetherfy.com')
-          .put('/schema/test-collection')
+          .put('/api/v1/schema/test-collection')
           .reply(404, { message: 'Collection not found' });
 
         await expect(
@@ -1740,7 +1742,7 @@ describe('AetherfyVectorsClient', () => {
         });
 
         nock('https://vectors.aetherfy.com')
-          .get('/schema/test-collection')
+          .get('/api/v1/schema/test-collection')
           .reply(404, {
             error: { code: 'COLLECTION_NOT_FOUND', message: 'gone' },
           });
@@ -1764,7 +1766,7 @@ describe('AetherfyVectorsClient', () => {
         });
 
         nock('https://vectors.aetherfy.com')
-          .get('/schema/test-collection')
+          .get('/api/v1/schema/test-collection')
           .reply(404, {
             error: { code: 'SCHEMA_NOT_DEFINED', message: 'no schema set' },
           });
@@ -1788,7 +1790,7 @@ describe('AetherfyVectorsClient', () => {
         });
 
         nock('https://vectors.aetherfy.com')
-          .delete('/schema/test-collection')
+          .delete('/api/v1/schema/test-collection')
           .reply(404, {
             error: { code: 'COLLECTION_NOT_FOUND', message: 'gone' },
           });
@@ -1812,7 +1814,7 @@ describe('AetherfyVectorsClient', () => {
         });
 
         nock('https://vectors.aetherfy.com')
-          .delete('/schema/test-collection')
+          .delete('/api/v1/schema/test-collection')
           .reply(404, {
             error: { code: 'SCHEMA_NOT_DEFINED', message: 'no schema set' },
           });
@@ -1834,7 +1836,7 @@ describe('AetherfyVectorsClient', () => {
         // The else-branch covers raw network errors. We trigger it by
         // forcing nock to error the GET with a non-HTTP failure.
         nock('https://vectors.aetherfy.com')
-          .get('/collections/test-collection')
+          .get('/api/v1/collections/test-collection')
           .replyWithError('socket hang up');
 
         await expect(
@@ -1849,7 +1851,7 @@ describe('AetherfyVectorsClient', () => {
       it('should cache refreshed schema so subsequent upserts use it without re-fetching', async () => {
         // First upsert — populates schemaCache (vector) and payloadSchemaCache (payload)
         nock('https://vectors.aetherfy.com')
-          .get('/collections/test-collection')
+          .get('/api/v1/collections/test-collection')
           .reply(200, {
             result: {
               config: { params: { vectors: { size: 2, distance: 'Cosine' } } },
@@ -1857,7 +1859,7 @@ describe('AetherfyVectorsClient', () => {
             schema_version: 'v1',
           });
         nock('https://vectors.aetherfy.com')
-          .get('/schema/test-collection')
+          .get('/api/v1/schema/test-collection')
           .reply(200, {
             schema: { fields: { old: { type: 'string', required: false } } },
             enforcement_mode: 'off',
@@ -1865,7 +1867,7 @@ describe('AetherfyVectorsClient', () => {
             description: null,
           });
         nock('https://vectors.aetherfy.com')
-          .put('/collections/test-collection/points')
+          .put('/api/v1/collections/test-collection/points')
           .reply(200, { status: 'ok' });
 
         await client.upsert('test-collection', [
@@ -1874,7 +1876,7 @@ describe('AetherfyVectorsClient', () => {
 
         // refreshSchema clears payloadSchemaCache and re-populates it with the new schema
         nock('https://vectors.aetherfy.com')
-          .get('/schema/test-collection')
+          .get('/api/v1/schema/test-collection')
           .reply(200, {
             schema: {
               fields: { required_field: { type: 'integer', required: true } },

@@ -154,23 +154,28 @@ export function validateDistanceMetric(metric: string): void {
  */
 
 /**
- * Build API URL with proper encoding
+ * Build a fully-qualified API URL from a bare host and a versioned path.
  *
- * @param baseUrl - Base URL
- * @param endpoint - API endpoint
- * @param params - Optional query parameters
- * @returns Complete API URL
+ * `baseUrl` is a bare host (e.g. `https://vectors-use1.aetherfy.com`)
+ * — the SDK owns the `/api/v1` prefix so the discovery payload, the
+ * `AETHERFY_VECTORS_URL` env var, and any explicit `endpoint=` argument
+ * can all stay clean. Mirror of `aetherfy_vectors.utils.build_api_url`
+ * in the Python SDK; both must produce `<host>/api/v1/<path>`.
+ *
+ * @param baseUrl - Bare host URL with optional trailing slash.
+ * @param endpoint - API path, with or without a leading slash.
+ * @param params - Optional query parameters appended as `?k=v&...`.
+ * @returns `<baseUrl>/api/v1/<endpoint>` with optional query string.
  */
 export function buildApiUrl(
   baseUrl: string,
   endpoint: string,
   params?: Record<string, string | number>
 ): string {
-  // Remove trailing slash from baseUrl and leading slash from endpoint
   const cleanBaseUrl = baseUrl.replace(/\/$/, '');
   const cleanEndpoint = endpoint.replace(/^\//, '');
 
-  let url = `${cleanBaseUrl}/${cleanEndpoint}`;
+  let url = `${cleanBaseUrl}/api/v1/${cleanEndpoint}`;
 
   if (params && Object.keys(params).length > 0) {
     const searchParams = new URLSearchParams();

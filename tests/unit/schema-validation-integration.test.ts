@@ -25,7 +25,7 @@ describe('Schema Validation Integration', () => {
     it('should validate and allow valid data', async () => {
       // Mock GET /collections (vector config)
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -39,7 +39,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock GET /api/v1/schema (payload schema)
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -53,7 +53,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock PUT /collections/test-collection/points (upsert)
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(200, { status: 'ok' });
 
       const points: Point[] = [
@@ -76,7 +76,7 @@ describe('Schema Validation Integration', () => {
     it('should block invalid data in strict mode', async () => {
       // Mock GET /collections
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -90,7 +90,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -117,7 +117,7 @@ describe('Schema Validation Integration', () => {
     it('should report multiple validation errors', async () => {
       // Mock GET /collections
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -131,7 +131,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -173,7 +173,7 @@ describe('Schema Validation Integration', () => {
     it('should allow invalid data in warn mode', async () => {
       // Mock GET /collections
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -187,7 +187,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -200,7 +200,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock PUT /collections/test-collection/points
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(200, { status: 'ok' });
 
       const points: Point[] = [
@@ -220,7 +220,7 @@ describe('Schema Validation Integration', () => {
     it('should skip validation when enforcement is off', async () => {
       // Mock GET /collections
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -234,7 +234,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -247,7 +247,7 @@ describe('Schema Validation Integration', () => {
 
       // Mock PUT /collections/test-collection/points
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(200, { status: 'ok' });
 
       const points: Point[] = [
@@ -267,7 +267,7 @@ describe('Schema Validation Integration', () => {
     it('should allow any data when no schema exists', async () => {
       // Mock GET /collections
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -281,12 +281,12 @@ describe('Schema Validation Integration', () => {
 
       // Mock GET /api/v1/schema (404 - no schema)
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(404, { error: { message: 'Schema not found' } });
 
       // Mock PUT /collections/test-collection/points
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(200, { status: 'ok' });
 
       const points: Point[] = [
@@ -306,7 +306,7 @@ describe('Schema Validation Integration', () => {
     it('should retry upsert when schema changes (412)', async () => {
       // First attempt: GET /collections
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -320,7 +320,7 @@ describe('Schema Validation Integration', () => {
 
       // First attempt: GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -333,7 +333,7 @@ describe('Schema Validation Integration', () => {
 
       // First attempt: PUT returns 412
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(412, {
           error: {
             code: 'SCHEMA_VERSION_MISMATCH',
@@ -343,7 +343,7 @@ describe('Schema Validation Integration', () => {
 
       // Retry: GET /api/v1/schema (fetch updated schema)
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -357,7 +357,7 @@ describe('Schema Validation Integration', () => {
 
       // Retry: GET /collections (refetch vector config)
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -371,7 +371,7 @@ describe('Schema Validation Integration', () => {
 
       // Retry: PUT succeeds
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(200, { status: 'ok' });
 
       const points: Point[] = [
@@ -389,7 +389,7 @@ describe('Schema Validation Integration', () => {
     it('should fail if data is invalid after schema refresh', async () => {
       // First attempt: GET /collections
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -403,7 +403,7 @@ describe('Schema Validation Integration', () => {
 
       // First attempt: GET /api/v1/schema (old schema: price optional)
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -416,14 +416,14 @@ describe('Schema Validation Integration', () => {
 
       // First attempt: PUT returns 412
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(412, {
           error: { message: 'Schema changed' },
         });
 
       // Retry: GET /api/v1/schema (new schema: price required)
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -452,7 +452,7 @@ describe('Schema Validation Integration', () => {
     it('should cache payload schema on first upsert', async () => {
       // First upsert: GET /collections
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -466,7 +466,7 @@ describe('Schema Validation Integration', () => {
 
       // First upsert: GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(200, {
           schema: {
             fields: {
@@ -479,7 +479,7 @@ describe('Schema Validation Integration', () => {
 
       // First upsert: PUT
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(200, { status: 'ok' });
 
       const points: Point[] = [
@@ -491,7 +491,7 @@ describe('Schema Validation Integration', () => {
       // Second upsert: should NOT fetch schema again (uses cache)
       // Only PUT is mocked
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(200, { status: 'ok' });
 
       const result = await client.upsert('test-collection', points);
@@ -501,7 +501,7 @@ describe('Schema Validation Integration', () => {
     it('should cache "no schema" state to avoid repeated fetches', async () => {
       // First upsert: GET /collections
       nock('https://vectors.aetherfy.com')
-        .get('/collections/test-collection')
+        .get('/api/v1/collections/test-collection')
         .reply(200, {
           result: {
             config: {
@@ -515,12 +515,12 @@ describe('Schema Validation Integration', () => {
 
       // First upsert: GET /api/v1/schema (404)
       nock('https://vectors.aetherfy.com')
-        .get('/schema/test-collection')
+        .get('/api/v1/schema/test-collection')
         .reply(404, {});
 
       // First upsert: PUT
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(200, { status: 'ok' });
 
       const points: Point[] = [{ id: '1', vector: [0.1, 0.2], payload: {} }];
@@ -530,7 +530,7 @@ describe('Schema Validation Integration', () => {
       // Second upsert: should NOT try to fetch schema again (cached null)
       // Only PUT is mocked
       nock('https://vectors.aetherfy.com')
-        .put('/collections/test-collection/points')
+        .put('/api/v1/collections/test-collection/points')
         .reply(200, { status: 'ok' });
 
       const result = await client.upsert('test-collection', points);

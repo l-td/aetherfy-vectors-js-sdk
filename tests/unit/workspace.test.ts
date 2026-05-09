@@ -58,7 +58,7 @@ describe('Workspace Support', () => {
       });
 
       const scope = nock(baseUrl)
-        .post('/collections', body => {
+        .post('/api/v1/collections', body => {
           // Check that collection name is scoped
           return body.name === 'invoice-pipeline/documents';
         })
@@ -83,7 +83,7 @@ describe('Workspace Support', () => {
 
       // Mock getCollection for schema fetch
       nock(baseUrl)
-        .get('/collections/invoice-pipeline%2Fdocuments')
+        .get('/api/v1/collections/invoice-pipeline%2Fdocuments')
         .reply(200, {
           result: {
             name: 'invoice-pipeline/documents',
@@ -101,7 +101,7 @@ describe('Workspace Support', () => {
 
       const searchScope = nock(baseUrl)
         .post(
-          '/collections/invoice-pipeline%2Fdocuments/points/search',
+          '/api/v1/collections/invoice-pipeline%2Fdocuments/points/search',
           body => {
             return body.vector.length === 384;
           }
@@ -128,7 +128,7 @@ describe('Workspace Support', () => {
 
       // Mock getCollection for vector schema fetch
       nock(baseUrl)
-        .get('/collections/invoice-pipeline%2Fdocuments')
+        .get('/api/v1/collections/invoice-pipeline%2Fdocuments')
         .reply(200, {
           result: {
             name: 'invoice-pipeline/documents',
@@ -146,15 +146,18 @@ describe('Workspace Support', () => {
 
       // Mock getSchema for payload schema fetch (returns 404 = no schema)
       nock(baseUrl)
-        .get('/schema/invoice-pipeline%2Fdocuments')
+        .get('/api/v1/schema/invoice-pipeline%2Fdocuments')
         .reply(404, {
           error: { code: 'SCHEMA_NOT_FOUND', message: 'No schema' },
         });
 
       const upsertScope = nock(baseUrl)
-        .put('/collections/invoice-pipeline%2Fdocuments/points', body => {
-          return body.points.length === 1;
-        })
+        .put(
+          '/api/v1/collections/invoice-pipeline%2Fdocuments/points',
+          body => {
+            return body.points.length === 1;
+          }
+        )
         .reply(200, { success: true });
 
       const vector = new Array(384).fill(0.1);
@@ -172,7 +175,7 @@ describe('Workspace Support', () => {
       });
 
       const scope = nock(baseUrl)
-        .post('/collections', body => {
+        .post('/api/v1/collections', body => {
           // Check that collection name is NOT scoped
           return body.name === 'documents';
         })
@@ -198,7 +201,7 @@ describe('Workspace Support', () => {
       });
 
       nock(baseUrl)
-        .get('/collections')
+        .get('/api/v1/collections')
         .reply(200, {
           collections: [
             { name: 'invoice-pipeline/documents', config: {} },
@@ -223,7 +226,7 @@ describe('Workspace Support', () => {
       });
 
       nock(baseUrl)
-        .get('/collections')
+        .get('/api/v1/collections')
         .reply(200, {
           collections: [
             { name: 'collection1', config: {} },
@@ -250,7 +253,7 @@ describe('Workspace Support', () => {
       });
 
       nock(baseUrl)
-        .get('/collections/invoice-pipeline%2Fdocuments')
+        .get('/api/v1/collections/invoice-pipeline%2Fdocuments')
         .reply(200, {
           result: {
             name: 'invoice-pipeline/documents',
@@ -275,7 +278,7 @@ describe('Workspace Support', () => {
       });
 
       const scope = nock(baseUrl)
-        .get('/schema/test-workspace%2Fdocuments')
+        .get('/api/v1/schema/test-workspace%2Fdocuments')
         .reply(200, {
           schema: { fields: {} },
           enforcement_mode: 'off',
@@ -297,7 +300,7 @@ describe('Workspace Support', () => {
       });
 
       const scope = nock(baseUrl)
-        .put('/schema/test-workspace%2Fdocuments', body => {
+        .put('/api/v1/schema/test-workspace%2Fdocuments', body => {
           return body.schema && body.enforcement_mode === 'strict';
         })
         .reply(200, { etag: 'abc123' });

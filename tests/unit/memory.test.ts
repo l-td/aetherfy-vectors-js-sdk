@@ -20,6 +20,7 @@ import {
   MemoryClient,
   Namespace,
   Thread,
+  ThreadAddOptions,
   DEFAULT_VECTOR_SIZE,
   EmbeddingNotSupportedError,
   InvalidNameError,
@@ -731,6 +732,42 @@ describe('Thread operations', () => {
         { role: '', content: 'bad', vector: [0.1] },
       ])
     ).rejects.toThrow(/appendMany\[1\]/);
+    expect(mock.upsert).not.toHaveBeenCalled();
+  });
+
+  it('appendMany throws TypeError for non-array input', async () => {
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    await expect(
+      t.appendMany('nope' as unknown as ThreadAddOptions[])
+    ).rejects.toThrow(TypeError);
+    await expect(
+      t.appendMany(null as unknown as ThreadAddOptions[])
+    ).rejects.toThrow(/array of ThreadAddOptions/);
+    expect(mock.upsert).not.toHaveBeenCalled();
+  });
+
+  it('appendMany throws EmbeddingNotSupportedError when vector is missing', async () => {
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    await expect(
+      t.appendMany([
+        { role: 'user', content: 'ok', vector: [0.1] },
+        { role: 'user', content: 'no vector' } as ThreadAddOptions,
+      ])
+    ).rejects.toThrow(EmbeddingNotSupportedError);
+    expect(mock.upsert).not.toHaveBeenCalled();
+  });
+
+  it('appendMany rejects non-string content with the bad index', async () => {
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    await expect(
+      t.appendMany([
+        { role: 'user', content: 'good', vector: [0.1] },
+        { role: 'user', content: 123 as unknown as string, vector: [0.1] },
+      ])
+    ).rejects.toThrow(/appendMany\[1\]: content must be a string/);
     expect(mock.upsert).not.toHaveBeenCalled();
   });
 

@@ -48,7 +48,7 @@ describe('AnalyticsClient', () => {
       };
 
       nock(baseUrl)
-        .get('/analytics/performance?time_range=24h')
+        .get('/api/v1/analytics/performance?time_range=24h')
         .reply(200, mockAnalytics);
 
       const result = await client.getPerformanceAnalytics();
@@ -68,7 +68,7 @@ describe('AnalyticsClient', () => {
       };
 
       nock(baseUrl)
-        .get('/analytics/performance?time_range=7d')
+        .get('/api/v1/analytics/performance?time_range=7d')
         .reply(200, mockAnalytics);
 
       const result = await client.getPerformanceAnalytics('7d');
@@ -88,7 +88,7 @@ describe('AnalyticsClient', () => {
       };
 
       nock(baseUrl)
-        .get('/analytics/performance?time_range=24h&region=us-east-1')
+        .get('/api/v1/analytics/performance?time_range=24h&region=us-east-1')
         .reply(200, mockAnalytics);
 
       const result = await client.getPerformanceAnalytics('24h', 'us-east-1');
@@ -97,10 +97,12 @@ describe('AnalyticsClient', () => {
     });
 
     it('should handle errors properly', async () => {
-      nock(baseUrl).get('/analytics/performance?time_range=24h').reply(401, {
-        message: 'Authentication failed',
-        code: 'AUTH_ERROR',
-      });
+      nock(baseUrl)
+        .get('/api/v1/analytics/performance?time_range=24h')
+        .reply(401, {
+          message: 'Authentication failed',
+          code: 'AUTH_ERROR',
+        });
 
       await expect(client.getPerformanceAnalytics()).rejects.toThrow(
         AuthenticationError
@@ -120,7 +122,7 @@ describe('AnalyticsClient', () => {
       };
 
       nock(baseUrl)
-        .get('/analytics/collections/products?time_range=24h')
+        .get('/api/v1/analytics/collections/products?time_range=24h')
         .reply(200, mockAnalytics);
 
       const result = await client.getCollectionAnalytics('products');
@@ -139,7 +141,7 @@ describe('AnalyticsClient', () => {
       };
 
       nock(baseUrl)
-        .get('/analytics/collections/users?time_range=7d')
+        .get('/api/v1/analytics/collections/users?time_range=7d')
         .reply(200, mockAnalytics);
 
       const result = await client.getCollectionAnalytics('users', '7d');
@@ -158,7 +160,7 @@ describe('AnalyticsClient', () => {
       };
 
       nock(baseUrl)
-        .get('/analytics/collections/test%20collection?time_range=24h')
+        .get('/api/v1/analytics/collections/test%20collection?time_range=24h')
         .reply(200, mockAnalytics);
 
       const result = await client.getCollectionAnalytics('test collection');
@@ -168,7 +170,7 @@ describe('AnalyticsClient', () => {
 
     it('should handle not found error for non-existent collection', async () => {
       nock(baseUrl)
-        .get('/analytics/collections/non-existent?time_range=24h')
+        .get('/api/v1/analytics/collections/non-existent?time_range=24h')
         .reply(404, {
           message: 'Collection not found',
           code: 'COLLECTION_NOT_FOUND',
@@ -194,7 +196,7 @@ describe('AnalyticsClient', () => {
         planName: 'Developer',
       };
 
-      nock(baseUrl).get('/analytics/usage').reply(200, mockUsage);
+      nock(baseUrl).get('/api/v1/analytics/usage').reply(200, mockUsage);
 
       const result = await client.getUsageStats();
 
@@ -202,7 +204,7 @@ describe('AnalyticsClient', () => {
     });
 
     it('should handle errors properly', async () => {
-      nock(baseUrl).get('/analytics/usage').reply(429, {
+      nock(baseUrl).get('/api/v1/analytics/usage').reply(429, {
         message: 'Too many requests',
         code: 'RATE_LIMIT_EXCEEDED',
       });
@@ -223,7 +225,7 @@ describe('AnalyticsClient', () => {
       };
 
       nock(baseUrl)
-        .get('/analytics/regions?time_range=24h')
+        .get('/api/v1/analytics/regions?time_range=24h')
         .reply(200, mockRegions);
 
       const result = await client.getRegionPerformance();
@@ -239,7 +241,7 @@ describe('AnalyticsClient', () => {
       };
 
       nock(baseUrl)
-        .get('/analytics/regions?time_range=7d')
+        .get('/api/v1/analytics/regions?time_range=7d')
         .reply(200, mockRegions);
 
       const result = await client.getRegionPerformance('7d');
@@ -248,7 +250,9 @@ describe('AnalyticsClient', () => {
     });
 
     it('should return empty object if regions are missing', async () => {
-      nock(baseUrl).get('/analytics/regions?time_range=24h').reply(200, {});
+      nock(baseUrl)
+        .get('/api/v1/analytics/regions?time_range=24h')
+        .reply(200, {});
 
       const result = await client.getRegionPerformance();
 
@@ -256,7 +260,7 @@ describe('AnalyticsClient', () => {
     });
 
     it('should handle errors properly', async () => {
-      nock(baseUrl).get('/analytics/regions?time_range=24h').reply(500, {
+      nock(baseUrl).get('/api/v1/analytics/regions?time_range=24h').reply(500, {
         message: 'Internal server error',
         code: 'INTERNAL_ERROR',
       });
@@ -274,7 +278,7 @@ describe('AnalyticsClient', () => {
       };
 
       nock(baseUrl)
-        .get('/analytics/cache?time_range=24h')
+        .get('/api/v1/analytics/cache?time_range=24h')
         .reply(200, mockCacheStats);
 
       const result = await client.getCacheAnalytics();
@@ -290,7 +294,7 @@ describe('AnalyticsClient', () => {
       };
 
       nock(baseUrl)
-        .get('/analytics/cache?time_range=30d')
+        .get('/api/v1/analytics/cache?time_range=30d')
         .reply(200, mockCacheStats);
 
       const result = await client.getCacheAnalytics('30d');
@@ -299,7 +303,7 @@ describe('AnalyticsClient', () => {
     });
 
     it('should handle errors properly', async () => {
-      nock(baseUrl).get('/analytics/cache?time_range=24h').reply(403, {
+      nock(baseUrl).get('/api/v1/analytics/cache?time_range=24h').reply(403, {
         message: 'Forbidden',
         code: 'FORBIDDEN',
       });
@@ -318,7 +322,7 @@ describe('AnalyticsClient', () => {
 
       nock(baseUrl)
         .get(
-          '/analytics/collections/top?metric=requests&time_range=24h&limit=10'
+          '/api/v1/analytics/collections/top?metric=requests&time_range=24h&limit=10'
         )
         .reply(200, { collections: mockCollections });
 
@@ -334,7 +338,9 @@ describe('AnalyticsClient', () => {
       ];
 
       nock(baseUrl)
-        .get('/analytics/collections/top?metric=points&time_range=7d&limit=5')
+        .get(
+          '/api/v1/analytics/collections/top?metric=points&time_range=7d&limit=5'
+        )
         .reply(200, { collections: mockCollections });
 
       const result = await client.getTopCollections('points', '7d', 5);
@@ -345,7 +351,7 @@ describe('AnalyticsClient', () => {
     it('should return empty array if collections are missing', async () => {
       nock(baseUrl)
         .get(
-          '/analytics/collections/top?metric=requests&time_range=24h&limit=10'
+          '/api/v1/analytics/collections/top?metric=requests&time_range=24h&limit=10'
         )
         .reply(200, {});
 
@@ -357,7 +363,7 @@ describe('AnalyticsClient', () => {
     it('should handle errors properly', async () => {
       nock(baseUrl)
         .get(
-          '/analytics/collections/top?metric=requests&time_range=24h&limit=10'
+          '/api/v1/analytics/collections/top?metric=requests&time_range=24h&limit=10'
         )
         .reply(400, {
           message: 'Bad request',
@@ -392,7 +398,7 @@ describe('AnalyticsClient', () => {
       ];
 
       nock(baseUrl)
-        .get('/analytics/regions/info')
+        .get('/api/v1/analytics/regions/info')
         .reply(200, { regions: mockRegions });
 
       const result = await client.getRegions();
@@ -401,7 +407,7 @@ describe('AnalyticsClient', () => {
     });
 
     it('should return empty array if regions are missing', async () => {
-      nock(baseUrl).get('/analytics/regions/info').reply(200, {});
+      nock(baseUrl).get('/api/v1/analytics/regions/info').reply(200, {});
 
       const result = await client.getRegions();
 
@@ -409,7 +415,7 @@ describe('AnalyticsClient', () => {
     });
 
     it('should handle errors properly', async () => {
-      nock(baseUrl).get('/analytics/regions/info').reply(503, {
+      nock(baseUrl).get('/api/v1/analytics/regions/info').reply(503, {
         message: 'Service unavailable',
         code: 'SERVICE_UNAVAILABLE',
       });
@@ -420,10 +426,12 @@ describe('AnalyticsClient', () => {
 
   describe('handleError', () => {
     it('should convert HTTP errors to appropriate exception types', async () => {
-      nock(baseUrl).get('/analytics/performance?time_range=24h').reply(401, {
-        message: 'Invalid API key',
-        code: 'INVALID_API_KEY',
-      });
+      nock(baseUrl)
+        .get('/api/v1/analytics/performance?time_range=24h')
+        .reply(401, {
+          message: 'Invalid API key',
+          code: 'INVALID_API_KEY',
+        });
 
       await expect(client.getPerformanceAnalytics()).rejects.toThrow(
         AuthenticationError
@@ -432,7 +440,7 @@ describe('AnalyticsClient', () => {
 
     it('should handle non-HTTP errors', async () => {
       nock(baseUrl)
-        .get('/analytics/performance?time_range=24h')
+        .get('/api/v1/analytics/performance?time_range=24h')
         .replyWithError(new Error('Network Error'));
 
       await expect(client.getPerformanceAnalytics()).rejects.toThrow();
@@ -443,7 +451,7 @@ describe('AnalyticsClient', () => {
       Object.assign(error, { code: 'ECONNABORTED' });
 
       nock(baseUrl)
-        .get('/analytics/performance?time_range=24h')
+        .get('/api/v1/analytics/performance?time_range=24h')
         .replyWithError(error);
 
       await expect(client.getPerformanceAnalytics()).rejects.toThrow();

@@ -149,7 +149,7 @@ describe('Collection Operations Integration', () => {
 
         expect(result).toBe(true);
         expect(mockFetch).toHaveBeenCalledWith(
-          'https://vectors.aetherfy.com/collections',
+          'https://vectors.aetherfy.com/api/v1/collections',
           expect.objectContaining({
             method: 'POST',
             body: JSON.stringify({
