@@ -283,15 +283,12 @@ export interface ClientConfig {
    */
   workspace?: string | 'auto';
   /**
-   * Fly region code ('iad', 'fra', or 'sin').
+   * Region code ('iad', 'fra', or 'sin').
    *
-   * LOCAL DEV / DEBUGGING ONLY. Production agents have AETHERFY_VECTORS_URL
-   * set by the control-plane and that takes precedence; if both are set
-   * the env var wins and a warning is logged. region= is useful for
-   * pinning a developer-laptop client to a specific region to debug
-   * regional partitioning. The first call resolves region against
-   * GET /api/v1/regions on the default global endpoint and caches the
-   * result on the client instance.
+   * For local development and debugging. If `AETHERFY_VECTORS_URL` is
+   * also set, the env var wins and a warning is logged. The first call
+   * resolves the region against `GET /api/v1/regions` on the default
+   * global endpoint and caches the result on the client instance.
    */
   region?: 'iad' | 'fra' | 'sin';
 }

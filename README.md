@@ -261,18 +261,18 @@ for `appendMany()` on threads.
 
 ### setMetadata — atomic replace, explicit-compose merge
 
-`setMetadata()` atomically writes `payload.metadata = …` on an existing
-memory. Reserved fields (`text` for Namespace; `role`/`content`/`ts`
-for Thread) are untouched.
+`setMetadata()` replaces the entire metadata sub-key.
+`setMetadata({ tag: 'x' })` nukes every other key. Use `mergeMetadata`
+if you want additive updates that preserve existing keys. Reserved
+fields (`text` for Namespace; `role`/`content`/`ts` for Thread) are
+untouched either way.
 
 ```typescript
 await ns.setMetadata(pointId, { reviewed: true, score: 0.92 });
 ```
 
-There is intentionally **no** `mergeMetadata()` helper. To merge into
-existing metadata, retrieve, mutate locally, and write back — the
-explicit-compose pattern keeps races visible at the call site rather
-than hidden inside an SDK helper:
+To merge into existing metadata via the explicit-compose pattern (race
+visible at the call site, no atomicity guarantee):
 
 ```typescript
 const [point] = await ns.retrieve([pointId]);
@@ -283,6 +283,33 @@ await ns.setMetadata(pointId, { ...current, reviewed: true });
 If two callers run this concurrently, one update wins and the other
 sees its read be stale — by design, you see that race in your own code
 rather than have the SDK hide it.
+
+### mergeMetadata — atomic per-point partial merge
+
+`mergeMetadata({ tag: 'x' })` adds/updates the listed keys and leaves
+every other key untouched. Concurrent patches to different keys all
+land atomically; concurrent writes to the same key resolve via
+last-writer-wins per the storage operation order. Throws
+`PointNotFoundError` if the point doesn't exist. Reserved keys (`text`
+on Namespace; `role`, `content`, `ts` on Thread) cannot appear in the
+partial — throws a local `TypeError` before the request is sent.
+
+```typescript
+await ns.mergeMetadata(pointId, { reviewed: true });
+await ns.mergeMetadata(pointId, { score: 0.92 });
+// final metadata: original keys + reviewed + score
+```
+
+### deleteMetadataKeys — atomic key removal
+
+`deleteMetadataKeys(pointId, ['tag', 'score'])` removes the listed keys
+from metadata; keys not in the list are left untouched. Throws
+`PointNotFoundError` if the point doesn't exist. Reserved keys cannot
+appear in the keys list (same set as `mergeMetadata`).
+
+```typescript
+await ns.deleteMetadataKeys(pointId, ['draft', 'staleScore']);
+```
 
 ## 📐 Limits
 

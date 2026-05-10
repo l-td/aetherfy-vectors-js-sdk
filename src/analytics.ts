@@ -30,13 +30,7 @@ export class AnalyticsClient {
     this.authHeaders = authHeaders;
   }
 
-  /**
-   * Build a fully-qualified analytics URL.
-   *
-   * `baseUrl` is a bare host — the SDK owns the `/api/v1` prefix so
-   * the discovery payload, env vars, and `endpoint=` overrides stay
-   * clean. Mirrors `AetherfyVectorsClient.apiUrl`.
-   */
+  /** Build a fully-qualified analytics URL from the base host and a path. */
   private apiUrl(path: string): string {
     const base = this.baseUrl.replace(/\/$/, '');
     const p = path.startsWith('/') ? path : `/${path}`;

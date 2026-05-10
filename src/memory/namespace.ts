@@ -1,5 +1,5 @@
 /**
- * Namespace — a named, scoped memory bucket backed by one Qdrant collection.
+ * Namespace — a named, scoped memory bucket backed by one collection.
  *
  * The generic primitive for any agent shape. Wraps a single underlying
  * AetherfyVectorsClient collection and exposes only the operations that
@@ -11,6 +11,11 @@
  */
 
 import { AetherfyVectorsClient } from '../client';
+import {
+  AetherfyVectorsError,
+  CollectionNotFoundError,
+  PointNotFoundError,
+} from '../exceptions';
 import {
   AnalysisResult,
   CollectionAnalytics,
@@ -137,7 +142,20 @@ export class Namespace {
   }
 
   /**
-   * Replace the metadata sub-key of an existing memory.
+   * Top-level reserved keys that cannot appear inside metadata partials.
+   * Subclasses (Thread) override with their own reserved set.
+   * @internal
+   */
+  protected static readonly RESERVED_KEYS: ReadonlySet<string> = new Set([
+    'text',
+  ]);
+
+  /**
+   * Replace the entire metadata sub-key of an existing memory.
+   *
+   * `setMetadata({ tag: 'x' })` nukes every other key. Use
+   * `mergeMetadata` if you want additive updates that preserve existing
+   * keys.
    *
    * Atomically writes `payload.metadata = metadata`. Reserved fields
    * (`text` for Namespace, plus `role`/`content`/`ts` for Thread) are
@@ -158,6 +176,95 @@ export class Namespace {
     metadata: Record<string, unknown>
   ): Promise<unknown> {
     return this.client.setPayload(this.collection, { metadata }, [id]);
+  }
+
+  /**
+   * Additive merge into existing metadata.
+   *
+   * `mergeMetadata({ tag: 'x' })` adds/updates the listed keys and
+   * leaves every other key untouched. Use `setMetadata` if you want to
+   * fully replace the metadata sub-key. Concurrent patches to different
+   * keys all land atomically; concurrent writes to the same key resolve
+   * via last-writer-wins per the storage operation order. Throws
+   * `PointNotFoundError` if the point doesn't exist.
+   *
+   * Reserved keys (`text` on Namespace; `role`, `content`, `ts` on
+   * Thread) cannot appear in the partial — throws a local `TypeError`
+   * before the request is sent.
+   */
+  async mergeMetadata(
+    id: string | number,
+    partial: Record<string, unknown>
+  ): Promise<unknown> {
+    if (
+      partial === null ||
+      typeof partial !== 'object' ||
+      Array.isArray(partial)
+    ) {
+      throw new TypeError('partial must be a plain object');
+    }
+    const reserved = (this.constructor as typeof Namespace).RESERVED_KEYS;
+    const bad = Object.keys(partial).filter(k => reserved.has(k));
+    if (bad.length > 0) {
+      throw new TypeError(
+        `Reserved keys cannot appear in metadata partial: ${JSON.stringify(
+          bad.sort()
+        )}`
+      );
+    }
+    try {
+      return await this.client.setPayload(this.collection, partial, [id], {
+        key: 'metadata',
+      });
+    } catch (error: unknown) {
+      throw this.translatePointNotFound(error, id);
+    }
+  }
+
+  /**
+   * Removes the listed keys from metadata.
+   *
+   * Keys not in the list are left untouched. Throws
+   * `PointNotFoundError` if the point doesn't exist.
+   *
+   * Reserved keys (`text` on Namespace; `role`, `content`, `ts` on
+   * Thread) cannot appear in the keys list — throws a local
+   * `TypeError` before the request is sent.
+   */
+  async deleteMetadataKeys(
+    id: string | number,
+    keys: string[]
+  ): Promise<unknown> {
+    if (!Array.isArray(keys) || !keys.every(k => typeof k === 'string')) {
+      throw new TypeError('keys must be an array of strings');
+    }
+    const reserved = (this.constructor as typeof Namespace).RESERVED_KEYS;
+    const bad = keys.filter(k => reserved.has(k));
+    if (bad.length > 0) {
+      throw new TypeError(
+        `Reserved keys cannot appear in delete keys list: ${JSON.stringify(
+          bad.sort()
+        )}`
+      );
+    }
+    const dotted = keys.map(k => `metadata.${k}`);
+    try {
+      return await this.client.deletePayload(this.collection, dotted, [id]);
+    } catch (error: unknown) {
+      throw this.translatePointNotFound(error, id);
+    }
+  }
+
+  private translatePointNotFound(error: unknown, id: string | number): unknown {
+    if (
+      error instanceof AetherfyVectorsError &&
+      error.statusCode === 404 &&
+      !(error instanceof PointNotFoundError) &&
+      !(error instanceof CollectionNotFoundError)
+    ) {
+      return new PointNotFoundError(String(id), this.collection);
+    }
+    return error;
   }
 
   // -------------------------------------------------------------------

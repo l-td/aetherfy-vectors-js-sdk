@@ -9,6 +9,7 @@
 
 import nock from 'nock';
 import { AetherfyVectorsClient } from '../../src/client';
+import { PointNotFoundError } from '../../src/exceptions';
 
 const ENDPOINT = 'https://vectors.aetherfy.com';
 
@@ -129,6 +130,110 @@ describe('AetherfyVectorsClient payload methods', () => {
       await expect(
         client.deletePayload('col', ['k'], ['p1'])
       ).rejects.toThrow();
+    });
+  });
+
+  describe('setPayload key= option', () => {
+    it('includes key in the body when set', async () => {
+      const client = makeClient();
+      nock(ENDPOINT)
+        .post('/api/v1/collections/col/points/payload', {
+          payload: { a: 1 },
+          points: ['p1'],
+          key: 'metadata',
+        })
+        .reply(200, { result: { status: 'ok' } });
+
+      await client.setPayload('col', { a: 1 }, ['p1'], { key: 'metadata' });
+    });
+
+    it('omits key from the body when not set', async () => {
+      const client = makeClient();
+      nock(ENDPOINT)
+        .post(
+          '/api/v1/collections/col/points/payload',
+          body => !('key' in body)
+        )
+        .reply(200, { result: { status: 'ok' } });
+
+      await client.setPayload('col', { a: 1 }, ['p1']);
+    });
+  });
+
+  describe('mergeMetadata', () => {
+    it('POSTs partial under payload with key="metadata"', async () => {
+      const client = makeClient();
+      nock(ENDPOINT)
+        .post('/api/v1/collections/col/points/payload', {
+          payload: { tag: 'x' },
+          points: ['p1'],
+          key: 'metadata',
+        })
+        .reply(200, { result: { status: 'ok' } });
+
+      const out = await client.mergeMetadata('col', 'p1', { tag: 'x' });
+      expect(out).toEqual({ result: { status: 'ok' } });
+    });
+
+    it('rejects non-object partial with TypeError', async () => {
+      const client = makeClient();
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        client.mergeMetadata('col', 'p1', 'nope' as any)
+      ).rejects.toBeInstanceOf(TypeError);
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        client.mergeMetadata('col', 'p1', [1] as any)
+      ).rejects.toBeInstanceOf(TypeError);
+    });
+
+    it('translates a generic 404 into PointNotFoundError', async () => {
+      const client = makeClient();
+      nock(ENDPOINT)
+        .post('/api/v1/collections/col/points/payload')
+        .reply(404, { message: 'No point with id missing found' });
+
+      await expect(
+        client.mergeMetadata('col', 'missing', { a: 1 })
+      ).rejects.toBeInstanceOf(PointNotFoundError);
+    });
+  });
+
+  describe('deleteMetadataKeys', () => {
+    it('POSTs to /points/payload/delete with dotted metadata.<k> keys', async () => {
+      const client = makeClient();
+      nock(ENDPOINT)
+        .post('/api/v1/collections/col/points/payload/delete', {
+          keys: ['metadata.k1', 'metadata.k2'],
+          points: ['p1'],
+        })
+        .reply(200, { result: { status: 'ok' } });
+
+      const out = await client.deleteMetadataKeys('col', 'p1', ['k1', 'k2']);
+      expect(out).toEqual({ result: { status: 'ok' } });
+    });
+
+    it('rejects non-string-array keys with TypeError', async () => {
+      const client = makeClient();
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        client.deleteMetadataKeys('col', 'p1', 'k1' as any)
+      ).rejects.toBeInstanceOf(TypeError);
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        client.deleteMetadataKeys('col', 'p1', ['k1', 2] as any)
+      ).rejects.toBeInstanceOf(TypeError);
+    });
+
+    it('translates a generic 404 into PointNotFoundError', async () => {
+      const client = makeClient();
+      nock(ENDPOINT)
+        .post('/api/v1/collections/col/points/payload/delete')
+        .reply(404, { message: 'No point with id missing found' });
+
+      await expect(
+        client.deleteMetadataKeys('col', 'missing', ['k1'])
+      ).rejects.toBeInstanceOf(PointNotFoundError);
     });
   });
 });

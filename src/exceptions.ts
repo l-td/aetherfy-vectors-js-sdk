@@ -230,9 +230,9 @@ export class ConflictError extends AetherfyVectorsError {
 
 /**
  * Raised when a collection name is created in one region but already
- * exists in a different region (vectordb's WS9 reject policy). Carries
- * the rejection's typed fields so callers can offer a different name
- * or pin to the existing region without parsing error message strings.
+ * exists in a different region. Carries the rejection's typed fields
+ * so callers can offer a different name or pin to the existing region
+ * without parsing error message strings.
  */
 export class CollectionInOtherRegionError extends AetherfyVectorsError {
   public readonly collectionName: string;

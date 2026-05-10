@@ -21,7 +21,7 @@
  * const history = await chat.history({ limit: 20 });
  * ```
  *
- * For raw-Qdrant operations not exposed here, drop to the low-level client:
+ * For low-level vector operations not exposed here, drop to the underlying client:
  *
  * ```typescript
  * memory.vectors.scroll(...);   // any AetherfyVectorsClient method

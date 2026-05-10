@@ -27,7 +27,7 @@ export interface Message {
 }
 
 /**
- * Reconstruct a Message from a retrieved Qdrant point.
+ * Reconstruct a Message from a retrieved point.
  * @internal
  */
 export function messageFromPoint(point: {
@@ -54,10 +54,10 @@ export function messageFromPoint(point: {
 /**
  * Canonical UUID point ID generator (8-4-4-4-12 hex with hyphens).
  *
- * Returns the same canonical form Qdrant emits on read. The hyphenated
- * form is what scroll/retrieve return; emitting the un-hyphenated 32-char
- * form here would make round-trip ID equality (caller tracks SDK-returned
- * IDs and compares against scroll output) silently fail.
+ * Returns the same canonical form scroll/retrieve emit on read. Emitting
+ * the un-hyphenated 32-char form here would make round-trip ID equality
+ * (caller tracks SDK-returned IDs and compares against scroll output)
+ * silently fail.
  *
  * Uses `crypto.randomUUID` when available (Node ≥14.17, modern browsers);
  * falls back to `Math.random` formatted into the canonical layout. The

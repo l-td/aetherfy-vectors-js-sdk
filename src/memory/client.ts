@@ -6,9 +6,9 @@
  * Thread); there is no root-level add/search and no magic default
  * collection. Scopes must be created explicitly (typo protection).
  *
- * For operations not exposed here — custom collection configs, raw Qdrant
- * calls, any current vectors-SDK surface — use AetherfyVectorsClient
- * directly via `memory.vectors` or its own import.
+ * For operations not exposed here — custom collection configs, low-level
+ * vector operations, any current vectors-SDK surface — use
+ * AetherfyVectorsClient directly via `memory.vectors` or its own import.
  */
 
 import { AetherfyVectorsClient } from '../client';

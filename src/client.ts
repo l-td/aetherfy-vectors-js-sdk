@@ -28,6 +28,8 @@ import {
 } from './models';
 import {
   AetherfyVectorsError,
+  CollectionNotFoundError,
+  PointNotFoundError,
   ValidationError,
   NetworkError,
   SchemaNotFoundError,
@@ -95,8 +97,8 @@ export class AetherfyVectorsClient {
     'sin',
   ]);
   /**
-   * The Fly region for this client (when `region` was provided to
-   * `create()`). null otherwise. Read-only after construction.
+   * The region this client is pinned to (when `region` was provided
+   * to `create()`); null otherwise. Read-only after construction.
    */
   public readonly region: 'iad' | 'fra' | 'sin' | null = null;
 
@@ -167,14 +169,12 @@ export class AetherfyVectorsClient {
           `region must be one of iad, fra, sin (got ${String(config.region)})`
         );
       }
-      // env var wins over region= regardless of how the caller got
-      // here — production-agent protection.
+      // env var wins over region= regardless of how the caller got here.
       if (envEndpoint) {
         // eslint-disable-next-line no-console
         console.warn(
           `Both AETHERFY_VECTORS_URL and region=${config.region} are set; ` +
-            'using AETHERFY_VECTORS_URL — region= is a local-dev parameter, ' +
-            'env var wins in production agents'
+            'using AETHERFY_VECTORS_URL (region= is a local-dev parameter)'
         );
         this.endpoint = envEndpoint;
       } else if (config.endpoint) {
@@ -234,7 +234,7 @@ export class AetherfyVectorsClient {
    *   4. Default global endpoint.
    *
    * When the env var and `region=` are both set, the env var wins and
-   * a warning is logged — production-agent protection.
+   * a warning is logged.
    *
    * @example
    * ```typescript
@@ -321,27 +321,12 @@ export class AetherfyVectorsClient {
     });
   }
 
-  /**
-   * Build a fully-qualified API URL from the bare endpoint host.
-   *
-   * `this.endpoint` is a bare host (e.g. `https://vectors-use1.aetherfy.com`)
-   * — the API version prefix is owned by the SDK so the discovery
-   * payload, the AETHERFY_VECTORS_URL env var, and any `endpoint=`
-   * override all stay clean. Every operation routes through here so
-   * the prefix lives in exactly one place.
-   *
-   * Mirrors `aetherfy_vectors.utils.build_api_url` in the Python SDK
-   * — both must produce `<host>/api/v1/<path>`.
-   */
+  /** Build a fully-qualified API URL from the endpoint host and a path. */
   private apiUrl(path: string): string {
     return AetherfyVectorsClient.buildApiUrl(this.endpoint, path);
   }
 
-  /**
-   * Static counterpart of {@link apiUrl} — used by `create()`'s
-   * region-discovery code which has no `this`. Kept symmetric so the
-   * `/api/v1` prefix is added in exactly one place across the SDK.
-   */
+  /** Static counterpart of {@link apiUrl}, for use without an instance. */
   private static buildApiUrl(host: string, path: string): string {
     const base = host.replace(/\/$/, '');
     const p = path.startsWith('/') ? path : `/${path}`;
@@ -411,15 +396,15 @@ export class AetherfyVectorsClient {
       const ok = response.status === 200 || response.status === 201;
       if (ok) {
         // Prepopulate the schema cache from the request we just authored.
-        // The backend's GET /collections/<name> hits Qdrant, which is
-        // eventually consistent w.r.t. its own writes — a read immediately
-        // after a successful create can briefly return 4xx. Seeding the
-        // cache here makes the next upsert/exists call hit local state
-        // instead of racing the read-after-write window. We have ground
-        // truth (size + distance) directly from the caller, so no extra
-        // network round trip is needed. etag stays undefined: upsert's
-        // `if (schema.etag)` guard treats it as "no If-Match header,"
-        // which is correct until a real GET assigns a schema_version.
+        // GET /collections/<name> can be eventually consistent w.r.t.
+        // its own writes — a read immediately after a successful create
+        // can briefly return 4xx. Seeding the cache here makes the next
+        // upsert/exists call hit local state instead of racing the
+        // read-after-write window. We have ground truth (size + distance)
+        // from the caller, so no extra round trip is needed. etag stays
+        // undefined: upsert's `if (schema.etag)` guard treats it as "no
+        // If-Match header," which is correct until a real GET assigns a
+        // schema_version.
         this.schemaCache.set(scopedName, {
           size: config.size,
           distance: config.distance,
@@ -505,11 +490,10 @@ export class AetherfyVectorsClient {
 
     // Fast path: if this client just created (or recently used) the
     // collection, the schema cache holds proof of existence. Skip the
-    // network round trip and the read-after-write race against Qdrant's
-    // eventual consistency. deleteCollection() clears the cache, so a
-    // stale `true` after a remote delete is bounded to cross-client
-    // deletes only — and any subsequent operation will surface the real
-    // 404 from the backend.
+    // network round trip and the read-after-write window of the upstream
+    // store. deleteCollection() clears the cache, so a stale `true`
+    // after a remote delete is bounded to cross-client deletes only —
+    // and any subsequent operation will surface the real 404.
     if (this.getCachedSchema(scopedName) !== undefined) {
       return true;
     }
@@ -823,8 +807,8 @@ export class AetherfyVectorsClient {
   // ---------------------------------------------------------------------
   // Payload mutation
   //
-  // Three helpers correspond to the three Qdrant payload endpoints
-  // exposed by the backend. Server-side cap: body.points.length <= 512.
+  // Three helpers for the three payload-mutation endpoints. Server-side
+  // cap: body.points.length <= 512.
   // ---------------------------------------------------------------------
 
   /**
@@ -837,22 +821,31 @@ export class AetherfyVectorsClient {
    * @param collectionName - Target collection.
    * @param payload - Payload object to merge into each point's payload.
    * @param points - Point IDs to update. Server caps at 512.
+   * @param options - Optional. `key` targets the merge inside a nested
+   *   payload sub-object instead of the top level — every key in
+   *   `payload` is merged into `payload[key]`, preserving siblings not
+   *   mentioned. Used by `mergeMetadata` for atomic per-point
+   *   partial-merge semantics under `payload.metadata`.
    */
   async setPayload(
     collectionName: string,
     payload: Record<string, unknown>,
-    points: Array<string | number>
+    points: Array<string | number>,
+    options: { key?: string } = {}
   ): Promise<unknown> {
     this.validateCollectionName(collectionName);
     points.forEach(validatePointId);
     const scopedName = this.scopeCollection(collectionName);
+
+    const body: Record<string, unknown> = { payload, points };
+    if (options.key !== undefined) body.key = options.key;
 
     try {
       const response = await this.httpClient.post(
         this.apiUrl(
           `/collections/${encodeURIComponent(scopedName)}/points/payload`
         ),
-        { payload, points }
+        body
       );
       return response.data;
     } catch (error: unknown) {
@@ -907,9 +900,8 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      // Qdrant's URL is POST /points/payload/delete (not DELETE
-      // /points/payload). Match the upstream contract directly so the
-      // proxy has nothing to translate.
+      // POST /points/payload/delete (not DELETE /points/payload) —
+      // matches the underlying wire contract.
       const response = await this.httpClient.post(
         this.apiUrl(
           `/collections/${encodeURIComponent(scopedName)}/points/payload/delete`
@@ -921,6 +913,76 @@ export class AetherfyVectorsClient {
       this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);
     }
+  }
+
+  /**
+   * Additive merge into existing `payload.metadata`.
+   *
+   * `mergeMetadata({ tag: 'x' })` adds/updates the listed keys and
+   * leaves every other key untouched. Use `setPayload` with the full
+   * metadata object if you want to fully replace the metadata sub-key.
+   * Concurrent patches to different keys all land atomically;
+   * concurrent writes to the same key resolve via last-writer-wins per
+   * the storage operation order. Throws `PointNotFoundError` if the
+   * point doesn't exist.
+   */
+  async mergeMetadata(
+    collectionName: string,
+    pointId: string | number,
+    partial: Record<string, unknown>
+  ): Promise<unknown> {
+    if (
+      partial === null ||
+      typeof partial !== 'object' ||
+      Array.isArray(partial)
+    ) {
+      throw new TypeError('partial must be a plain object');
+    }
+    try {
+      return await this.setPayload(collectionName, partial, [pointId], {
+        key: 'metadata',
+      });
+    } catch (error: unknown) {
+      throw this.translatePointNotFound(error, collectionName, pointId);
+    }
+  }
+
+  /**
+   * Removes the listed keys from `payload.metadata`.
+   *
+   * Keys not in the list are left untouched. Throws
+   * `PointNotFoundError` if the point doesn't exist.
+   */
+  async deleteMetadataKeys(
+    collectionName: string,
+    pointId: string | number,
+    keys: string[]
+  ): Promise<unknown> {
+    if (!Array.isArray(keys) || !keys.every(k => typeof k === 'string')) {
+      throw new TypeError('keys must be an array of strings');
+    }
+    const dotted = keys.map(k => `metadata.${k}`);
+    try {
+      return await this.deletePayload(collectionName, dotted, [pointId]);
+    } catch (error: unknown) {
+      throw this.translatePointNotFound(error, collectionName, pointId);
+    }
+  }
+
+  private translatePointNotFound(
+    error: unknown,
+    collectionName: string,
+    pointId: string | number
+  ): unknown {
+    if (
+      error instanceof AetherfyVectorsError &&
+      error.statusCode === 404 &&
+      !(error instanceof PointNotFoundError) &&
+      !(error instanceof CollectionNotFoundError)
+    ) {
+      return new PointNotFoundError(String(pointId), collectionName);
+    }
+    return error;
   }
 
   /**
@@ -958,10 +1020,8 @@ export class AetherfyVectorsClient {
         {
           ids,
           with_payload: options.withPayload ?? true,
-          // Qdrant's wire field is singular; matches Python SDK at
-          // aetherfy_vectors/client.py (with_vectors caller arg →
-          // with_vector body field). The dedicated /points/retrieve
-          // route reads body.with_vector strictly.
+          // Wire field is singular (with_vector); the caller-facing
+          // option name `withVectors` is plural by JS convention.
           with_vector: options.withVectors ?? false,
         }
       );

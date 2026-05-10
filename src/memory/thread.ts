@@ -37,6 +37,16 @@ export interface ThreadHistoryOptions {
 
 export class Thread extends Namespace {
   /**
+   * Thread payload top-level reserved fields. Overrides Namespace's
+   * `{text}` set — Thread payload is `{ role, content, ts, metadata }`,
+   * so role/content/ts are the names that shouldn't appear in user
+   * metadata partials.
+   * @internal
+   */
+  protected static override readonly RESERVED_KEYS: ReadonlySet<string> =
+    new Set(['role', 'content', 'ts']);
+
+  /**
    * Internal — callers use MemoryClient.thread(id) to construct.
    * @internal
    */
@@ -149,10 +159,9 @@ export class Thread extends Namespace {
   /**
    * Return messages ordered by timestamp.
    *
-   * Qdrant's scroll API has no server-side order_by over payload fields
-   * without an index; for the MVP we pull up to a bounded cap and sort
-   * client-side by `ts`. Long histories can paginate via `offset` in
-   * a future iteration.
+   * The underlying scroll API has no server-side order_by over payload
+   * fields, so we pull up to a bounded cap and sort client-side by `ts`.
+   * Long histories can paginate via `offset` in a future iteration.
    */
   async history(options: ThreadHistoryOptions = {}): Promise<Message[]> {
     const limit = options.limit ?? 50;

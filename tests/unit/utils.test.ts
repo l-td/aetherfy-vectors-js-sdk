@@ -158,9 +158,6 @@ describe('Validation Functions', () => {
 
 describe('URL and Request Utilities', () => {
   describe('buildApiUrl', () => {
-    // SDK owns the /api/v1 prefix; baseUrl stays a bare host. Mirror of
-    // aetherfy_vectors.utils.build_api_url — change one, change the
-    // other.
     it('should build URL correctly', () => {
       expect(buildApiUrl('https://api.example.com', 'collections')).toBe(
         'https://api.example.com/api/v1/collections'

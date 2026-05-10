@@ -154,18 +154,12 @@ export function validateDistanceMetric(metric: string): void {
  */
 
 /**
- * Build a fully-qualified API URL from a bare host and a versioned path.
+ * Build a fully-qualified API URL from a base host and an endpoint path.
  *
- * `baseUrl` is a bare host (e.g. `https://vectors-use1.aetherfy.com`)
- * — the SDK owns the `/api/v1` prefix so the discovery payload, the
- * `AETHERFY_VECTORS_URL` env var, and any explicit `endpoint=` argument
- * can all stay clean. Mirror of `aetherfy_vectors.utils.build_api_url`
- * in the Python SDK; both must produce `<host>/api/v1/<path>`.
- *
- * @param baseUrl - Bare host URL with optional trailing slash.
- * @param endpoint - API path, with or without a leading slash.
+ * @param baseUrl - Base URL with optional trailing slash.
+ * @param endpoint - Endpoint path, with or without a leading slash.
  * @param params - Optional query parameters appended as `?k=v&...`.
- * @returns `<baseUrl>/api/v1/<endpoint>` with optional query string.
+ * @returns The joined URL, with an optional query string.
  */
 export function buildApiUrl(
   baseUrl: string,
