@@ -7,6 +7,18 @@
  * Base error class for all Aetherfy Vectors SDK errors
  */
 export class AetherfyVectorsError extends Error {
+  /**
+   * Machine-readable error code from the backend's canonical envelope
+   * (`body.error.code`). Examples: `COLLECTION_NOT_FOUND`,
+   * `STORAGE_LIMIT_EXCEEDED`, `COLLECTION_IN_USE`. Symmetric with the
+   * Python SDK's `exc.error_code` — clients can `if (err.code === 'X')`
+   * without reaching into `err.details`.
+   *
+   * Set once by `createErrorFromResponse`; not declared readonly so the
+   * factory can assign it after picking the concrete subclass without
+   * having to thread `code` through every subclass constructor.
+   */
+  public code?: string;
   public readonly requestId?: string;
   public readonly statusCode?: number;
   public readonly details?: Record<string, unknown>;
@@ -34,6 +46,7 @@ export class AetherfyVectorsError extends Error {
     return {
       name: this.name,
       message: this.message,
+      code: this.code,
       requestId: this.requestId,
       statusCode: this.statusCode,
       details: this.details,
@@ -414,6 +427,13 @@ export function createErrorFromResponse(
       ? (responseData.error as Record<string, unknown>)
       : undefined;
   const errorCode = nestedError?.code as string | undefined;
+  // Stamp `code` on every error we build so clients can switch on
+  // `err.code === 'X'` symmetrically with the Python SDK, regardless of
+  // which concrete subclass we picked below.
+  const stamp = (err: AetherfyVectorsError): AetherfyVectorsError => {
+    err.code = errorCode;
+    return err;
+  };
 
   let message: string;
   try {
@@ -440,34 +460,42 @@ export function createErrorFromResponse(
   switch (status) {
     case 400:
       if (errorCode === 'COLLECTION_LIMIT_EXCEEDED') {
-        return new QuotaExceededError(
-          message,
-          'collections',
-          nestedError?.current as number | undefined,
-          nestedError?.limit as number | undefined
+        return stamp(
+          new QuotaExceededError(
+            message,
+            'collections',
+            nestedError?.current as number | undefined,
+            nestedError?.limit as number | undefined
+          )
         );
       }
-      return new ValidationError(
-        message,
-        responseData?.field as string | undefined,
-        responseData?.violations as string[] | undefined
+      return stamp(
+        new ValidationError(
+          message,
+          responseData?.field as string | undefined,
+          responseData?.violations as string[] | undefined
+        )
       );
 
     case 401:
     case 403:
-      return new AuthenticationError(message);
+      return stamp(new AuthenticationError(message));
 
     case 404:
       // Check for both pointId and collectionName first (more specific case)
       if (responseData?.pointId && responseData?.collectionName) {
-        return new PointNotFoundError(
-          responseData.pointId as string | number,
-          String(responseData.collectionName)
+        return stamp(
+          new PointNotFoundError(
+            responseData.pointId as string | number,
+            String(responseData.collectionName)
+          )
         );
       }
       // Then check for just collectionName
       if (responseData?.collectionName) {
-        return new CollectionNotFoundError(String(responseData.collectionName));
+        return stamp(
+          new CollectionNotFoundError(String(responseData.collectionName))
+        );
       }
       // Handle Qdrant-style: {"status": {"error": "Not found: Collection `name` doesn't exist!"}}
       {
@@ -476,16 +504,18 @@ export function createErrorFromResponse(
         if (typeof statusError === 'string') {
           const match = statusError.match(/Collection `([^`]+)` doesn't exist/);
           if (match) {
-            return new CollectionNotFoundError(match[1]);
+            return stamp(new CollectionNotFoundError(match[1]));
           }
           message = statusError;
         }
       }
-      return new AetherfyVectorsError(
-        message,
-        requestId,
-        status,
-        details as Record<string, unknown> | undefined
+      return stamp(
+        new AetherfyVectorsError(
+          message,
+          requestId,
+          status,
+          details as Record<string, unknown> | undefined
+        )
       );
 
     case 409: {
@@ -493,54 +523,63 @@ export function createErrorFromResponse(
         | Record<string, unknown>
         | undefined;
       if (errorObj?.code === 'COLLECTION_IN_USE') {
-        return new CollectionInUseError(
-          String(errorObj.collection_name || 'unknown'),
-          (errorObj.agents as string[]) || []
+        return stamp(
+          new CollectionInUseError(
+            String(errorObj.collection_name || 'unknown'),
+            (errorObj.agents as string[]) || []
+          )
         );
       }
       if (errorObj?.code === 'COLLECTION_EXISTS_IN_OTHER_REGION') {
-        return new CollectionInOtherRegionError(
-          String(errorObj.collection_name || 'unknown'),
-          Array.isArray(errorObj.existing_regions)
-            ? (errorObj.existing_regions as string[])
-            : [],
-          String(errorObj.requesting_region || ''),
-          typeof errorObj.message === 'string' ? errorObj.message : undefined
+        return stamp(
+          new CollectionInOtherRegionError(
+            String(errorObj.collection_name || 'unknown'),
+            Array.isArray(errorObj.existing_regions)
+              ? (errorObj.existing_regions as string[])
+              : [],
+            String(errorObj.requesting_region || ''),
+            typeof errorObj.message === 'string' ? errorObj.message : undefined
+          )
         );
       }
-      return new ConflictError(
-        message,
-        responseData?.conflictingResource as string,
-        409,
-        details as Record<string, unknown> | undefined
+      return stamp(
+        new ConflictError(
+          message,
+          responseData?.conflictingResource as string,
+          409,
+          details as Record<string, unknown> | undefined
+        )
       );
     }
 
     case 429:
       if (errorCode === 'STORAGE_LIMIT_EXCEEDED') {
-        return new QuotaExceededError(
-          message,
-          'storage',
-          nestedError?.current as number | undefined,
-          nestedError?.limit as number | undefined
+        return stamp(
+          new QuotaExceededError(
+            message,
+            'storage',
+            nestedError?.current as number | undefined,
+            nestedError?.limit as number | undefined
+          )
         );
       }
-      return new RateLimitExceededError(
-        message,
-        responseData?.retryAfter as number
+      return stamp(
+        new RateLimitExceededError(message, responseData?.retryAfter as number)
       );
 
     case 502:
     case 503:
     case 504:
-      return new ServiceUnavailableError(message);
+      return stamp(new ServiceUnavailableError(message));
 
     default:
-      return new AetherfyVectorsError(
-        message,
-        requestId,
-        status,
-        details as Record<string, unknown> | undefined
+      return stamp(
+        new AetherfyVectorsError(
+          message,
+          requestId,
+          status,
+          details as Record<string, unknown> | undefined
+        )
       );
   }
 }
