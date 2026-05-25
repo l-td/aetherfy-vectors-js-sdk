@@ -91,16 +91,20 @@ import { validateVectors } from './schema';
 export class AetherfyVectorsClient {
   private static readonly DEFAULT_ENDPOINT = 'https://vectors.aetherfy.com';
   private static readonly DEFAULT_TIMEOUT = 30000;
-  private static readonly VALID_FLY_REGIONS: ReadonlySet<string> = new Set([
-    'iad',
-    'fra',
-    'sin',
+  private static readonly VALID_REGIONS: ReadonlySet<string> = new Set([
+    'us-east-1',
+    'eu-central-1',
+    'ap-southeast-1',
   ]);
   /**
    * The region this client is pinned to (when `region` was provided
    * to `create()`); null otherwise. Read-only after construction.
    */
-  public readonly region: 'iad' | 'fra' | 'sin' | null = null;
+  public readonly region:
+    | 'us-east-1'
+    | 'eu-central-1'
+    | 'ap-southeast-1'
+    | null = null;
 
   private httpClient: HttpClient;
   private authManager: APIKeyManager;
@@ -164,9 +168,9 @@ export class AetherfyVectorsClient {
         : undefined;
 
     if (config.region) {
-      if (!AetherfyVectorsClient.VALID_FLY_REGIONS.has(config.region)) {
+      if (!AetherfyVectorsClient.VALID_REGIONS.has(config.region)) {
         throw new Error(
-          `region must be one of iad, fra, sin (got ${String(config.region)})`
+          `region must be one of us-east-1, eu-central-1, ap-southeast-1 (got ${String(config.region)})`
         );
       }
       // env var wins over region= regardless of how the caller got here.
@@ -224,7 +228,7 @@ export class AetherfyVectorsClient {
   /**
    * Async factory — the canonical way to construct a client with
    * region= or any other future async configuration. Mirrors Python's
-   * `AetherfyVectorsClient(api_key=..., region='fra')` contract:
+   * `AetherfyVectorsClient(api_key=..., region='eu-central-1')` contract:
    * when you have a client, it's fully ready.
    *
    * Resolution order (same as Python):
@@ -240,7 +244,7 @@ export class AetherfyVectorsClient {
    * ```typescript
    * const client = await AetherfyVectorsClient.create({
    *   apiKey: 'afy_test_...',
-   *   region: 'fra',
+   *   region: 'eu-central-1',
    * });
    * ```
    */
@@ -251,10 +255,10 @@ export class AetherfyVectorsClient {
     if (
       config.region !== undefined &&
       config.region !== null &&
-      !AetherfyVectorsClient.VALID_FLY_REGIONS.has(config.region)
+      !AetherfyVectorsClient.VALID_REGIONS.has(config.region)
     ) {
       throw new Error(
-        `region must be one of iad, fra, sin (got ${String(config.region)})`
+        `region must be one of us-east-1, eu-central-1, ap-southeast-1 (got ${String(config.region)})`
       );
     }
 

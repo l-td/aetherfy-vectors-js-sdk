@@ -3,11 +3,12 @@
  * discovery on AetherfyVectorsClient.
  *
  * Pins the contract:
- *   - region= validates against the Fly set (iad/fra/sin) eagerly.
- *   - `await AetherfyVectorsClient.create({region: 'fra'})` runs
+ *   - region= validates against the AWS set
+ *     (us-east-1/eu-central-1/ap-southeast-1) eagerly.
+ *   - `await AetherfyVectorsClient.create({region: 'eu-central-1'})` runs
  *     discovery on the default global endpoint and returns a
  *     fully-ready client (mirrors Python's __init__).
- *   - `new AetherfyVectorsClient({region: 'fra'})` THROWS unless an
+ *   - `new AetherfyVectorsClient({region: 'eu-central-1'})` THROWS unless an
  *     override (endpoint= or AETHERFY_VECTORS_URL) is also present —
  *     async discovery isn't safe inside a sync constructor and
  *     silently deferring is a footgun.
@@ -47,10 +48,12 @@ describe('AetherfyVectorsClient region= + discovery', () => {
       await expect(
         AetherfyVectorsClient.create({
           apiKey: 'afy_test_1234567890123456',
-          region: 'xxx' as 'iad',
+          region: 'xxx' as 'us-east-1',
           enableConnectionPooling: false,
         })
-      ).rejects.toThrow(/region must be one of iad, fra, sin/);
+      ).rejects.toThrow(
+        /region must be one of us-east-1, eu-central-1, ap-southeast-1/
+      );
     });
 
     it('new throws when region= is passed without an override', () => {
@@ -60,7 +63,7 @@ describe('AetherfyVectorsClient region= + discovery', () => {
       expect(() => {
         new AetherfyVectorsClient({
           apiKey: 'afy_test_1234567890123456',
-          region: 'fra',
+          region: 'eu-central-1',
           enableConnectionPooling: false,
         });
       }).toThrow(/region= requires async region discovery.*create/);
@@ -73,11 +76,13 @@ describe('AetherfyVectorsClient region= + discovery', () => {
       expect(() => {
         new AetherfyVectorsClient({
           apiKey: 'afy_test_1234567890123456',
-          region: 'xxx' as 'iad',
+          region: 'xxx' as 'us-east-1',
           endpoint: 'https://vectors-fra.aetherfy.run',
           enableConnectionPooling: false,
         });
-      }).toThrow(/region must be one of iad, fra, sin/);
+      }).toThrow(
+        /region must be one of us-east-1, eu-central-1, ap-southeast-1/
+      );
     });
 
     it('new accepts region= when endpoint= is also passed (no discovery needed)', () => {
@@ -85,11 +90,11 @@ describe('AetherfyVectorsClient region= + discovery', () => {
       // region= just labels the .region field for callers.
       const client = new AetherfyVectorsClient({
         apiKey: 'afy_test_1234567890123456',
-        region: 'fra',
+        region: 'eu-central-1',
         endpoint: 'https://vectors-fra.aetherfy.run',
         enableConnectionPooling: false,
       });
-      expect(client.region).toBe('fra');
+      expect(client.region).toBe('eu-central-1');
       expect((client as unknown as { endpoint: string }).endpoint).toBe(
         'https://vectors-fra.aetherfy.run'
       );
@@ -97,19 +102,19 @@ describe('AetherfyVectorsClient region= + discovery', () => {
   });
 
   describe('discovery via create()', () => {
-    it('resolves region=fra to the per-region URL via /api/v1/regions', async () => {
+    it('resolves region=eu-central-1 to the per-region URL via /api/v1/regions', async () => {
       nock(DEFAULT).get('/api/v1/regions').reply(200, {
-        iad: 'https://vectors-iad.aetherfy.run',
-        fra: 'https://vectors-fra.aetherfy.run',
-        sin: 'https://vectors-sin.aetherfy.run',
+        'us-east-1': 'https://vectors-iad.aetherfy.run',
+        'eu-central-1': 'https://vectors-fra.aetherfy.run',
+        'ap-southeast-1': 'https://vectors-sin.aetherfy.run',
       });
 
       const client = await AetherfyVectorsClient.create({
         apiKey: 'afy_test_1234567890123456',
-        region: 'fra',
+        region: 'eu-central-1',
         enableConnectionPooling: false,
       });
-      expect(client.region).toBe('fra');
+      expect(client.region).toBe('eu-central-1');
       expect((client as unknown as { endpoint: string }).endpoint).toBe(
         'https://vectors-fra.aetherfy.run'
       );
@@ -119,18 +124,18 @@ describe('AetherfyVectorsClient region= + discovery', () => {
       // Per-creation discovery; no module-global state leaks across
       // independently constructed clients (e.g. test suite vs prod).
       nock(DEFAULT).get('/api/v1/regions').twice().reply(200, {
-        iad: 'https://vectors-iad.aetherfy.run',
-        fra: 'https://vectors-fra.aetherfy.run',
+        'us-east-1': 'https://vectors-iad.aetherfy.run',
+        'eu-central-1': 'https://vectors-fra.aetherfy.run',
       });
 
       const c1 = await AetherfyVectorsClient.create({
         apiKey: 'afy_test_1234567890123456',
-        region: 'iad',
+        region: 'us-east-1',
         enableConnectionPooling: false,
       });
       const c2 = await AetherfyVectorsClient.create({
         apiKey: 'afy_test_1234567890123456',
-        region: 'fra',
+        region: 'eu-central-1',
         enableConnectionPooling: false,
       });
       expect((c1 as unknown as { endpoint: string }).endpoint).toBe(
@@ -148,7 +153,7 @@ describe('AetherfyVectorsClient region= + discovery', () => {
       await expect(
         AetherfyVectorsClient.create({
           apiKey: 'afy_test_1234567890123456',
-          region: 'fra',
+          region: 'eu-central-1',
           enableConnectionPooling: false,
         })
       ).rejects.toBeInstanceOf(AetherfyVectorsError);
@@ -156,13 +161,13 @@ describe('AetherfyVectorsClient region= + discovery', () => {
 
     it('discovery missing the requested region → throws with available list', async () => {
       nock(DEFAULT).get('/api/v1/regions').reply(200, {
-        iad: 'https://vectors-iad.aetherfy.run',
+        'us-east-1': 'https://vectors-iad.aetherfy.run',
       });
 
       await expect(
         AetherfyVectorsClient.create({
           apiKey: 'afy_test_1234567890123456',
-          region: 'fra',
+          region: 'eu-central-1',
           enableConnectionPooling: false,
         })
       ).rejects.toThrow(/not configured at the discovery endpoint/);
@@ -178,7 +183,7 @@ describe('AetherfyVectorsClient region= + discovery', () => {
         // var is set; no /api/v1/regions request is made.
         const client = await AetherfyVectorsClient.create({
           apiKey: 'afy_test_1234567890123456',
-          region: 'fra',
+          region: 'eu-central-1',
           enableConnectionPooling: false,
         });
         expect((client as unknown as { endpoint: string }).endpoint).toBe(
@@ -187,7 +192,7 @@ describe('AetherfyVectorsClient region= + discovery', () => {
         expect(warnSpy).toHaveBeenCalled();
         const msg = warnSpy.mock.calls[0][0] as string;
         expect(msg).toMatch(/AETHERFY_VECTORS_URL/);
-        expect(msg).toMatch(/region=fra/);
+        expect(msg).toMatch(/region=eu-central-1/);
       } finally {
         delete process.env.AETHERFY_VECTORS_URL;
         warnSpy.mockRestore();
@@ -200,7 +205,7 @@ describe('AetherfyVectorsClient region= + discovery', () => {
       const client = await AetherfyVectorsClient.create({
         apiKey: 'afy_test_1234567890123456',
         endpoint: 'http://localhost:3000',
-        region: 'fra',
+        region: 'eu-central-1',
         enableConnectionPooling: false,
       });
       expect((client as unknown as { endpoint: string }).endpoint).toBe(
@@ -229,13 +234,13 @@ describe('AetherfyVectorsClient region= + discovery', () => {
     // endpoint is final. No transient state, no setBaseUrl shenanigans.
     it('analytics.baseUrl matches the resolved per-region URL', async () => {
       nock(DEFAULT).get('/api/v1/regions').reply(200, {
-        iad: 'https://vectors-iad.aetherfy.run',
-        fra: 'https://vectors-fra.aetherfy.run',
+        'us-east-1': 'https://vectors-iad.aetherfy.run',
+        'eu-central-1': 'https://vectors-fra.aetherfy.run',
       });
 
       const client = await AetherfyVectorsClient.create({
         apiKey: 'afy_test_1234567890123456',
-        region: 'fra',
+        region: 'eu-central-1',
         enableConnectionPooling: false,
       });
       const analytics = (
@@ -253,18 +258,19 @@ describe('AetherfyVectorsClient region= + discovery', () => {
       const body = {
         error: {
           code: 'COLLECTION_EXISTS_IN_OTHER_REGION',
-          message: "Collection 'foo' already exists in region fra. ...",
+          message:
+            "Collection 'foo' already exists in region eu-central-1. ...",
           collection_name: 'foo',
-          existing_regions: ['fra'],
-          requesting_region: 'iad',
+          existing_regions: ['eu-central-1'],
+          requesting_region: 'us-east-1',
         },
       };
       const err = createErrorFromResponse(body, 409, 'Conflict');
       expect(err).toBeInstanceOf(CollectionInOtherRegionError);
       const typed = err as CollectionInOtherRegionError;
       expect(typed.collectionName).toBe('foo');
-      expect(typed.existingRegions).toEqual(['fra']);
-      expect(typed.requestingRegion).toBe('iad');
+      expect(typed.existingRegions).toEqual(['eu-central-1']);
+      expect(typed.requestingRegion).toBe('us-east-1');
       expect(typed.statusCode).toBe(409);
     });
 

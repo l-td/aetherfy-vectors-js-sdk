@@ -850,8 +850,11 @@ describe('Analytics parity', () => {
   it('getPerformanceAnalytics delegates', async () => {
     const mock = buildMockClient();
     const m = newMemory(mock);
-    await m.getPerformanceAnalytics('7d', 'iad');
-    expect(mock.getPerformanceAnalytics).toHaveBeenCalledWith('7d', 'iad');
+    await m.getPerformanceAnalytics('7d', 'us-east-1');
+    expect(mock.getPerformanceAnalytics).toHaveBeenCalledWith(
+      '7d',
+      'us-east-1'
+    );
   });
 
   it('getNamespaceAnalytics requires existence', async () => {

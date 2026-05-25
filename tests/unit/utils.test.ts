@@ -206,14 +206,20 @@ describe('URL and Request Utilities', () => {
       expect(error.message).toBe('Something went wrong');
     });
 
-    it('should parse error with detail field', () => {
+    it('does NOT parse FastAPI {detail: "..."} envelope (per REVIEW_FAQ §56)', () => {
+      // The JS SDK only talks to vectordb (Node/Express), so it only
+      // parses {error: ...}. FastAPI's bare HTTPException(detail="...")
+      // shape is intentionally ignored — if the SDK ever sees it, that
+      // signals a misrouted call and the message falls back to
+      // statusText so the consumer notices.
       const error = parseErrorResponse(
         { detail: 'Validation failed' },
         400,
         'Bad Request'
       );
 
-      expect(error.message).toBe('Validation failed');
+      expect(error.message).toBe('Bad Request');
+      expect(error.code).toBeUndefined();
     });
 
     it('should fallback to statusText when no message fields present', () => {
@@ -251,6 +257,36 @@ describe('URL and Request Utilities', () => {
         statusCode: 400,
         statusText: 'Bad Request',
       });
+    });
+
+    it('should extract code and message from Node-style envelope { error: { code, message } }', () => {
+      const error = parseErrorResponse(
+        { error: { code: 'UPSTREAM_ERROR', message: 'gateway timeout' } },
+        502,
+        'Bad Gateway'
+      );
+
+      expect(error.code).toBe('UPSTREAM_ERROR');
+      expect(error.message).toBe('gateway timeout');
+      expect(error.statusCode).toBe(502);
+    });
+
+    it('should leave code undefined for legacy string-error envelope', () => {
+      const error = parseErrorResponse(
+        { error: 'just a string' },
+        500,
+        'Server Error'
+      );
+
+      expect(error.message).toBe('just a string');
+      expect(error.code).toBeUndefined();
+    });
+
+    it('should fall back to statusText with code undefined for empty body', () => {
+      const error = parseErrorResponse({}, 500, 'Server Error');
+
+      expect(error.message).toBe('Server Error');
+      expect(error.code).toBeUndefined();
     });
   });
 });

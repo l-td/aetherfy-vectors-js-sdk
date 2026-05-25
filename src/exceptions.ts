@@ -421,7 +421,12 @@ export function createErrorFromResponse(
   statusText: string,
   requestId?: string
 ): AetherfyVectorsError {
-  // Normalise nested { "error": { "code": "...", "message": "..." } } vs flat formats
+  // Canonical vectordb error envelope:
+  //   { "error": { "code", "message", ...extras } }
+  // The JS SDK only talks to vectordb (Node/Express); it does not
+  // parse FastAPI's `detail` key. Per docs/REVIEW_FAQ.md section 56,
+  // each consumer reads only from the surface(s) it talks to so its
+  // parser stays simple and asserts the contract.
   const nestedError =
     responseData?.error !== null && typeof responseData?.error === 'object'
       ? (responseData.error as Record<string, unknown>)

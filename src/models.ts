@@ -283,14 +283,14 @@ export interface ClientConfig {
    */
   workspace?: string | 'auto';
   /**
-   * Region code ('iad', 'fra', or 'sin').
+   * Region code ('us-east-1', 'eu-central-1', or 'ap-southeast-1').
    *
    * For local development and debugging. If `AETHERFY_VECTORS_URL` is
    * also set, the env var wins and a warning is logged. The first call
    * resolves the region against `GET /api/v1/regions` on the default
    * global endpoint and caches the result on the client instance.
    */
-  region?: 'iad' | 'fra' | 'sin';
+  region?: 'us-east-1' | 'eu-central-1' | 'ap-southeast-1';
 }
 
 /**

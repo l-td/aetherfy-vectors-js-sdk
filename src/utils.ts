@@ -199,15 +199,37 @@ export function parseErrorResponse(
 ): AetherfyVectorsError {
   let message = 'Unknown error';
   let details: Record<string, unknown> = { statusCode, statusText };
+  let code: string | undefined;
 
   if (responseData && typeof responseData === 'object') {
     const data = responseData as Record<string, unknown>;
+
+    // Canonical vectordb error envelope: { error: { code, message, ...extras } }.
+    // The JS SDK only talks to vectordb; it does not parse FastAPI's
+    // `detail` key. Per docs/REVIEW_FAQ.md section 56, each consumer
+    // reads only from the surface(s) it talks to so its parser stays
+    // simple and asserts the contract.
+    const nestedError =
+      data.error !== null && typeof data.error === 'object'
+        ? (data.error as Record<string, unknown>)
+        : undefined;
+
     message =
       (typeof data.message === 'string' ? data.message : undefined) ||
+      (typeof nestedError?.message === 'string'
+        ? (nestedError.message as string)
+        : undefined) ||
       (typeof data.error === 'string' ? data.error : undefined) ||
-      (typeof data.detail === 'string' ? data.detail : undefined) ||
       statusText ||
       'Unknown error';
+
+    // Extract machine-readable `code` from the canonical error envelope so
+    // consumers handling generic errors (no concrete subclass) can still
+    // switch on `err.code === 'X'` symmetrically with the Python SDK.
+    const rawCode = (nestedError?.code as unknown) ?? (data.code as unknown);
+    if (typeof rawCode === 'string') {
+      code = rawCode;
+    }
 
     details = {
       ...data,
@@ -216,7 +238,9 @@ export function parseErrorResponse(
     };
   }
 
-  return new AetherfyVectorsError(message, requestId, statusCode, details);
+  const err = new AetherfyVectorsError(message, requestId, statusCode, details);
+  err.code = code;
+  return err;
 }
 
 /**

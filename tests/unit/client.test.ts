@@ -327,20 +327,34 @@ describe('AetherfyVectorsClient', () => {
     it('non-404 errors do NOT evict caches (transient failures preserve cache)', async () => {
       // 503 is transient — the collection is still upstream. Wiping the
       // cache here would force a needless round trip on the next call.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const c = client as any;
-      c.schemaCache.set('intact', { size: 4, distance: 'Cosine' });
+      // The SDK retries 503 (executeWithRetry, maxRetries=3 + exponential
+      // backoff) so the mock must cover initial + 3 retry attempts; fake
+      // timers fast-forward the backoff waits to keep the test under the
+      // jest default timeout. Same pattern as `should handle createCollection
+      // errors` above.
+      jest.useFakeTimers();
 
-      nock('https://vectors.aetherfy.com')
-        .put('/api/v1/collections/intact/points')
-        .reply(503, { message: 'Service Unavailable' });
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const c = client as any;
+        c.schemaCache.set('intact', { size: 4, distance: 'Cosine' });
 
-      await expect(
-        client.upsert('intact', [{ id: 'p1', vector: [0.1, 0.2, 0.3, 0.4] }])
-      ).rejects.toThrow();
+        nock('https://vectors.aetherfy.com')
+          .put('/api/v1/collections/intact/points')
+          .times(4)
+          .reply(503, { message: 'Service Unavailable' });
 
-      // Cache survives the transient error.
-      expect(c.schemaCache.has('intact')).toBe(true);
+        const expectation = expect(
+          client.upsert('intact', [{ id: 'p1', vector: [0.1, 0.2, 0.3, 0.4] }])
+        ).rejects.toThrow();
+        await jest.runAllTimersAsync();
+        await expectation;
+
+        // Cache survives the transient error.
+        expect(c.schemaCache.has('intact')).toBe(true);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('should get collection information', async () => {

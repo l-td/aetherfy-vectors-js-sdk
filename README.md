@@ -110,23 +110,23 @@ const client = new AetherfyVectorsClient({
 Production agents have `AETHERFY_VECTORS_URL` injected by the control-plane —
 that's the URL they reach the regional backend through, and it takes
 precedence over `region`. For local development (no env var injected),
-you can pin a client to a specific Fly region — but `region` requires
+you can pin a client to a specific region — but `region` requires
 the async factory rather than `new`, because the SDK has to call
 `GET /api/v1/regions` to resolve the per-region URL:
 
 ```typescript
 const client = await AetherfyVectorsClient.create({
   apiKey: 'afy_test_...',
-  region: 'fra', // 'iad' | 'fra' | 'sin'
+  region: 'eu-central-1', // 'us-east-1' | 'eu-central-1' | 'ap-southeast-1'
 });
 ```
 
-`create()` mirrors Python's `AetherfyVectorsClient(api_key=..., region='fra')`
+`create()` mirrors Python's `AetherfyVectorsClient(api_key=..., region='eu-central-1')`
 contract: when the call resolves, the client is fully ready — endpoint,
 analytics, and `.region` are all final. Discovery errors surface at the
 `create()` call site instead of being deferred to your first method call.
 
-If you call `new AetherfyVectorsClient({region: 'fra'})` without an
+If you call `new AetherfyVectorsClient({region: 'eu-central-1'})` without an
 override (`endpoint=` or `AETHERFY_VECTORS_URL`), the constructor
 throws telling you to use `create()` — async discovery isn't safe
 inside a sync constructor and silent deferral is a footgun.
