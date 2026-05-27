@@ -34,11 +34,13 @@ import {
   NetworkError,
   SchemaNotFoundError,
   SchemaValidationError,
+  PartialUpsertError,
   createErrorFromResponse,
   isRetryableError,
 } from './exceptions';
 import { retryWithBackoff, validatePointId } from './utils';
 import { assertAllowedOptionKeys } from './utils/options';
+import { chunkPointsByBytes, MAX_REQUEST_BYTES } from './utils/chunking';
 import { validateVectors } from './schema';
 
 /**
@@ -558,11 +560,35 @@ export class AetherfyVectorsClient {
   // Point Operations
 
   /**
-   * Insert or update points in a collection
+   * Insert or update points in a collection.
+   *
+   * Auto-chunks large batches into multiple HTTP requests to stay under
+   * the per-request byte cap (`MAX_REQUEST_BYTES` ~80 MB, sized for
+   * Cloudflare's 100 MB edge limit). Most batches fit in one chunk; the
+   * chunker is transparent for small/medium upserts.
+   *
+   * Failure behaviour:
+   *   - Transient errors (network blips, 5xx, 429) are auto-retried per
+   *     chunk with exponential backoff inside `executeWithRetry`.
+   *   - Permanent errors on a chunk after retries: if there's only one
+   *     chunk, the specific error (Validation, ServiceUnavailable, etc.)
+   *     is thrown directly — same as pre-chunking behaviour.
+   *   - Permanent errors when there are multiple chunks AND at least one
+   *     chunk succeeded: throws `PartialUpsertError` carrying the saved
+   *     count and the failed chunks' point IDs + errors. Callers can
+   *     retry just those IDs (Qdrant upsert is idempotent by point ID
+   *     so a retry of an already-saved point is also safe).
+   *   - Permanent errors when ALL chunks fail (multi-chunk): also throws
+   *     `PartialUpsertError` with saved=0 and all chunks' IDs in failed.
    *
    * @param collectionName - Name of the collection
    * @param points - Array of points to upsert
-   * @returns Promise that resolves to true if successful
+   * @returns Promise that resolves to true if all points were saved
+   *
+   * @throws PartialUpsertError - When multi-chunk upsert has any failed chunks
+   * @throws ValidationError - Single-chunk validation / 400 errors
+   * @throws ServiceUnavailableError - Single-chunk 503 after retries
+   * @throws NetworkError - Single-chunk network failure after retries
    *
    * @example
    * ```typescript
@@ -643,6 +669,80 @@ export class AetherfyVectorsClient {
 
     const formattedPoints = this.formatPointsForUpsert(points);
 
+    // Chunk by byte size. Most upserts produce a single chunk; the
+    // multi-chunk path only fires for batches large enough to risk a
+    // 413 at Cloudflare's edge (~80+ MB JSON wire size).
+    const chunks = Array.from(
+      chunkPointsByBytes(formattedPoints, MAX_REQUEST_BYTES)
+    );
+
+    if (chunks.length === 1) {
+      // Single-chunk fast path: preserves the pre-chunking behaviour
+      // exactly — specific errors (ValidationError, NetworkError, etc.)
+      // are thrown directly without PartialUpsertError wrapping.
+      return this._uploadPointsChunk(
+        scopedName,
+        collectionName,
+        chunks[0],
+        schema,
+        payloadSchemaData
+      );
+    }
+
+    // Multi-chunk path: per-chunk error tracking. Each chunk goes through
+    // the same upload+retry+412 handling as the single-chunk path; only
+    // the outer failure aggregation differs.
+    let saved = 0;
+    const failed: Array<{
+      pointIds: Array<string | number>;
+      error: AetherfyVectorsError;
+    }> = [];
+
+    for (const chunk of chunks) {
+      try {
+        await this._uploadPointsChunk(
+          scopedName,
+          collectionName,
+          chunk,
+          schema,
+          payloadSchemaData
+        );
+        saved += chunk.length;
+      } catch (error: unknown) {
+        const chunkError =
+          error instanceof AetherfyVectorsError
+            ? error
+            : this.handleError(error);
+        failed.push({
+          pointIds: chunk.map(p => p.id),
+          error: chunkError,
+        });
+      }
+    }
+
+    if (failed.length > 0) {
+      throw new PartialUpsertError(saved, formattedPoints.length, failed);
+    }
+    return true;
+  }
+
+  /**
+   * Per-chunk upload. Mirrors the pre-chunking single-PUT logic exactly:
+   * If-Match headers from schema ETags, executeWithRetry for transient
+   * failures, per-status handling (412 schema-change retry, 400, 500+),
+   * 404 cache self-heal. Returns true on 200; throws otherwise.
+   *
+   * Extracted so the multi-chunk loop can call it per-chunk and aggregate
+   * failures into PartialUpsertError without duplicating ~150 lines of
+   * error-handling logic.
+   */
+  private async _uploadPointsChunk(
+    scopedName: string,
+    originalCollectionName: string,
+    chunk: Point[],
+    schema: { etag?: string },
+    payloadSchemaData: SchemaData | null
+  ): Promise<boolean> {
     try {
       // Add If-Match headers with ETags
       const headers: Record<string, string> = {};
@@ -657,7 +757,7 @@ export class AetherfyVectorsClient {
       const response = await this.executeWithRetry(async () =>
         this.httpClient.put(
           this.apiUrl(`/collections/${encodeURIComponent(scopedName)}/points`),
-          { points: formattedPoints },
+          { points: chunk },
           headers
         )
       );
@@ -691,7 +791,7 @@ export class AetherfyVectorsClient {
                 updatedPayloadSchema.enforcementMode || 'off';
               if (enforcementMode !== 'off') {
                 const validationErrors = validateVectors(
-                  points,
+                  chunk,
                   updatedPayloadSchema.schema
                 );
                 if (
@@ -725,7 +825,7 @@ export class AetherfyVectorsClient {
               this.apiUrl(
                 `/collections/${encodeURIComponent(scopedName)}/points`
               ),
-              { points: formattedPoints },
+              { points: chunk },
               retryHeaders
             );
 
@@ -733,7 +833,7 @@ export class AetherfyVectorsClient {
           } catch {
             // If retry also fails, raise the original 412 error
             throw new ValidationError(
-              `Collection schema has changed for '${collectionName}'. Please retry your request.`
+              `Collection schema has changed for '${originalCollectionName}'. Please retry your request.`
             );
           }
         }

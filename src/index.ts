@@ -99,6 +99,7 @@ export {
   QuotaExceededError,
   SchemaNotFoundError,
   SchemaValidationError,
+  PartialUpsertError,
 
   // Utility functions
   createErrorFromResponse,

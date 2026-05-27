@@ -413,6 +413,61 @@ export class SchemaValidationError extends AetherfyVectorsError {
 }
 
 /**
+ * Raised when a multi-chunk upsert succeeded for some chunks and failed
+ * for others. Carries which point IDs were saved and which weren't so
+ * callers can retry the failed ones surgically without double-upserting
+ * the saved ones (Qdrant upsert is idempotent by point ID, so a retry
+ * of an already-saved point is also safe — this just avoids the wasted
+ * round-trip).
+ *
+ * Thrown only when the SDK had to split the upsert into multiple HTTP
+ * requests due to byte-size limits and at least one of those requests
+ * failed after the SDK's retry budget was exhausted. Single-request
+ * upserts that fail throw the more specific error directly (Validation,
+ * Network, ServiceUnavailable, etc.) — same behaviour as before chunking.
+ */
+export class PartialUpsertError extends AetherfyVectorsError {
+  public readonly saved: number;
+  public readonly total: number;
+  public readonly failed: Array<{
+    pointIds: Array<string | number>;
+    error: AetherfyVectorsError;
+  }>;
+
+  constructor(
+    saved: number,
+    total: number,
+    failed: Array<{
+      pointIds: Array<string | number>;
+      error: AetherfyVectorsError;
+    }>
+  ) {
+    const failedCount = failed.reduce((n, f) => n + f.pointIds.length, 0);
+    super(
+      `Partial upsert: ${saved} of ${total} points saved; ${failedCount} failed across ${failed.length} chunk(s). ` +
+        `See .failed for per-chunk point IDs and errors.`
+    );
+    this.name = 'PartialUpsertError';
+    this.saved = saved;
+    this.total = total;
+    this.failed = failed;
+    Object.setPrototypeOf(this, PartialUpsertError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      saved: this.saved,
+      total: this.total,
+      failed: this.failed.map(f => ({
+        pointIds: f.pointIds,
+        error: f.error.toJSON(),
+      })),
+    };
+  }
+}
+
+/**
  * Utility function to create appropriate error from HTTP response
  */
 export function createErrorFromResponse(
