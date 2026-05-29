@@ -48,7 +48,9 @@ describe('Workspace Support', () => {
   });
 
   describe('Collection scoping with workspace', () => {
-    it('should prefix collection names with workspace on createCollection', async () => {
+    it('should POST to nested URL with bare body name on createCollection', async () => {
+      // Post-A/B: workspace lives in URL path, body name is bare.
+      // vectordb rejects body name containing "/".
       process.env.AETHERFY_WORKSPACE = 'invoice-pipeline';
 
       const client = new AetherfyVectorsClient({
@@ -58,9 +60,8 @@ describe('Workspace Support', () => {
       });
 
       const scope = nock(baseUrl)
-        .post('/api/v1/collections', body => {
-          // Check that collection name is scoped
-          return body.name === 'invoice-pipeline/documents';
+        .post('/api/v1/workspaces/invoice-pipeline/collections', body => {
+          return body.name === 'documents' && !body.name.includes('/');
         })
         .reply(201, { success: true });
 
@@ -83,7 +84,7 @@ describe('Workspace Support', () => {
 
       // Mock getCollection for schema fetch
       nock(baseUrl)
-        .get('/api/v1/collections/invoice-pipeline%2Fdocuments')
+        .get('/api/v1/workspaces/invoice-pipeline/collections/documents')
         .reply(200, {
           result: {
             name: 'invoice-pipeline/documents',
@@ -101,7 +102,7 @@ describe('Workspace Support', () => {
 
       const searchScope = nock(baseUrl)
         .post(
-          '/api/v1/collections/invoice-pipeline%2Fdocuments/points/search',
+          '/api/v1/workspaces/invoice-pipeline/collections/documents/points/search',
           body => {
             return body.vector.length === 384;
           }
@@ -128,7 +129,7 @@ describe('Workspace Support', () => {
 
       // Mock getCollection for vector schema fetch
       nock(baseUrl)
-        .get('/api/v1/collections/invoice-pipeline%2Fdocuments')
+        .get('/api/v1/workspaces/invoice-pipeline/collections/documents')
         .reply(200, {
           result: {
             name: 'invoice-pipeline/documents',
@@ -153,7 +154,7 @@ describe('Workspace Support', () => {
 
       const upsertScope = nock(baseUrl)
         .put(
-          '/api/v1/collections/invoice-pipeline%2Fdocuments/points',
+          '/api/v1/workspaces/invoice-pipeline/collections/documents/points',
           body => {
             return body.points.length === 1;
           }
@@ -191,7 +192,11 @@ describe('Workspace Support', () => {
   });
 
   describe('Collection listing with workspace', () => {
-    it('should filter and unscope collections in getCollections', async () => {
+    it('should GET nested list URL and return server-filtered bare-named collections', async () => {
+      // Post-A/B: GET /workspaces/{ws}/collections returns ONLY this
+      // workspace's collections (server-side filter by workspace_id),
+      // with bare names. The SDK no longer filters or unscopes client-
+      // side — pinning that contract here.
       process.env.AETHERFY_WORKSPACE = 'invoice-pipeline';
 
       const client = new AetherfyVectorsClient({
@@ -201,19 +206,16 @@ describe('Workspace Support', () => {
       });
 
       nock(baseUrl)
-        .get('/api/v1/collections')
+        .get('/api/v1/workspaces/invoice-pipeline/collections')
         .reply(200, {
           collections: [
-            { name: 'invoice-pipeline/documents', config: {} },
-            { name: 'invoice-pipeline/metadata', config: {} },
-            { name: 'other-workspace/data', config: {} },
-            { name: 'global-collection', config: {} },
+            { name: 'documents', config: {} },
+            { name: 'metadata', config: {} },
           ],
         });
 
       const collections = await client.getCollections();
 
-      // Should only return collections from our workspace, unscoped
       expect(collections).toHaveLength(2);
       expect(collections[0].name).toBe('documents');
       expect(collections[1].name).toBe('metadata');
@@ -243,7 +245,10 @@ describe('Workspace Support', () => {
   });
 
   describe('getCollection with workspace', () => {
-    it('should unscope collection name in getCollection result', async () => {
+    it('should GET nested URL and return bare-named collection from vectordb', async () => {
+      // Post-A/B: vectordb returns the bare collection name (PG stores
+      // name without workspace prefix). The SDK no longer needs to
+      // unscope client-side.
       process.env.AETHERFY_WORKSPACE = 'invoice-pipeline';
 
       const client = new AetherfyVectorsClient({
@@ -253,10 +258,10 @@ describe('Workspace Support', () => {
       });
 
       nock(baseUrl)
-        .get('/api/v1/collections/invoice-pipeline%2Fdocuments')
+        .get('/api/v1/workspaces/invoice-pipeline/collections/documents')
         .reply(200, {
           result: {
-            name: 'invoice-pipeline/documents',
+            name: 'documents',
             config: {},
           },
         });
