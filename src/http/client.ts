@@ -12,6 +12,23 @@ function isAxiosError(error: unknown): error is AxiosErrorType {
 }
 
 /**
+ * Body-aware timeout scaling. The default 30 s base is fine for small
+ * requests, but a single upsert chunk can be 80 MB (MAX_REQUEST_BYTES in
+ * utils/chunking.ts) and that doesn't fit in 30 s on residential / WAN
+ * uplinks at 25 Mbps and below. Without scaling, the SDK aborts mid-
+ * upload, retries 3 times, each timing out — the chunk lands in
+ * PartialUpsertError.failed even though the origin would have accepted
+ * it given enough time. Linear scaling above a small floor: cheap
+ * requests stay snappy, large uploads get the runway they need.
+ *
+ * Tuned for ~25 Mbps as the floor — at that bandwidth, 1 MB takes
+ * ~320 ms, so +1 s/MB gives ~3× margin for TLS, server processing, and
+ * response wait. Faster links don't notice; slower links no longer abort.
+ */
+const TIMEOUT_THRESHOLD_BYTES = 5 * 1024 * 1024;
+const TIMEOUT_PER_MB_OVER_THRESHOLD_MS = 1000;
+
+/**
  * HTTP client with persistent connection pooling using axios.
  *
  * Connection pooling prevents TCP/TLS handshake overhead on every request,
@@ -200,25 +217,46 @@ export class HttpClient {
   }
 
   /**
-   * POST request helper
+   * POST request helper. Body-aware timeout: large bodies (search-with-
+   * payload, scroll-with-filter, point retrieve) get extra time so a slow
+   * uplink doesn't abort the request mid-upload.
    */
   async post<T>(
     url: string,
     body?: unknown,
     headers?: Record<string, string>
   ): Promise<HttpResponse<T>> {
-    return this.request<T>({ url, method: 'POST', body, headers });
+    const { data, bodyBytes } = this.prepareBody(body);
+    const timeout = this.computeBodyAwareTimeout(bodyBytes);
+    return this.request<T>({
+      url,
+      method: 'POST',
+      body: data,
+      headers,
+      timeout,
+    });
   }
 
   /**
-   * PUT request helper
+   * PUT request helper. Body-aware timeout — see post(). The upsert path
+   * is the primary motivator: an 80 MB chunk at 25 Mbps WAN upload needs
+   * ~30 s just for the bytes; the default 30 s leaves no margin for
+   * processing or response.
    */
   async put<T>(
     url: string,
     body?: unknown,
     headers?: Record<string, string>
   ): Promise<HttpResponse<T>> {
-    return this.request<T>({ url, method: 'PUT', body, headers });
+    const { data, bodyBytes } = this.prepareBody(body);
+    const timeout = this.computeBodyAwareTimeout(bodyBytes);
+    return this.request<T>({
+      url,
+      method: 'PUT',
+      body: data,
+      headers,
+      timeout,
+    });
   }
 
   /**
@@ -233,6 +271,52 @@ export class HttpClient {
     headers?: Record<string, string>
   ): Promise<HttpResponse<T>> {
     return this.request<T>({ url, method: 'DELETE', body, headers });
+  }
+
+  /**
+   * Pre-serialize the body so we can size the timeout against the wire
+   * bytes and avoid axios serializing again. JSON.stringify is O(N) but
+   * unavoidable — axios would call it internally anyway. Strings and
+   * binary buffers pass through unchanged.
+   *
+   * Returns { data: <what to pass to axios>, bodyBytes: <wire size> }.
+   * On unserializable input (circular ref, etc.) falls back to handing
+   * axios the original value with bodyBytes=0; the request still fires,
+   * just with the base timeout.
+   */
+  private prepareBody(body: unknown): { data: unknown; bodyBytes: number } {
+    if (body === undefined || body === null) {
+      return { data: body, bodyBytes: 0 };
+    }
+    if (typeof body === 'string') {
+      return { data: body, bodyBytes: Buffer.byteLength(body, 'utf8') };
+    }
+    if (body instanceof Uint8Array) {
+      return { data: body, bodyBytes: body.byteLength };
+    }
+    try {
+      const serialized = JSON.stringify(body);
+      return {
+        data: serialized,
+        bodyBytes: Buffer.byteLength(serialized, 'utf8'),
+      };
+    } catch {
+      return { data: body, bodyBytes: 0 };
+    }
+  }
+
+  /**
+   * Compute the timeout for a request given its body size. Bodies up to
+   * TIMEOUT_THRESHOLD_BYTES use the base timeout unchanged; beyond that,
+   * add TIMEOUT_PER_MB_OVER_THRESHOLD_MS for each megabyte over. See
+   * the TIMEOUT_* constants near the top of this file for the rationale.
+   */
+  private computeBodyAwareTimeout(bodyBytes: number): number {
+    if (bodyBytes <= TIMEOUT_THRESHOLD_BYTES) return this.timeout;
+    const mbOver = Math.ceil(
+      (bodyBytes - TIMEOUT_THRESHOLD_BYTES) / (1024 * 1024)
+    );
+    return this.timeout + mbOver * TIMEOUT_PER_MB_OVER_THRESHOLD_MS;
   }
 
   /**
