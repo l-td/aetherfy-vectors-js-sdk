@@ -13,9 +13,9 @@ function isAxiosError(error: unknown): error is AxiosErrorType {
 
 /**
  * Body-aware timeout scaling. The default 30 s base is fine for small
- * requests, but a single upsert chunk can be 80 MB (MAX_REQUEST_BYTES in
- * utils/chunking.ts) and that doesn't fit in 30 s on residential / WAN
- * uplinks at 25 Mbps and below. Without scaling, the SDK aborts mid-
+ * requests, but a single upsert chunk can be 24 MB (MAX_REQUEST_BYTES in
+ * utils/chunking.ts) and that doesn't fit in 30 s on slow residential /
+ * WAN uplinks. Without scaling, the SDK aborts mid-
  * upload, retries 3 times, each timing out — the chunk lands in
  * PartialUpsertError.failed even though the origin would have accepted
  * it given enough time. Linear scaling above a small floor: cheap
@@ -239,7 +239,7 @@ export class HttpClient {
 
   /**
    * PUT request helper. Body-aware timeout — see post(). The upsert path
-   * is the primary motivator: an 80 MB chunk at 25 Mbps WAN upload needs
+   * is the primary motivator: a 24 MB chunk at ~6 Mbps WAN upload needs
    * ~30 s just for the bytes; the default 30 s leaves no margin for
    * processing or response.
    */

@@ -596,9 +596,9 @@ export class AetherfyVectorsClient {
    * Insert or update points in a collection.
    *
    * Auto-chunks large batches into multiple HTTP requests to stay under
-   * the per-request byte cap (`MAX_REQUEST_BYTES` ~80 MB, sized for
-   * Cloudflare's 100 MB edge limit). Most batches fit in one chunk; the
-   * chunker is transparent for small/medium upserts.
+   * the per-request byte cap (`MAX_REQUEST_BYTES` ~24 MB, sized for the
+   * backend's 90 s processing budget under wait=true). Most batches fit
+   * in one chunk; the chunker is transparent for small/medium upserts.
    *
    * Failure behaviour:
    *   - Transient errors (network blips, 5xx, 429) are auto-retried per
@@ -705,8 +705,8 @@ export class AetherfyVectorsClient {
     const formattedPoints = this.formatPointsForUpsert(points);
 
     // Chunk by byte size. Most upserts produce a single chunk; the
-    // multi-chunk path only fires for batches large enough to risk a
-    // 413 at Cloudflare's edge (~80+ MB JSON wire size).
+    // multi-chunk path only fires for batches large enough to risk the
+    // backend's per-request processing budget (>~24 MB JSON wire size).
     const chunks = Array.from(
       chunkPointsByBytes(formattedPoints, MAX_REQUEST_BYTES)
     );

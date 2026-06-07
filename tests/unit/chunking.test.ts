@@ -158,8 +158,8 @@ describe('chunkPointsByBytes', () => {
     }
   });
 
-  it('MAX_REQUEST_BYTES is 80 MB (Cloudflare 100 MB cap with 20 MB margin)', () => {
-    expect(MAX_REQUEST_BYTES).toBe(80 * 1024 * 1024);
+  it('MAX_REQUEST_BYTES is 24 MB (backend processing budget under wait=true)', () => {
+    expect(MAX_REQUEST_BYTES).toBe(24 * 1024 * 1024);
   });
 });
 
