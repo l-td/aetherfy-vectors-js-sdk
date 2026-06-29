@@ -295,8 +295,8 @@ export interface ClientConfig {
    * plane injects `AETHERFY_VECTORS_URL` on every agent machine and an explicit
    * URL always wins (a warning is logged if both are set). Load-bearing only
    * for standalone vectordb usage, local development, and debugging. Distinct
-   * from a collection's placement `regions` (createCollection(regions=...)) —
-   * see REVIEW_FAQ §66.
+   * from a collection's placement `regions` (createCollection(regions=...)).
+   * See REVIEW_FAQ §67 (apiRegion routing rationale) and §66 (placement).
    */
   apiRegion?: 'us-east-1' | 'eu-central-1' | 'ap-southeast-1';
 }

@@ -148,7 +148,8 @@ export class AetherfyVectorsClient {
    * is the API/connection endpoint pin (which regional backend to talk
    * to), a standalone/local-dev/debug override — in integrated agents
    * the injected `AETHERFY_VECTORS_URL` wins. Distinct from a
-   * collection's placement `regions` — see REVIEW_FAQ §66.
+   * collection's placement `regions`. See REVIEW_FAQ §67 (apiRegion
+   * routing rationale) and §66 (per-collection placement).
    *
    * @param config - Configuration options
    */
@@ -244,7 +245,8 @@ export class AetherfyVectorsClient {
    * backend to connect to) — a standalone/local-dev/debug override, NOT
    * collection placement. In integrated agents the injected
    * `AETHERFY_VECTORS_URL` wins. Distinct from a collection's placement
-   * `regions` — see REVIEW_FAQ §66.
+   * `regions`. See REVIEW_FAQ §67 (apiRegion routing rationale) and §66
+   * (per-collection placement).
    *
    * Resolution order (same as Python):
    *   1. Explicit `config.endpoint`.
@@ -428,7 +430,7 @@ export class AetherfyVectorsClient {
    *   your scope to pin the collection to those regions; an empty array is
    *   rejected by the server (422). Subset/empty validation is server-side.
    *   Distinct from the constructor's `apiRegion` (which endpoint to connect
-   *   to) — see REVIEW_FAQ §66.
+   *   to — §67) — see REVIEW_FAQ §66.
    * @returns Promise resolving to the created Collection, including its
    *   resolved `regions` list.
    *
