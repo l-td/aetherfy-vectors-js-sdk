@@ -107,31 +107,34 @@ const client = new AetherfyVectorsClient({
 
 ### 4. Local development across regions
 
-Production agents have `AETHERFY_VECTORS_URL` injected by the control-plane —
-that's the URL they reach the regional backend through, and it takes
-precedence over `region`. For local development (no env var injected),
-you can pin a client to a specific region — but `region` requires
-the async factory rather than `new`, because the SDK has to call
+`apiRegion` pins which **regional API endpoint** the client connects to —
+a transport/routing override, NOT where collections live (for collection
+placement see `createCollection(..., regions)`). Production agents have
+`AETHERFY_VECTORS_URL` injected by the control-plane — that's the URL they
+reach the regional backend through, and it takes precedence over
+`apiRegion`. For local development (no env var injected), you can pin a
+client to a specific API region — but `apiRegion` requires the async
+factory rather than `new`, because the SDK has to call
 `GET /api/v1/regions` to resolve the per-region URL:
 
 ```typescript
 const client = await AetherfyVectorsClient.create({
   apiKey: 'afy_test_...',
-  region: 'eu-central-1', // 'us-east-1' | 'eu-central-1' | 'ap-southeast-1'
+  apiRegion: 'eu-central-1', // 'us-east-1' | 'eu-central-1' | 'ap-southeast-1'
 });
 ```
 
 `create()` mirrors Python's `AetherfyVectorsClient(api_key=..., region='eu-central-1')`
 contract: when the call resolves, the client is fully ready — endpoint,
-analytics, and `.region` are all final. Discovery errors surface at the
+analytics, and `.apiRegion` are all final. Discovery errors surface at the
 `create()` call site instead of being deferred to your first method call.
 
-If you call `new AetherfyVectorsClient({region: 'eu-central-1'})` without an
+If you call `new AetherfyVectorsClient({apiRegion: 'eu-central-1'})` without an
 override (`endpoint=` or `AETHERFY_VECTORS_URL`), the constructor
 throws telling you to use `create()` — async discovery isn't safe
 inside a sync constructor and silent deferral is a footgun.
 
-If both `AETHERFY_VECTORS_URL` and `region` are set, the env var wins
+If both `AETHERFY_VECTORS_URL` and `apiRegion` are set, the env var wins
 and a warning is logged — production-agent protection rule.
 
 ## 🔁 Iterating Large Collections
@@ -442,11 +445,24 @@ Schema violations throw `SchemaValidationError` with a detailed per-field errors
 ### Collection Management
 
 ```typescript
-// Create collection with vector configuration
-await client.createCollection('my-collection', {
+// Create collection with vector configuration.
+// Returns the created Collection (not a boolean). `.regions` reflects the
+// resolved placement: the full scope when `regions` is omitted, or the
+// explicit subset you passed.
+const collection = await client.createCollection('my-collection', {
   size: 768,
   distance: DistanceMetric.EUCLIDEAN,
 });
+console.log(collection.name, collection.regions);
+
+// Pin a collection to a subset of your scope (placement, NOT the
+// connection apiRegion). An empty array is rejected by the server.
+await client.createCollection(
+  'eu-only',
+  { size: 768, distance: DistanceMetric.COSINE },
+  'EU-resident collection',
+  ['eu-central-1']
+);
 
 // List all collections
 const collections = await client.getCollections();
@@ -698,29 +714,29 @@ client.destroy();
 
 ### AetherfyVectorsClient
 
-| Method                                          | Description                | Returns                          |
-| ----------------------------------------------- | -------------------------- | -------------------------------- |
-| `createCollection(name, config)`                | Create a new collection    | `Promise<boolean>`               |
-| `deleteCollection(name)`                        | Delete a collection        | `Promise<boolean>`               |
-| `getCollections()`                              | List all collections       | `Promise<Collection[]>`          |
-| `collectionExists(name)`                        | Check if collection exists | `Promise<boolean>`               |
-| `getCollection(name)`                           | Get collection info        | `Promise<Collection>`            |
-| `upsert(collection, points)`                    | Insert/update vectors      | `Promise<boolean>`               |
-| `delete(collection, selector)`                  | Delete vectors             | `Promise<boolean>`               |
-| `retrieve(collection, ids, options)`            | Get vectors by ID          | `Promise<Record<string, any>[]>` |
-| `search(collection, vector, options)`           | Similarity search          | `Promise<SearchResult[]>`        |
-| `count(collection, options)`                    | Count vectors              | `Promise<number>`                |
-| `getSchema(collection)`                         | Get payload schema         | `Promise<Schema \| null>`        |
-| `setSchema(collection, schema, mode?, desc?)`   | Define/update schema       | `Promise<string>` (ETag)         |
-| `deleteSchema(collection)`                      | Remove schema              | `Promise<boolean>`               |
-| `analyzeSchema(collection, sampleSize?)`        | Infer schema from data     | `Promise<AnalysisResult>`        |
-| `refreshSchema(collection)`                     | Force schema cache refresh | `Promise<void>`                  |
-| `clearSchemaCache(collection?)`                 | Clear schema cache         | `void`                           |
-| `getPerformanceAnalytics(timeRange, region)`    | Performance metrics        | `Promise<PerformanceAnalytics>`  |
-| `getCollectionAnalytics(collection, timeRange)` | Collection metrics         | `Promise<CollectionAnalytics>`   |
-| `getUsageStats()`                               | Account usage              | `Promise<UsageStats>`            |
-| `testConnection()`                              | Test API connection        | `Promise<boolean>`               |
-| `destroy()`                                     | Close HTTP connections     | `void`                           |
+| Method                                                   | Description                                                                        | Returns                          |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------- |
+| `createCollection(name, config, description?, regions?)` | Create a new collection (returns the created Collection, incl. resolved `regions`) | `Promise<Collection>`            |
+| `deleteCollection(name)`                                 | Delete a collection                                                                | `Promise<boolean>`               |
+| `getCollections()`                                       | List all collections                                                               | `Promise<Collection[]>`          |
+| `collectionExists(name)`                                 | Check if collection exists                                                         | `Promise<boolean>`               |
+| `getCollection(name)`                                    | Get collection info                                                                | `Promise<Collection>`            |
+| `upsert(collection, points)`                             | Insert/update vectors                                                              | `Promise<boolean>`               |
+| `delete(collection, selector)`                           | Delete vectors                                                                     | `Promise<boolean>`               |
+| `retrieve(collection, ids, options)`                     | Get vectors by ID                                                                  | `Promise<Record<string, any>[]>` |
+| `search(collection, vector, options)`                    | Similarity search                                                                  | `Promise<SearchResult[]>`        |
+| `count(collection, options)`                             | Count vectors                                                                      | `Promise<number>`                |
+| `getSchema(collection)`                                  | Get payload schema                                                                 | `Promise<Schema \| null>`        |
+| `setSchema(collection, schema, mode?, desc?)`            | Define/update schema                                                               | `Promise<string>` (ETag)         |
+| `deleteSchema(collection)`                               | Remove schema                                                                      | `Promise<boolean>`               |
+| `analyzeSchema(collection, sampleSize?)`                 | Infer schema from data                                                             | `Promise<AnalysisResult>`        |
+| `refreshSchema(collection)`                              | Force schema cache refresh                                                         | `Promise<void>`                  |
+| `clearSchemaCache(collection?)`                          | Clear schema cache                                                                 | `void`                           |
+| `getPerformanceAnalytics(timeRange, region)`             | Performance metrics                                                                | `Promise<PerformanceAnalytics>`  |
+| `getCollectionAnalytics(collection, timeRange)`          | Collection metrics                                                                 | `Promise<CollectionAnalytics>`   |
+| `getUsageStats()`                                        | Account usage                                                                      | `Promise<UsageStats>`            |
+| `testConnection()`                                       | Test API connection                                                                | `Promise<boolean>`               |
+| `destroy()`                                              | Close HTTP connections                                                             | `void`                           |
 
 ### Distance Metrics
 

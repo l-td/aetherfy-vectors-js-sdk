@@ -111,7 +111,10 @@ describe('AetherfyVectorsClient', () => {
         distance: DistanceMetric.COSINE,
       });
 
-      expect(result).toBe(true);
+      // createCollection now returns the created Collection (not boolean).
+      expect(result.name).toBe('test-collection');
+      expect(result.config.size).toBe(128);
+      expect(result.config.distance).toBe(DistanceMetric.COSINE);
       expect(scope.isDone()).toBe(true);
     });
 
@@ -134,7 +137,8 @@ describe('AetherfyVectorsClient', () => {
         'Test collection for embeddings'
       );
 
-      expect(result).toBe(true);
+      expect(result.name).toBe('test-collection');
+      expect(result.description).toBe('Test collection for embeddings');
       expect(scope.isDone()).toBe(true);
     });
 
@@ -150,7 +154,82 @@ describe('AetherfyVectorsClient', () => {
         distance: DistanceMetric.COSINE,
       });
 
-      expect(result).toBe(true);
+      expect(result.name).toBe('test-collection');
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('createCollection omits regions from POST body and echoes server-resolved regions', async () => {
+      // §66: when the caller omits `regions`, the SDK must NOT send a
+      // `regions` key (server resolves to the full scope). The returned
+      // Collection.regions reflects whatever the server echoes back.
+      const scope = nock('https://vectors.aetherfy.com')
+        .post('/api/v1/collections', body => {
+          return body.name === 'no-regions' && !('regions' in body);
+        })
+        .reply(201, {
+          regions: ['us-east-1', 'eu-central-1', 'ap-southeast-1'],
+        });
+
+      const result = await client.createCollection('no-regions', {
+        size: 128,
+        distance: DistanceMetric.COSINE,
+      });
+
+      expect(result.name).toBe('no-regions');
+      expect(result.regions).toEqual([
+        'us-east-1',
+        'eu-central-1',
+        'ap-southeast-1',
+      ]);
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('createCollection forwards an explicit regions subset and echoes it back', async () => {
+      // §66: an explicit subset is forwarded verbatim; the server echoes
+      // the pinned list, which the returned Collection surfaces.
+      const scope = nock('https://vectors.aetherfy.com')
+        .post('/api/v1/collections', body => {
+          return (
+            body.name === 'subset-regions' &&
+            JSON.stringify(body.regions) === JSON.stringify(['us-east-1'])
+          );
+        })
+        .reply(201, { regions: ['us-east-1'] });
+
+      const result = await client.createCollection(
+        'subset-regions',
+        { size: 128, distance: DistanceMetric.COSINE },
+        undefined,
+        ['us-east-1']
+      );
+
+      expect(result.regions).toEqual(['us-east-1']);
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('createCollection forwards an explicit empty regions array (server rejects, SDK does not)', async () => {
+      // §66: an explicit [] IS forwarded so the server can return 422
+      // COLLECTION_REGIONS_EMPTY — the SDK never silently treats [] as
+      // "all regions". Response body may omit regions.
+      const scope = nock('https://vectors.aetherfy.com')
+        .post('/api/v1/collections', body => {
+          return (
+            body.name === 'empty-regions' &&
+            Array.isArray(body.regions) &&
+            body.regions.length === 0
+          );
+        })
+        .reply(201, { success: true });
+
+      const result = await client.createCollection(
+        'empty-regions',
+        { size: 128, distance: DistanceMetric.COSINE },
+        undefined,
+        []
+      );
+
+      expect(result.name).toBe('empty-regions');
+      expect(result.regions).toBeUndefined();
       expect(scope.isDone()).toBe(true);
     });
 

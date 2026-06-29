@@ -73,6 +73,12 @@ export interface Collection {
   pointsCount?: number;
   /** Collection status */
   status?: string;
+  /**
+   * §66 per-collection placement regions. Populated on create (the resolved
+   * list the server echoes) and on getCollection. Undefined when the server
+   * didn't report it (older backend / non-regional response).
+   */
+  regions?: string[];
 }
 
 /**
@@ -283,14 +289,16 @@ export interface ClientConfig {
    */
   workspace?: string | 'auto';
   /**
-   * Region code ('us-east-1', 'eu-central-1', or 'ap-southeast-1').
-   *
-   * For local development and debugging. If `AETHERFY_VECTORS_URL` is
-   * also set, the env var wins and a warning is logged. The first call
-   * resolves the region against `GET /api/v1/regions` on the default
-   * global endpoint and caches the result on the client instance.
+   * Which regional API endpoint to CONNECT to ('us-east-1', 'eu-central-1',
+   * or 'ap-southeast-1') — a transport/routing override, NOT where collections
+   * live. In the integrated product this is effectively ignored: the control
+   * plane injects `AETHERFY_VECTORS_URL` on every agent machine and an explicit
+   * URL always wins (a warning is logged if both are set). Load-bearing only
+   * for standalone vectordb usage, local development, and debugging. Distinct
+   * from a collection's placement `regions` (createCollection(regions=...)) —
+   * see REVIEW_FAQ §66.
    */
-  region?: 'us-east-1' | 'eu-central-1' | 'ap-southeast-1';
+  apiRegion?: 'us-east-1' | 'eu-central-1' | 'ap-southeast-1';
 }
 
 /**

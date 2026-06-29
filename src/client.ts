@@ -99,10 +99,12 @@ export class AetherfyVectorsClient {
     'ap-southeast-1',
   ]);
   /**
-   * The region this client is pinned to (when `region` was provided
-   * to `create()`); null otherwise. Read-only after construction.
+   * The pinned API/connection endpoint region (when `apiRegion` was
+   * provided to `create()`); null otherwise. This is the regional API
+   * endpoint the client connects to — a transport/routing pin, NOT where
+   * collections live. Read-only after construction.
    */
-  public readonly region:
+  public readonly apiRegion:
     | 'us-east-1'
     | 'eu-central-1'
     | 'ap-southeast-1'
@@ -130,19 +132,23 @@ export class AetherfyVectorsClient {
   /**
    * Construct a client with a pre-resolved endpoint.
    *
-   * Use {@link AetherfyVectorsClient.create} when you need region= /
+   * Use {@link AetherfyVectorsClient.create} when you need apiRegion= /
    * /api/v1/regions discovery — `create()` runs the async discovery
    * before constructing, so by the time you have a client every
-   * field (endpoint, analytics, region) is already final.
+   * field (endpoint, analytics, apiRegion) is already final.
    *
    * `new` works for the synchronous resolution paths:
    *   - Explicit `endpoint=`
    *   - `AETHERFY_VECTORS_URL` env var
    *   - Default global endpoint
    *
-   * Passing `region=` to `new` throws — region= requires `create()`.
+   * Passing `apiRegion=` to `new` throws — apiRegion= requires `create()`.
    * The constructor cannot do async discovery, and silently deferring
-   * to first method call (the previous behavior) is a footgun.
+   * to first method call (the previous behavior) is a footgun. apiRegion
+   * is the API/connection endpoint pin (which regional backend to talk
+   * to), a standalone/local-dev/debug override — in integrated agents
+   * the injected `AETHERFY_VECTORS_URL` wins. Distinct from a
+   * collection's placement `regions` — see REVIEW_FAQ §66.
    *
    * @param config - Configuration options
    */
@@ -157,11 +163,11 @@ export class AetherfyVectorsClient {
       enableConnectionPooling: config.enableConnectionPooling,
     });
 
-    // Resolve endpoint synchronously. region= cannot be honored here —
+    // Resolve endpoint synchronously. apiRegion= cannot be honored here —
     // that's create()'s job — so reject it explicitly to avoid the
     // previous "looks like it works but discovery isn't done yet"
     // footgun. The exception to this rule: create() calls the
-    // constructor with a pre-resolved endpoint (and region= cleared);
+    // constructor with a pre-resolved endpoint (and apiRegion= cleared);
     // see `_constructWithResolvedEndpoint`.
     /* c8 ignore next 4 */
     const envEndpoint =
@@ -169,31 +175,32 @@ export class AetherfyVectorsClient {
         ? process.env?.AETHERFY_VECTORS_URL
         : undefined;
 
-    if (config.region) {
-      if (!AetherfyVectorsClient.VALID_REGIONS.has(config.region)) {
+    if (config.apiRegion) {
+      if (!AetherfyVectorsClient.VALID_REGIONS.has(config.apiRegion)) {
         throw new Error(
-          `region must be one of us-east-1, eu-central-1, ap-southeast-1 (got ${String(config.region)})`
+          `apiRegion must be one of us-east-1, eu-central-1, ap-southeast-1 (got ${String(config.apiRegion)})`
         );
       }
-      // env var wins over region= regardless of how the caller got here.
+      // env var wins over apiRegion= regardless of how the caller got here.
       if (envEndpoint) {
         // eslint-disable-next-line no-console
         console.warn(
-          `Both AETHERFY_VECTORS_URL and region=${config.region} are set; ` +
-            'using AETHERFY_VECTORS_URL (region= is a local-dev parameter)'
+          `Both AETHERFY_VECTORS_URL and apiRegion=${config.apiRegion} are set; ` +
+            'using AETHERFY_VECTORS_URL (apiRegion= is a standalone/local-dev ' +
+            'override; the injected URL wins in integrated agents)'
         );
         this.endpoint = envEndpoint;
       } else if (config.endpoint) {
         this.endpoint = config.endpoint;
       } else {
-        // Direct `new` with region= and no env-var/endpoint override:
+        // Direct `new` with apiRegion= and no env-var/endpoint override:
         // this is the footgun case. Tell the caller to use create().
         throw new Error(
-          'region= requires async region discovery. Use ' +
+          'apiRegion= requires async region discovery. Use ' +
             '`await AetherfyVectorsClient.create({...})` instead of `new`.'
         );
       }
-      this.region = config.region;
+      this.apiRegion = config.apiRegion;
     } else if (config.endpoint) {
       this.endpoint = config.endpoint;
     } else if (envEndpoint) {
@@ -229,24 +236,30 @@ export class AetherfyVectorsClient {
 
   /**
    * Async factory — the canonical way to construct a client with
-   * region= or any other future async configuration. Mirrors Python's
+   * apiRegion= or any other future async configuration. Mirrors Python's
    * `AetherfyVectorsClient(api_key=..., region='eu-central-1')` contract:
    * when you have a client, it's fully ready.
+   *
+   * `apiRegion` is the API/connection endpoint pin (which regional
+   * backend to connect to) — a standalone/local-dev/debug override, NOT
+   * collection placement. In integrated agents the injected
+   * `AETHERFY_VECTORS_URL` wins. Distinct from a collection's placement
+   * `regions` — see REVIEW_FAQ §66.
    *
    * Resolution order (same as Python):
    *   1. Explicit `config.endpoint`.
    *   2. `AETHERFY_VECTORS_URL` env var.
-   *   3. `config.region` → `GET /api/v1/regions` discovery.
+   *   3. `config.apiRegion` → `GET /api/v1/regions` discovery.
    *   4. Default global endpoint.
    *
-   * When the env var and `region=` are both set, the env var wins and
+   * When the env var and `apiRegion=` are both set, the env var wins and
    * a warning is logged.
    *
    * @example
    * ```typescript
    * const client = await AetherfyVectorsClient.create({
    *   apiKey: 'afy_test_...',
-   *   region: 'eu-central-1',
+   *   apiRegion: 'eu-central-1',
    * });
    * ```
    */
@@ -255,12 +268,12 @@ export class AetherfyVectorsClient {
   ): Promise<AetherfyVectorsClient> {
     // Validate eagerly — same semantics as Python's __init__.
     if (
-      config.region !== undefined &&
-      config.region !== null &&
-      !AetherfyVectorsClient.VALID_REGIONS.has(config.region)
+      config.apiRegion !== undefined &&
+      config.apiRegion !== null &&
+      !AetherfyVectorsClient.VALID_REGIONS.has(config.apiRegion)
     ) {
       throw new Error(
-        `region must be one of us-east-1, eu-central-1, ap-southeast-1 (got ${String(config.region)})`
+        `apiRegion must be one of us-east-1, eu-central-1, ap-southeast-1 (got ${String(config.apiRegion)})`
       );
     }
 
@@ -270,13 +283,13 @@ export class AetherfyVectorsClient {
         ? process.env?.AETHERFY_VECTORS_URL
         : undefined;
 
-    // If region= is irrelevant (no region OR an override is present),
+    // If apiRegion= is irrelevant (no apiRegion OR an override is present),
     // delegate to the sync constructor — nothing to discover.
-    if (!config.region || config.endpoint || envEndpoint) {
+    if (!config.apiRegion || config.endpoint || envEndpoint) {
       return new AetherfyVectorsClient(config);
     }
 
-    // region= without override: run discovery on the default global
+    // apiRegion= without override: run discovery on the default global
     // endpoint, then construct with the resolved per-region URL.
     const apiKey = APIKeyManager.resolveApiKey(config.apiKey);
     const tempAuth = new APIKeyManager(apiKey);
@@ -299,7 +312,7 @@ export class AetherfyVectorsClient {
       tempHttp.destroy();
       const msg = err instanceof Error ? err.message : 'unknown error';
       throw new AetherfyVectorsError(
-        `Could not resolve region '${config.region}' via discovery: ${msg}. ` +
+        `Could not resolve apiRegion '${config.apiRegion}' via discovery: ${msg}. ` +
           'Check that the default endpoint is reachable, or pass endpoint= directly.'
       );
     }
@@ -311,19 +324,19 @@ export class AetherfyVectorsClient {
       );
     }
     const cache = (response.data as Record<string, string>) ?? {};
-    if (!(config.region in cache)) {
+    if (!(config.apiRegion in cache)) {
       throw new AetherfyVectorsError(
-        `Region '${config.region}' not configured at the discovery endpoint ` +
+        `Region '${config.apiRegion}' not configured at the discovery endpoint ` +
           `(available: ${JSON.stringify(Object.keys(cache).sort())}).`
       );
     }
     // Construct with the resolved URL pinned as endpoint=. The
-    // constructor sees both `region` and `endpoint`, takes the
-    // endpoint path, and still assigns this.region for caller-visible
+    // constructor sees both `apiRegion` and `endpoint`, takes the
+    // endpoint path, and still assigns this.apiRegion for caller-visible
     // identification.
     return new AetherfyVectorsClient({
       ...config,
-      endpoint: cache[config.region],
+      endpoint: cache[config.apiRegion],
     });
   }
 
@@ -409,57 +422,80 @@ export class AetherfyVectorsClient {
    * @param collectionName - Collection name (must be unique)
    * @param vectorsConfig - Vector configuration or legacy config object
    * @param description - Optional collection description (max 500 characters)
-   * @returns Promise that resolves to true if successful
+   * @param regions - Optional explicit placement regions (§66 per-collection
+   *   scoping). Omit to default to your full scope — the server resolves it
+   *   and the returned Collection echoes the explicit list. Pass a subset of
+   *   your scope to pin the collection to those regions; an empty array is
+   *   rejected by the server (422). Subset/empty validation is server-side.
+   *   Distinct from the constructor's `apiRegion` (which endpoint to connect
+   *   to) — see REVIEW_FAQ §66.
+   * @returns Promise resolving to the created Collection, including its
+   *   resolved `regions` list.
    *
    * @example
    * ```typescript
-   * await client.createCollection('my-collection', {
+   * const coll = await client.createCollection('my-collection', {
    *   size: 384,
    *   distance: DistanceMetric.COSINE
-   * }, 'My collection for semantic search');
+   * }, 'My collection', ['us-east-1']);
+   * console.log(coll.regions); // ['us-east-1']
    * ```
    */
   async createCollection(
     collectionName: string,
     vectorsConfig: VectorConfig | VectorConfigInput,
-    description?: string
-  ): Promise<boolean> {
+    description?: string,
+    regions?: string[]
+  ): Promise<Collection> {
     this.validateCollectionName(collectionName);
 
     const config = this.normalizeVectorConfig(vectorsConfig);
     const scopedName = this.scopeCollection(collectionName);
 
     try {
+      // Post-A/B: workspace lives in the URL, body name is bare. vectordb
+      // rejects any "/" in the body name.
+      const body: Record<string, unknown> = {
+        name: collectionName,
+        vectors: config,
+        description: description || null,
+      };
+      // §66: forward `regions` only when the caller provided it. Omission
+      // triggers server-side resolve-on-omit (the full scope); an explicit
+      // [] IS forwarded so the server returns 422 COLLECTION_REGIONS_EMPTY,
+      // rather than the SDK silently treating [] as "all regions". Subset
+      // enforcement is the server's job.
+      if (regions !== undefined) {
+        body.regions = regions;
+      }
+
       const response = await this.executeWithRetry(async () =>
-        // Post-A/B: workspace lives in the URL, body name is bare.
-        // POST /workspaces/{ws}/collections {name, vectors, description}
-        // for workspaced; POST /collections {name, vectors, description}
-        // for workspaceless. vectordb rejects any "/" in the body name.
-        this.httpClient.post(this.apiUrl(this.buildCollectionsListPath()), {
-          name: collectionName,
-          vectors: config,
-          description: description || null,
-        })
+        this.httpClient.post<{ regions?: string[] }>(
+          this.apiUrl(this.buildCollectionsListPath()),
+          body
+        )
       );
 
-      const ok = response.status === 200 || response.status === 201;
-      if (ok) {
+      if (response.status === 200 || response.status === 201) {
         // Prepopulate the schema cache from the request we just authored.
-        // GET /collections/<name> can be eventually consistent w.r.t.
-        // its own writes — a read immediately after a successful create
-        // can briefly return 4xx. Seeding the cache here makes the next
-        // upsert/exists call hit local state instead of racing the
-        // read-after-write window. We have ground truth (size + distance)
-        // from the caller, so no extra round trip is needed. etag stays
-        // undefined: upsert's `if (schema.etag)` guard treats it as "no
-        // If-Match header," which is correct until a real GET assigns a
-        // schema_version.
+        // A GET immediately after create can race the read-after-write
+        // window; size + distance are ground truth from the caller, so no
+        // extra round trip is needed. etag stays undefined until a real GET.
         this.schemaCache.set(scopedName, {
           size: config.size,
           distance: config.distance,
         });
       }
-      return ok;
+
+      // §66 Option SDK-B: return the created collection with its resolved
+      // placement regions echoed by the server (the full scope on omit, the
+      // caller's subset otherwise; the stored list on idempotent re-create).
+      return {
+        name: collectionName,
+        config,
+        description,
+        regions: response.data?.regions,
+      };
     } catch (error: unknown) {
       throw this.handleError(error);
     }

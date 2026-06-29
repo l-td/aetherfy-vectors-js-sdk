@@ -1,18 +1,23 @@
 /**
- * Unit tests for the region= constructor option and /api/v1/regions
+ * Unit tests for the apiRegion= constructor option and /api/v1/regions
  * discovery on AetherfyVectorsClient.
  *
+ * `apiRegion` is the API/connection endpoint pin (which regional backend
+ * to connect to) — a standalone/local-dev/debug override, NOT collection
+ * placement. It is a config field only; the client does not read it from
+ * the environment (only AETHERFY_VECTORS_URL is read from env).
+ *
  * Pins the contract:
- *   - region= validates against the AWS set
+ *   - apiRegion= validates against the AWS set
  *     (us-east-1/eu-central-1/ap-southeast-1) eagerly.
- *   - `await AetherfyVectorsClient.create({region: 'eu-central-1'})` runs
+ *   - `await AetherfyVectorsClient.create({apiRegion: 'eu-central-1'})` runs
  *     discovery on the default global endpoint and returns a
  *     fully-ready client (mirrors Python's __init__).
- *   - `new AetherfyVectorsClient({region: 'eu-central-1'})` THROWS unless an
+ *   - `new AetherfyVectorsClient({apiRegion: 'eu-central-1'})` THROWS unless an
  *     override (endpoint= or AETHERFY_VECTORS_URL) is also present —
  *     async discovery isn't safe inside a sync constructor and
  *     silently deferring is a footgun.
- *   - When env var and region= both set, env var wins and console.warn
+ *   - When env var and apiRegion= both set, env var wins and console.warn
  *     fires (production-agent protection).
  *   - Discovery failure throws AetherfyVectorsError with a clear
  *     message at the `create()` call site (not lazily on first method).
@@ -28,10 +33,13 @@ import {
 
 const DEFAULT = 'https://vectors.aetherfy.com';
 
-describe('AetherfyVectorsClient region= + discovery', () => {
+describe('AetherfyVectorsClient apiRegion= + discovery', () => {
   beforeEach(() => {
     delete process.env.AETHERFY_VECTORS_URL;
-    delete process.env.AETHERFY_VECTORS_REGION;
+    // Defensive cleanup only — the client does NOT read a region env var
+    // (apiRegion is a config field). Kept so a stray env var from another
+    // test or the shell can't leak into these cases.
+    delete process.env.AETHERFY_VECTORS_API_REGION;
     nock.cleanAll();
   });
 
@@ -44,57 +52,57 @@ describe('AetherfyVectorsClient region= + discovery', () => {
   });
 
   describe('validation', () => {
-    it('create() throws synchronously for an unknown region', async () => {
+    it('create() throws synchronously for an unknown apiRegion', async () => {
       await expect(
         AetherfyVectorsClient.create({
           apiKey: 'afy_test_1234567890123456',
-          region: 'xxx' as 'us-east-1',
+          apiRegion: 'xxx' as 'us-east-1',
           enableConnectionPooling: false,
         })
       ).rejects.toThrow(
-        /region must be one of us-east-1, eu-central-1, ap-southeast-1/
+        /apiRegion must be one of us-east-1, eu-central-1, ap-southeast-1/
       );
     });
 
-    it('new throws when region= is passed without an override', () => {
+    it('new throws when apiRegion= is passed without an override', () => {
       // The footgun guard: silent lazy resolution would bite users
       // who didn't realize their first method call could 30s later
       // surface a discovery failure.
       expect(() => {
         new AetherfyVectorsClient({
           apiKey: 'afy_test_1234567890123456',
-          region: 'eu-central-1',
+          apiRegion: 'eu-central-1',
           enableConnectionPooling: false,
         });
-      }).toThrow(/region= requires async region discovery.*create/);
+      }).toThrow(/apiRegion= requires async region discovery.*create/);
     });
 
-    it('new throws for an unknown region even when endpoint= is provided', () => {
+    it('new throws for an unknown apiRegion even when endpoint= is provided', () => {
       // Validation must fire regardless of construction path — a caller
       // bypassing create() with their own endpoint shouldn't slip an
-      // invalid region label through.
+      // invalid apiRegion label through.
       expect(() => {
         new AetherfyVectorsClient({
           apiKey: 'afy_test_1234567890123456',
-          region: 'xxx' as 'us-east-1',
+          apiRegion: 'xxx' as 'us-east-1',
           endpoint: 'https://vectors-fra.aetherfy.run',
           enableConnectionPooling: false,
         });
       }).toThrow(
-        /region must be one of us-east-1, eu-central-1, ap-southeast-1/
+        /apiRegion must be one of us-east-1, eu-central-1, ap-southeast-1/
       );
     });
 
-    it('new accepts region= when endpoint= is also passed (no discovery needed)', () => {
+    it('new accepts apiRegion= when endpoint= is also passed (no discovery needed)', () => {
       // create() uses this path internally — pre-resolved endpoint,
-      // region= just labels the .region field for callers.
+      // apiRegion= just labels the .apiRegion field for callers.
       const client = new AetherfyVectorsClient({
         apiKey: 'afy_test_1234567890123456',
-        region: 'eu-central-1',
+        apiRegion: 'eu-central-1',
         endpoint: 'https://vectors-fra.aetherfy.run',
         enableConnectionPooling: false,
       });
-      expect(client.region).toBe('eu-central-1');
+      expect(client.apiRegion).toBe('eu-central-1');
       expect((client as unknown as { endpoint: string }).endpoint).toBe(
         'https://vectors-fra.aetherfy.run'
       );
@@ -102,7 +110,7 @@ describe('AetherfyVectorsClient region= + discovery', () => {
   });
 
   describe('discovery via create()', () => {
-    it('resolves region=eu-central-1 to the per-region URL via /api/v1/regions', async () => {
+    it('resolves apiRegion=eu-central-1 to the per-region URL via /api/v1/regions', async () => {
       nock(DEFAULT).get('/api/v1/regions').reply(200, {
         'us-east-1': 'https://vectors-iad.aetherfy.run',
         'eu-central-1': 'https://vectors-fra.aetherfy.run',
@@ -111,10 +119,10 @@ describe('AetherfyVectorsClient region= + discovery', () => {
 
       const client = await AetherfyVectorsClient.create({
         apiKey: 'afy_test_1234567890123456',
-        region: 'eu-central-1',
+        apiRegion: 'eu-central-1',
         enableConnectionPooling: false,
       });
-      expect(client.region).toBe('eu-central-1');
+      expect(client.apiRegion).toBe('eu-central-1');
       expect((client as unknown as { endpoint: string }).endpoint).toBe(
         'https://vectors-fra.aetherfy.run'
       );
@@ -130,12 +138,12 @@ describe('AetherfyVectorsClient region= + discovery', () => {
 
       const c1 = await AetherfyVectorsClient.create({
         apiKey: 'afy_test_1234567890123456',
-        region: 'us-east-1',
+        apiRegion: 'us-east-1',
         enableConnectionPooling: false,
       });
       const c2 = await AetherfyVectorsClient.create({
         apiKey: 'afy_test_1234567890123456',
-        region: 'eu-central-1',
+        apiRegion: 'eu-central-1',
         enableConnectionPooling: false,
       });
       expect((c1 as unknown as { endpoint: string }).endpoint).toBe(
@@ -153,13 +161,13 @@ describe('AetherfyVectorsClient region= + discovery', () => {
       await expect(
         AetherfyVectorsClient.create({
           apiKey: 'afy_test_1234567890123456',
-          region: 'eu-central-1',
+          apiRegion: 'eu-central-1',
           enableConnectionPooling: false,
         })
       ).rejects.toBeInstanceOf(AetherfyVectorsError);
     });
 
-    it('discovery missing the requested region → throws with available list', async () => {
+    it('discovery missing the requested apiRegion → throws with available list', async () => {
       nock(DEFAULT).get('/api/v1/regions').reply(200, {
         'us-east-1': 'https://vectors-iad.aetherfy.run',
       });
@@ -167,7 +175,7 @@ describe('AetherfyVectorsClient region= + discovery', () => {
       await expect(
         AetherfyVectorsClient.create({
           apiKey: 'afy_test_1234567890123456',
-          region: 'eu-central-1',
+          apiRegion: 'eu-central-1',
           enableConnectionPooling: false,
         })
       ).rejects.toThrow(/not configured at the discovery endpoint/);
@@ -175,7 +183,7 @@ describe('AetherfyVectorsClient region= + discovery', () => {
   });
 
   describe('precedence', () => {
-    it('AETHERFY_VECTORS_URL wins over region= and warns (via create)', async () => {
+    it('AETHERFY_VECTORS_URL wins over apiRegion= and warns (via create)', async () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       try {
         process.env.AETHERFY_VECTORS_URL = 'http://10.0.10.243:3000';
@@ -183,7 +191,7 @@ describe('AetherfyVectorsClient region= + discovery', () => {
         // var is set; no /api/v1/regions request is made.
         const client = await AetherfyVectorsClient.create({
           apiKey: 'afy_test_1234567890123456',
-          region: 'eu-central-1',
+          apiRegion: 'eu-central-1',
           enableConnectionPooling: false,
         });
         expect((client as unknown as { endpoint: string }).endpoint).toBe(
@@ -192,7 +200,7 @@ describe('AetherfyVectorsClient region= + discovery', () => {
         expect(warnSpy).toHaveBeenCalled();
         const msg = warnSpy.mock.calls[0][0] as string;
         expect(msg).toMatch(/AETHERFY_VECTORS_URL/);
-        expect(msg).toMatch(/region=eu-central-1/);
+        expect(msg).toMatch(/apiRegion=eu-central-1/);
       } finally {
         delete process.env.AETHERFY_VECTORS_URL;
         warnSpy.mockRestore();
@@ -205,7 +213,7 @@ describe('AetherfyVectorsClient region= + discovery', () => {
       const client = await AetherfyVectorsClient.create({
         apiKey: 'afy_test_1234567890123456',
         endpoint: 'http://localhost:3000',
-        region: 'eu-central-1',
+        apiRegion: 'eu-central-1',
         enableConnectionPooling: false,
       });
       expect((client as unknown as { endpoint: string }).endpoint).toBe(
@@ -213,22 +221,22 @@ describe('AetherfyVectorsClient region= + discovery', () => {
       );
     });
 
-    it('new without region= still works for sync paths (no breaking change)', () => {
-      // Backward path for callers that don't need region discovery —
+    it('new without apiRegion= still works for sync paths (no breaking change)', () => {
+      // Backward path for callers that don't need apiRegion discovery —
       // explicit endpoint, env var, or default URL.
       const client = new AetherfyVectorsClient({
         apiKey: 'afy_test_1234567890123456',
         endpoint: 'http://localhost:3000',
         enableConnectionPooling: false,
       });
-      expect(client.region).toBe(null);
+      expect(client.apiRegion).toBe(null);
       expect((client as unknown as { endpoint: string }).endpoint).toBe(
         'http://localhost:3000'
       );
     });
   });
 
-  describe('analytics endpoint follows region', () => {
+  describe('analytics endpoint follows apiRegion', () => {
     // create() returns a client with analytics already pinned to the
     // resolved per-region URL — analytics is constructed AFTER the
     // endpoint is final. No transient state, no setBaseUrl shenanigans.
@@ -240,7 +248,7 @@ describe('AetherfyVectorsClient region= + discovery', () => {
 
       const client = await AetherfyVectorsClient.create({
         apiKey: 'afy_test_1234567890123456',
-        region: 'eu-central-1',
+        apiRegion: 'eu-central-1',
         enableConnectionPooling: false,
       });
       const analytics = (
