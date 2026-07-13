@@ -18,7 +18,12 @@ export const DEFAULT_VECTOR_SIZE = 384;
  * provides one explicitly (useful for backfilling historical messages).
  */
 export interface Message {
-  id: string;
+  /**
+   * Point id — a number if the message was stored under an integer id, a
+   * string for a UUID. Preserved as stored so `msg.id === <what you wrote>`
+   * round-trips intact (no String() coercion on read).
+   */
+  id: string | number;
   role: string;
   content: string;
   ts: number;
@@ -41,7 +46,11 @@ export function messageFromPoint(point: {
   if (typeof ts !== 'number') return null;
 
   return {
-    id: String(point.id),
+    // Preserve the id as stored — an integer point id comes back a number,
+    // a UUID a string. String()-coercing here would make `add(id=42)` then
+    // `history()` return id "42", breaking the caller's `msg.id === 42` check
+    // (the read-side twin of the write-side str() bug).
+    id: point.id,
     role: typeof payload.role === 'string' ? payload.role : '',
     content: typeof payload.content === 'string' ? payload.content : '',
     ts,

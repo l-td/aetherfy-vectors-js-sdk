@@ -37,7 +37,7 @@ export interface VectorConfigInput {
  * A point (vector) with optional metadata
  */
 export interface Point {
-  /** Unique identifier for the point */
+  /** Unique identifier — an unsigned integer (≤ 2^53 − 1) or a UUID string */
   id: string | number;
   /** The vector data */
   vector: number[];
@@ -49,7 +49,7 @@ export interface Point {
  * Result from a similarity search
  */
 export interface SearchResult {
-  /** Point identifier */
+  /** Point identifier — an unsigned integer (≤ 2^53 − 1) or a UUID string */
   id: string | number;
   /** Similarity score */
   score: number;

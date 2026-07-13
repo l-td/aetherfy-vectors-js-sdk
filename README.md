@@ -44,10 +44,10 @@ await client.createCollection('products', {
   distance: DistanceMetric.COSINE
 });
 
-// Add vectors
+// Add vectors — point ids are unsigned integers (≤ 2^53 − 1) or UUID strings
 const points = [
   {
-    id: 'product_1',
+    id: 1,
     vector: [0.1, 0.2, ...], // 384-dimensional vector
     payload: {
       name: 'Wireless Headphones',
@@ -480,28 +480,40 @@ await client.deleteCollection('my-collection');
 ### Vector Operations
 
 ```typescript
-// Insert or update vectors
+// Insert or update vectors. A point id is an unsigned integer (≤ 2^53 − 1)
+// or a UUID string — anything else is rejected client-side with the same
+// error the server would return (400 INVALID_POINT_ID).
 await client.upsert('collection-name', [
   {
-    id: 'vec-1',
+    id: '550e8400-e29b-41d4-a716-446655440001',
     vector: [0.1, 0.2, 0.3, ...],
     payload: { category: 'A', metadata: {...} }
   },
   {
-    id: 'vec-2',
+    id: '550e8400-e29b-41d4-a716-446655440002',
     vector: [0.4, 0.5, 0.6, ...],
     payload: { category: 'B', metadata: {...} }
   }
 ]);
 
 // Retrieve vectors by ID
-const vectors = await client.retrieve('collection-name', ['vec-1', 'vec-2'], {
-  withPayload: true,
-  withVectors: false
-});
+const vectors = await client.retrieve(
+  'collection-name',
+  [
+    '550e8400-e29b-41d4-a716-446655440001',
+    '550e8400-e29b-41d4-a716-446655440002',
+  ],
+  {
+    withPayload: true,
+    withVectors: false
+  }
+);
 
 // Delete vectors
-await client.delete('collection-name', ['vec-1', 'vec-2']);
+await client.delete('collection-name', [
+  '550e8400-e29b-41d4-a716-446655440001',
+  '550e8400-e29b-41d4-a716-446655440002',
+]);
 
 // Delete by filter
 await client.delete('collection-name', {
@@ -758,7 +770,7 @@ interface VectorConfig {
 }
 
 interface Point {
-  id: string | number; // Unique identifier
+  id: string | number; // Unsigned integer (≤ 2^53 − 1) or UUID string
   vector: number[]; // Vector data
   payload?: Record<string, any>; // Optional metadata
 }
@@ -773,7 +785,7 @@ interface SearchOptions {
 }
 
 interface SearchResult {
-  id: string | number; // Point identifier
+  id: string | number; // Unsigned integer (≤ 2^53 − 1) or UUID string
   score: number; // Similarity score
   payload?: Record<string, any>; // Metadata (if requested)
   vector?: number[]; // Vector (if requested)

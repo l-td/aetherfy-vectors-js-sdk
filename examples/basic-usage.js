@@ -41,7 +41,7 @@ async function basicUsageExample() {
     // Prepare sample product data with vectors
     const products = [
       {
-        id: 'product_1',
+        id: 1,
         vector: Array.from({ length: 128 }, () => Math.random()), // Random 128-dim vector
         payload: {
           name: 'Wireless Headphones',
@@ -51,7 +51,7 @@ async function basicUsageExample() {
         },
       },
       {
-        id: 'product_2',
+        id: 2,
         vector: Array.from({ length: 128 }, () => Math.random()),
         payload: {
           name: 'Running Shoes',
@@ -61,7 +61,7 @@ async function basicUsageExample() {
         },
       },
       {
-        id: 'product_3',
+        id: 3,
         vector: Array.from({ length: 128 }, () => Math.random()),
         payload: {
           name: 'Coffee Maker',
@@ -103,14 +103,10 @@ async function basicUsageExample() {
 
     // Retrieve specific products by ID
     console.log('Retrieving specific products...');
-    const retrieved = await client.retrieve(
-      collectionName,
-      ['product_1', 'product_3'],
-      {
-        withPayload: true,
-        withVectors: false,
-      }
-    );
+    const retrieved = await client.retrieve(collectionName, [1, 3], {
+      withPayload: true,
+      withVectors: false,
+    });
 
     console.log(`Retrieved ${retrieved.length} products by ID`);
     retrieved.forEach(product => {

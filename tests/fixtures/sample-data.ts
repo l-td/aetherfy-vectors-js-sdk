@@ -12,7 +12,7 @@ import {
 
 export const samplePoints: Point[] = [
   {
-    id: 'point_1',
+    id: 1,
     vector: [0.1, 0.2, 0.3, 0.4, 0.5],
     payload: {
       category: 'electronics',
@@ -22,7 +22,7 @@ export const samplePoints: Point[] = [
     },
   },
   {
-    id: 'point_2',
+    id: 2,
     vector: [0.6, 0.7, 0.8, 0.9, 1.0],
     payload: {
       category: 'clothing',
@@ -32,7 +32,7 @@ export const samplePoints: Point[] = [
     },
   },
   {
-    id: 'point_3',
+    id: 3,
     vector: [0.2, 0.4, 0.6, 0.8, 1.0],
     payload: {
       category: 'books',
@@ -42,7 +42,7 @@ export const samplePoints: Point[] = [
     },
   },
   {
-    id: 'point_4',
+    id: 4,
     vector: [0.1, 0.3, 0.5, 0.7, 0.9],
     payload: {
       category: 'electronics',
@@ -52,7 +52,7 @@ export const samplePoints: Point[] = [
     },
   },
   {
-    id: 'point_5',
+    id: 5,
     vector: [0.9, 0.8, 0.7, 0.6, 0.5],
     payload: {
       category: 'home',
@@ -95,19 +95,19 @@ export const sampleCollections: Collection[] = [
 
 export const sampleSearchResults: SearchResult[] = [
   {
-    id: 'point_1',
+    id: 1,
     score: 0.95,
     payload: samplePoints[0].payload,
     vector: samplePoints[0].vector,
   },
   {
-    id: 'point_4',
+    id: 4,
     score: 0.87,
     payload: samplePoints[3].payload,
     vector: samplePoints[3].vector,
   },
   {
-    id: 'point_2',
+    id: 2,
     score: 0.72,
     payload: samplePoints[1].payload,
   },

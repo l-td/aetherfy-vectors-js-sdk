@@ -48,7 +48,7 @@ describe('ETag Validation', () => {
       .reply(200, { success: true });
 
     // First upsert
-    const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
+    const points = [{ id: 1, vector: new Array(768).fill(0.1), payload: {} }];
     await client.upsert('test-collection', points);
 
     // Should have made 3 calls: GET for schema, GET for payload schema (404), PUT for upsert
@@ -86,7 +86,7 @@ describe('ETag Validation', () => {
       .times(2)
       .reply(200, { success: true });
 
-    const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
+    const points = [{ id: 1, vector: new Array(768).fill(0.1), payload: {} }];
 
     // First upsert — fetches both vector schema and payload schema, then PUTs
     await client.upsert('test-collection', points);
@@ -128,7 +128,7 @@ describe('ETag Validation', () => {
       .matchHeader('If-Match', 'abc12345')
       .reply(200, { success: true });
 
-    const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
+    const points = [{ id: 1, vector: new Array(768).fill(0.1), payload: {} }];
     await client.upsert('test-collection', points);
 
     // Check If-Match header was sent in PUT request
@@ -154,7 +154,7 @@ describe('ETag Validation', () => {
       });
 
     // Upsert with wrong dimensions (too small)
-    const points = [{ id: '1', vector: new Array(384).fill(0.1), payload: {} }];
+    const points = [{ id: 1, vector: new Array(384).fill(0.1), payload: {} }];
 
     try {
       await client.upsert('test-collection', points);
@@ -191,9 +191,7 @@ describe('ETag Validation', () => {
       });
 
     // Upsert with wrong dimensions (too large)
-    const points = [
-      { id: '1', vector: new Array(1536).fill(0.1), payload: {} },
-    ];
+    const points = [{ id: 1, vector: new Array(1536).fill(0.1), payload: {} }];
 
     try {
       await client.upsert('test-collection', points);
@@ -238,7 +236,7 @@ describe('ETag Validation', () => {
       .put('/api/v1/collections/test-collection/points')
       .reply(200, { success: true });
 
-    const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
+    const points = [{ id: 1, vector: new Array(768).fill(0.1), payload: {} }];
 
     // First call succeeds and caches schema
     await client.upsert('test-collection', points);
@@ -341,7 +339,7 @@ describe('ETag Validation', () => {
         code: 'DIMENSION_MISMATCH',
       });
 
-    const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
+    const points = [{ id: 1, vector: new Array(768).fill(0.1), payload: {} }];
 
     try {
       await client.upsert('test-collection', points);
@@ -383,7 +381,7 @@ describe('ETag Validation', () => {
         code: 'INTERNAL_ERROR',
       });
 
-    const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
+    const points = [{ id: 1, vector: new Array(768).fill(0.1), payload: {} }];
 
     // Should throw AetherfyVectorsError with server error message
     try {
@@ -427,7 +425,7 @@ describe('ETag Validation', () => {
         code: 'SERVICE_UNAVAILABLE',
       });
 
-    const points = [{ id: '1', vector: new Array(768).fill(0.1), payload: {} }];
+    const points = [{ id: 1, vector: new Array(768).fill(0.1), payload: {} }];
 
     // Should throw AetherfyVectorsError for 5xx errors
     try {
@@ -458,7 +456,7 @@ describe('ETag Validation', () => {
       });
 
     // Points without vector (intentionally invalid for testing)
-    const points = [{ id: '1', payload: {} }] as unknown as Array<{
+    const points = [{ id: 1, payload: {} }] as unknown as Array<{
       id: string;
       vector: number[];
       payload: Record<string, unknown>;

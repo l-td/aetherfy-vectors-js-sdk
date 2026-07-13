@@ -34,13 +34,15 @@ export { MemoryClient } from './client';
 export type { MemoryClientConfig, CreateScopeOptions } from './client';
 
 export { Namespace } from './namespace';
+export type { NamespaceAddOptions } from './namespace';
+// The shared scope-option types live on the Scope base (used by both
+// Namespace and Thread); exported from their real home.
 export type {
-  NamespaceAddOptions,
   NamespaceSearchOptions,
   NamespaceRetrieveOptions,
   NamespaceSetSchemaOptions,
   NamespaceIterOptions,
-} from './namespace';
+} from './scope';
 
 export { Thread } from './thread';
 export type { ThreadAddOptions, ThreadHistoryOptions } from './thread';

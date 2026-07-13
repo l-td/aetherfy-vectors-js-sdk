@@ -13,6 +13,12 @@ import { PointNotFoundError } from '../../src/exceptions';
 
 const ENDPOINT = 'https://vectors.aetherfy.com';
 
+// Point-id fixtures — must be valid ids (unsigned integer or UUID string);
+// arbitrary strings like 'p1' now throw client-side before the request fires.
+const P1 = '550e8400-e29b-41d4-a716-446655440001';
+const P2 = '550e8400-e29b-41d4-a716-446655440002';
+const MISSING = '550e8400-e29b-41d4-a716-446655440099';
+
 function makeClient(): AetherfyVectorsClient {
   return new AetherfyVectorsClient({
     apiKey: 'afy_test_1234567890123456',
@@ -29,21 +35,31 @@ describe('AetherfyVectorsClient payload methods', () => {
   describe('setPayload', () => {
     it('POSTs to /points/payload with { payload, points }', async () => {
       const client = makeClient();
-      const expectedBody = { payload: { tag: 'new' }, points: ['p1', 'p2'] };
+      const expectedBody = { payload: { tag: 'new' }, points: [P1, P2] };
 
       nock(ENDPOINT)
         .post('/api/v1/collections/col/points/payload', expectedBody)
         .reply(200, { result: { status: 'ok' } });
 
-      const out = await client.setPayload('col', { tag: 'new' }, ['p1', 'p2']);
+      const out = await client.setPayload('col', { tag: 'new' }, [P1, P2]);
       expect(out).toEqual({ result: { status: 'ok' } });
     });
 
     it('throws ValidationError on invalid collection name (no request fires)', async () => {
       const client = makeClient();
       // No nock interceptor — if the request fires, nock throws "no match".
-      await expect(client.setPayload('', { x: 1 }, ['p1'])).rejects.toThrow(
+      await expect(client.setPayload('', { x: 1 }, [P1])).rejects.toThrow(
         /Collection name/i
+      );
+    });
+
+    it('throws ValidationError on an invalid point id (no request fires)', async () => {
+      const client = makeClient();
+      // No nock interceptor — if the request fires, nock throws "no match".
+      await expect(
+        client.setPayload('col', { x: 1 }, ['my_point_1'])
+      ).rejects.toThrow(
+        "Point ID 'my_point_1' is invalid — use an unsigned integer or a UUID string."
       );
     });
 
@@ -56,9 +72,7 @@ describe('AetherfyVectorsClient payload methods', () => {
           error: { code: 'RATE_LIMIT_EXCEEDED', message: 'slow down' },
         });
 
-      await expect(
-        client.setPayload('col', { x: 1 }, ['p1'])
-      ).rejects.toThrow();
+      await expect(client.setPayload('col', { x: 1 }, [P1])).rejects.toThrow();
     });
   });
 
@@ -69,13 +83,11 @@ describe('AetherfyVectorsClient payload methods', () => {
       nock(ENDPOINT)
         .put('/api/v1/collections/col/points/payload', {
           payload: { only: 'this' },
-          points: ['p1'],
+          points: [P1],
         })
         .reply(200, { result: { status: 'ok' } });
 
-      const out = await client.overwritePayload('col', { only: 'this' }, [
-        'p1',
-      ]);
+      const out = await client.overwritePayload('col', { only: 'this' }, [P1]);
       expect(out).toEqual({ result: { status: 'ok' } });
     });
 
@@ -89,7 +101,7 @@ describe('AetherfyVectorsClient payload methods', () => {
         });
 
       await expect(
-        client.overwritePayload('col', { x: 1 }, ['p1'])
+        client.overwritePayload('col', { x: 1 }, [P1])
       ).rejects.toThrow();
     });
   });
@@ -101,21 +113,21 @@ describe('AetherfyVectorsClient payload methods', () => {
       nock(ENDPOINT)
         .post('/api/v1/collections/col/points/payload/delete', {
           keys: ['old_tag', 'old_meta'],
-          points: ['p1', 'p2'],
+          points: [P1, P2],
         })
         .reply(200, { result: { status: 'ok' } });
 
       const out = await client.deletePayload(
         'col',
         ['old_tag', 'old_meta'],
-        ['p1', 'p2']
+        [P1, P2]
       );
       expect(out).toEqual({ result: { status: 'ok' } });
     });
 
     it('validates collection name before sending', async () => {
       const client = makeClient();
-      await expect(client.deletePayload('', ['k'], ['p1'])).rejects.toThrow(
+      await expect(client.deletePayload('', ['k'], [P1])).rejects.toThrow(
         /Collection name/i
       );
     });
@@ -127,9 +139,7 @@ describe('AetherfyVectorsClient payload methods', () => {
         .post('/api/v1/collections/col/points/payload/delete')
         .reply(500, { error: { code: 'INTERNAL_ERROR', message: 'oops' } });
 
-      await expect(
-        client.deletePayload('col', ['k'], ['p1'])
-      ).rejects.toThrow();
+      await expect(client.deletePayload('col', ['k'], [P1])).rejects.toThrow();
     });
   });
 
@@ -139,12 +149,12 @@ describe('AetherfyVectorsClient payload methods', () => {
       nock(ENDPOINT)
         .post('/api/v1/collections/col/points/payload', {
           payload: { a: 1 },
-          points: ['p1'],
+          points: [P1],
           key: 'metadata',
         })
         .reply(200, { result: { status: 'ok' } });
 
-      await client.setPayload('col', { a: 1 }, ['p1'], { key: 'metadata' });
+      await client.setPayload('col', { a: 1 }, [P1], { key: 'metadata' });
     });
 
     it('omits key from the body when not set', async () => {
@@ -156,7 +166,7 @@ describe('AetherfyVectorsClient payload methods', () => {
         )
         .reply(200, { result: { status: 'ok' } });
 
-      await client.setPayload('col', { a: 1 }, ['p1']);
+      await client.setPayload('col', { a: 1 }, [P1]);
     });
   });
 
@@ -166,12 +176,12 @@ describe('AetherfyVectorsClient payload methods', () => {
       nock(ENDPOINT)
         .post('/api/v1/collections/col/points/payload', {
           payload: { tag: 'x' },
-          points: ['p1'],
+          points: [P1],
           key: 'metadata',
         })
         .reply(200, { result: { status: 'ok' } });
 
-      const out = await client.mergeMetadata('col', 'p1', { tag: 'x' });
+      const out = await client.mergeMetadata('col', P1, { tag: 'x' });
       expect(out).toEqual({ result: { status: 'ok' } });
     });
 
@@ -179,11 +189,11 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
       await expect(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        client.mergeMetadata('col', 'p1', 'nope' as any)
+        client.mergeMetadata('col', P1, 'nope' as any)
       ).rejects.toBeInstanceOf(TypeError);
       await expect(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        client.mergeMetadata('col', 'p1', [1] as any)
+        client.mergeMetadata('col', P1, [1] as any)
       ).rejects.toBeInstanceOf(TypeError);
     });
 
@@ -194,7 +204,7 @@ describe('AetherfyVectorsClient payload methods', () => {
         .reply(404, { message: 'No point with id missing found' });
 
       await expect(
-        client.mergeMetadata('col', 'missing', { a: 1 })
+        client.mergeMetadata('col', MISSING, { a: 1 })
       ).rejects.toBeInstanceOf(PointNotFoundError);
     });
   });
@@ -205,11 +215,11 @@ describe('AetherfyVectorsClient payload methods', () => {
       nock(ENDPOINT)
         .post('/api/v1/collections/col/points/payload/delete', {
           keys: ['metadata.k1', 'metadata.k2'],
-          points: ['p1'],
+          points: [P1],
         })
         .reply(200, { result: { status: 'ok' } });
 
-      const out = await client.deleteMetadataKeys('col', 'p1', ['k1', 'k2']);
+      const out = await client.deleteMetadataKeys('col', P1, ['k1', 'k2']);
       expect(out).toEqual({ result: { status: 'ok' } });
     });
 
@@ -217,11 +227,11 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
       await expect(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        client.deleteMetadataKeys('col', 'p1', 'k1' as any)
+        client.deleteMetadataKeys('col', P1, 'k1' as any)
       ).rejects.toBeInstanceOf(TypeError);
       await expect(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        client.deleteMetadataKeys('col', 'p1', ['k1', 2] as any)
+        client.deleteMetadataKeys('col', P1, ['k1', 2] as any)
       ).rejects.toBeInstanceOf(TypeError);
     });
 
@@ -232,7 +242,7 @@ describe('AetherfyVectorsClient payload methods', () => {
         .reply(404, { message: 'No point with id missing found' });
 
       await expect(
-        client.deleteMetadataKeys('col', 'missing', ['k1'])
+        client.deleteMetadataKeys('col', MISSING, ['k1'])
       ).rejects.toBeInstanceOf(PointNotFoundError);
     });
   });

@@ -67,7 +67,7 @@ class VectorSearchApp {
   async addSampleProducts() {
     const sampleProducts = [
       {
-        id: 'laptop_1',
+        id: 1,
         vector: this.generateMockEmbedding(),
         payload: {
           name: 'Gaming Laptop Pro',
@@ -78,7 +78,7 @@ class VectorSearchApp {
         },
       },
       {
-        id: 'laptop_2',
+        id: 2,
         vector: this.generateMockEmbedding(),
         payload: {
           name: 'Business Ultrabook',
@@ -90,7 +90,7 @@ class VectorSearchApp {
         },
       },
       {
-        id: 'headphones_1',
+        id: 3,
         vector: this.generateMockEmbedding(),
         payload: {
           name: 'Wireless Noise-Canceling Headphones',
@@ -102,7 +102,7 @@ class VectorSearchApp {
         },
       },
       {
-        id: 'phone_1',
+        id: 4,
         vector: this.generateMockEmbedding(),
         payload: {
           name: 'Smartphone Pro Max',

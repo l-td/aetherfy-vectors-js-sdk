@@ -58,12 +58,12 @@ describe('Schema Validation Integration', () => {
 
       const points: Point[] = [
         {
-          id: '1',
+          id: 1,
           vector: [0.1, 0.2],
           payload: { price: 100, name: 'Product A' },
         },
         {
-          id: '2',
+          id: 2,
           vector: [0.3, 0.4],
           payload: { price: 200, name: 'Product B' },
         },
@@ -103,7 +103,7 @@ describe('Schema Validation Integration', () => {
 
       const points: Point[] = [
         {
-          id: '1',
+          id: 1,
           vector: [0.1, 0.2],
           payload: { price: 'invalid' }, // Wrong type
         },
@@ -145,12 +145,12 @@ describe('Schema Validation Integration', () => {
 
       const points: Point[] = [
         {
-          id: '1',
+          id: 1,
           vector: [0.1, 0.2],
           payload: { price: 100, name: 'Valid' },
         },
         {
-          id: '2',
+          id: 2,
           vector: [0.3, 0.4],
           payload: { price: 'invalid' }, // Wrong type + missing name
         },
@@ -205,7 +205,7 @@ describe('Schema Validation Integration', () => {
 
       const points: Point[] = [
         {
-          id: '1',
+          id: 1,
           vector: [0.1, 0.2],
           payload: { price: 'invalid' }, // Wrong type but should be allowed
         },
@@ -252,7 +252,7 @@ describe('Schema Validation Integration', () => {
 
       const points: Point[] = [
         {
-          id: '1',
+          id: 1,
           vector: [0.1, 0.2],
           payload: { price: 'anything goes' }, // Should be allowed
         },
@@ -291,7 +291,7 @@ describe('Schema Validation Integration', () => {
 
       const points: Point[] = [
         {
-          id: '1',
+          id: 1,
           vector: [0.1, 0.2],
           payload: { anything: 'goes', random: 123 },
         },
@@ -376,7 +376,7 @@ describe('Schema Validation Integration', () => {
 
       const points: Point[] = [
         {
-          id: '1',
+          id: 1,
           vector: [0.1, 0.2],
           payload: { price: 100 },
         },
@@ -436,7 +436,7 @@ describe('Schema Validation Integration', () => {
 
       const points: Point[] = [
         {
-          id: '1',
+          id: 1,
           vector: [0.1, 0.2],
           payload: {}, // Missing required price in new schema
         },
@@ -483,7 +483,7 @@ describe('Schema Validation Integration', () => {
         .reply(200, { status: 'ok' });
 
       const points: Point[] = [
-        { id: '1', vector: [0.1, 0.2], payload: { price: 100 } },
+        { id: 1, vector: [0.1, 0.2], payload: { price: 100 } },
       ];
 
       await client.upsert('test-collection', points);
@@ -523,7 +523,7 @@ describe('Schema Validation Integration', () => {
         .put('/api/v1/collections/test-collection/points')
         .reply(200, { status: 'ok' });
 
-      const points: Point[] = [{ id: '1', vector: [0.1, 0.2], payload: {} }];
+      const points: Point[] = [{ id: 1, vector: [0.1, 0.2], payload: {} }];
 
       await client.upsert('test-collection', points);
 

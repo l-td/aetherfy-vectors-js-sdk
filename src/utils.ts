@@ -108,30 +108,74 @@ export function validateCollectionName(name: string): void {
 }
 
 /**
- * Validate point ID
+ * Point-ID validation — mirrors the server's ingress rule (vectordb
+ * utils/pointIds.js, 400 INVALID_POINT_ID).
+ *
+ * A point id has exactly two valid shapes:
+ * - an unsigned integer no larger than Number.MAX_SAFE_INTEGER (2^53 − 1).
+ *   The bound is the server's, not Qdrant's full u64: the server's Node
+ *   parse layer decodes JSON numbers as IEEE-754 doubles, so an id past
+ *   2^53 − 1 would be silently mangled before storage — an id we accept
+ *   is an id we can round-trip intact. Callers needing bigger stable ids
+ *   use a UUID.
+ * - a UUID string in any of the four forms Qdrant accepts: canonical
+ *   (8-4-4-4-12), simple (32 hex, no hyphens), braced ({…}), or URN
+ *   (urn:uuid:…), case-insensitive.
+ *
+ * Rejecting anything else does not change which ids WORK — the server
+ * already responds 400 INVALID_POINT_ID to them; this raises the same
+ * rejection client-side, before the request is sent.
+ */
+const UUID_CANONICAL_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_SIMPLE_RE = /^[0-9a-f]{32}$/i;
+const URN_UUID_PREFIX = 'urn:uuid:';
+
+/**
+ * True iff `s` is any of Qdrant's four accepted UUID string forms.
+ */
+function isUuidPointId(s: string): boolean {
+  let core = s;
+  // The urn:uuid: prefix and { } braces are mutually exclusive wrappers in
+  // the forms Qdrant accepts — strip whichever is present, then hex-check
+  // the core.
+  if (
+    core.length >= URN_UUID_PREFIX.length &&
+    core.slice(0, URN_UUID_PREFIX.length).toLowerCase() === URN_UUID_PREFIX
+  ) {
+    core = core.slice(URN_UUID_PREFIX.length);
+  } else if (
+    core.length >= 2 &&
+    core[0] === '{' &&
+    core[core.length - 1] === '}'
+  ) {
+    core = core.slice(1, -1);
+  }
+  return UUID_CANONICAL_RE.test(core) || UUID_SIMPLE_RE.test(core);
+}
+
+/**
+ * Validate a point ID.
+ *
+ * Valid ids are unsigned integers up to 2^53 − 1 (Number.MAX_SAFE_INTEGER)
+ * or UUID strings in any of the four Qdrant-accepted forms (canonical,
+ * simple 32-hex, braced, urn:uuid:). See the module note above for why the
+ * integer bound is 2^53 − 1 rather than Qdrant's full u64.
  *
  * @param id - Point ID to validate
- * @throws ValidationError if ID is invalid
+ * @throws ValidationError if the ID is invalid — same wording as the
+ *   server's 400 INVALID_POINT_ID response, so client-side and
+ *   server-side rejections read the same
  */
 export function validatePointId(id: string | number): void {
-  if (id === null || id === undefined) {
-    throw new ValidationError('Point ID cannot be null or undefined');
+  if (typeof id === 'number') {
+    if (id >= 0 && Number.isSafeInteger(id)) return;
+  } else if (typeof id === 'string') {
+    if (isUuidPointId(id)) return;
   }
-
-  if (typeof id === 'string') {
-    if (id.length === 0) {
-      throw new ValidationError('Point ID cannot be an empty string');
-    }
-    if (id.length > 255) {
-      throw new ValidationError('Point ID cannot exceed 255 characters');
-    }
-  } else if (typeof id === 'number') {
-    if (!isFinite(id)) {
-      throw new ValidationError('Point ID must be a finite number');
-    }
-  } else {
-    throw new ValidationError('Point ID must be a string or number');
-  }
+  throw new ValidationError(
+    `Point ID '${id}' is invalid — use an unsigned integer or a UUID string.`
+  );
 }
 
 /**
@@ -258,11 +302,14 @@ export function formatPointsForUpsert(
 ): Point[] {
   return points.map((point, index) => {
     try {
+      // Presence check only — `!point.id` would reject the valid id 0.
+      // Shape validation is validatePointId's job below.
       if (
         !point ||
         typeof point !== 'object' ||
         !('id' in point) ||
-        !point.id
+        point.id === null ||
+        point.id === undefined
       ) {
         throw new ValidationError(`Point at index ${index} must have an id`);
       }

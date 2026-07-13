@@ -177,7 +177,7 @@ export const mockScenarios = {
     }),
   successfulSearch: () =>
     createMockResponse({
-      result: [{ id: 'point_1', score: 0.95, payload: { name: 'Test Item' } }],
+      result: [{ id: 1, score: 0.95, payload: { name: 'Test Item' } }],
     }),
 
   // Error scenarios

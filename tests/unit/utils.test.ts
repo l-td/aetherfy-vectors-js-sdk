@@ -108,35 +108,128 @@ describe('Validation Functions', () => {
     });
   });
 
+  // Mirrors the server matrix in vectordb tests/utils/pointIds.test.js —
+  // one assertion per case, so a divergence names the exact id shape.
   describe('validatePointId', () => {
-    it('should accept valid point IDs', () => {
-      expect(() => validatePointId('valid-id')).not.toThrow();
-      expect(() => validatePointId(123)).not.toThrow();
+    // ---- accepted: unsigned integers -----------------------------------
+    it('accepts 0', () => {
       expect(() => validatePointId(0)).not.toThrow();
     });
+    it('accepts a small positive integer', () => {
+      expect(() => validatePointId(42)).not.toThrow();
+    });
+    it('accepts Number.MAX_SAFE_INTEGER (the bound)', () => {
+      expect(() => validatePointId(Number.MAX_SAFE_INTEGER)).not.toThrow();
+    });
 
-    it('should reject invalid point IDs', () => {
+    // ---- accepted: UUID strings, all four Qdrant forms ------------------
+    it('accepts a lowercase canonical UUID', () => {
+      expect(() =>
+        validatePointId('550e8400-e29b-41d4-a716-446655440000')
+      ).not.toThrow();
+    });
+    it('accepts an uppercase UUID (case-insensitive)', () => {
+      expect(() =>
+        validatePointId('550E8400-E29B-41D4-A716-446655440000')
+      ).not.toThrow();
+    });
+    it('accepts a simple (no-hyphen 32-hex) UUID', () => {
+      expect(() =>
+        validatePointId('550e8400e29b41d4a716446655440000')
+      ).not.toThrow();
+    });
+    it('accepts a URN-form UUID (urn:uuid:…)', () => {
+      expect(() =>
+        validatePointId('urn:uuid:550e8400-e29b-41d4-a716-446655440000')
+      ).not.toThrow();
+    });
+    it('accepts a URN prefix in mixed case', () => {
+      expect(() =>
+        validatePointId('URN:UUID:550e8400-e29b-41d4-a716-446655440000')
+      ).not.toThrow();
+    });
+    it('accepts a braced UUID ({…})', () => {
+      expect(() =>
+        validatePointId('{550e8400-e29b-41d4-a716-446655440000}')
+      ).not.toThrow();
+    });
+
+    // ---- rejected: numbers out of the accepted set ----------------------
+    it('rejects a negative integer', () => {
+      expect(() => validatePointId(-1)).toThrow(ValidationError);
+    });
+    it('rejects a float', () => {
+      expect(() => validatePointId(1.5)).toThrow(ValidationError);
+    });
+    it('rejects an integer above the safe-integer bound', () => {
+      expect(() => validatePointId(Number.MAX_SAFE_INTEGER + 1)).toThrow(
+        ValidationError
+      );
+    });
+    it('rejects NaN', () => {
+      expect(() => validatePointId(NaN)).toThrow(ValidationError);
+    });
+    it('rejects Infinity', () => {
+      expect(() => validatePointId(Infinity)).toThrow(ValidationError);
+    });
+
+    // ---- rejected: strings that are not UUIDs ---------------------------
+    it('rejects a numeric string', () => {
+      expect(() => validatePointId('123')).toThrow(ValidationError);
+    });
+    it('rejects an arbitrary string', () => {
+      expect(() => validatePointId('my_point_1')).toThrow(ValidationError);
+    });
+    it('rejects an empty string', () => {
       expect(() => validatePointId('')).toThrow(ValidationError);
+    });
+    it('rejects a hex string of the wrong length (31 chars)', () => {
+      expect(() => validatePointId('550e8400e29b41d4a71644665544000')).toThrow(
+        ValidationError
+      );
+    });
+    it('rejects a braced UUID with no closing brace', () => {
+      expect(() =>
+        validatePointId('{550e8400-e29b-41d4-a716-446655440000')
+      ).toThrow(ValidationError);
+    });
+    it('rejects a UUID with non-hex characters', () => {
+      expect(() =>
+        validatePointId('550e8400-e29b-41d4-a716-44665544zzzz')
+      ).toThrow(ValidationError);
+    });
+
+    // ---- rejected: non-string, non-number -------------------------------
+    it('rejects null', () => {
       expect(() => validatePointId(null as unknown as string)).toThrow(
         ValidationError
       );
+    });
+    it('rejects undefined', () => {
       expect(() => validatePointId(undefined as unknown as string)).toThrow(
         ValidationError
       );
-      expect(() => validatePointId(NaN)).toThrow(ValidationError);
-      expect(() => validatePointId(Infinity)).toThrow(ValidationError);
-      expect(() => validatePointId('a'.repeat(256))).toThrow(ValidationError);
+    });
+    it('rejects an object', () => {
+      expect(() => validatePointId({} as unknown as string)).toThrow(
+        ValidationError
+      );
+    });
+    it('rejects an array', () => {
+      expect(() => validatePointId([] as unknown as string)).toThrow(
+        ValidationError
+      );
+    });
+    it('rejects a boolean', () => {
+      expect(() => validatePointId(true as unknown as string)).toThrow(
+        ValidationError
+      );
     });
 
-    it('should reject non-string, non-number types', () => {
-      expect(() => validatePointId({} as unknown as string)).toThrow(
-        'Point ID must be a string or number'
-      );
-      expect(() => validatePointId([] as unknown as string)).toThrow(
-        'Point ID must be a string or number'
-      );
-      expect(() => validatePointId(true as unknown as string)).toThrow(
-        'Point ID must be a string or number'
+    // ---- error copy ------------------------------------------------------
+    it('mirrors the server INVALID_POINT_ID wording and names the id', () => {
+      expect(() => validatePointId('my_point_1')).toThrow(
+        "Point ID 'my_point_1' is invalid — use an unsigned integer or a UUID string."
       );
     });
   });
@@ -295,15 +388,29 @@ describe('Data Formatting', () => {
   describe('formatPointsForUpsert', () => {
     it('should format valid points', () => {
       const points = [
-        { id: 'point1', vector: [1, 2, 3], payload: { type: 'test' } },
-        { id: 'point2', vector: [4, 5, 6] },
+        { id: 1, vector: [1, 2, 3], payload: { type: 'test' } },
+        {
+          id: '550e8400-e29b-41d4-a716-446655440000',
+          vector: [4, 5, 6],
+        },
       ];
 
       const formatted = formatPointsForUpsert(points);
 
       expect(formatted).toEqual([
-        { id: 'point1', vector: [1, 2, 3], payload: { type: 'test' } },
-        { id: 'point2', vector: [4, 5, 6], payload: {} },
+        { id: 1, vector: [1, 2, 3], payload: { type: 'test' } },
+        {
+          id: '550e8400-e29b-41d4-a716-446655440000',
+          vector: [4, 5, 6],
+          payload: {},
+        },
+      ]);
+    });
+
+    it('should accept the valid id 0 (not treated as missing)', () => {
+      const points = [{ id: 0, vector: [1, 2, 3] }];
+      expect(formatPointsForUpsert(points)).toEqual([
+        { id: 0, vector: [1, 2, 3], payload: {} },
       ]);
     });
 
@@ -312,15 +419,22 @@ describe('Data Formatting', () => {
       expect(() => formatPointsForUpsert(points)).toThrow(ValidationError);
     });
 
+    it('should reject a non-UUID string id', () => {
+      const points = [{ id: 'point1', vector: [1, 2, 3] }];
+      expect(() => formatPointsForUpsert(points)).toThrow(
+        "Point ID 'point1' is invalid — use an unsigned integer or a UUID string."
+      );
+    });
+
     it('should reject points without vector', () => {
-      const points = [{ id: 'point1' }];
+      const points = [{ id: 1 }];
       expect(() => formatPointsForUpsert(points)).toThrow(ValidationError);
     });
 
     it('should handle non-ValidationError during formatting', () => {
       const points = [
         {
-          id: 'point1',
+          id: 1,
           get vector() {
             throw new Error('Unexpected error');
           },

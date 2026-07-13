@@ -9,6 +9,15 @@ import { Thread } from '../../src/memory/thread';
 import type { AetherfyVectorsClient } from '../../src/client';
 import { AetherfyVectorsError, PointNotFoundError } from '../../src/exceptions';
 
+// Point-id fixtures — valid ids (UUID strings). Arbitrary labels like 'p1'
+// would be rejected by validatePointId on a real setPayload/deletePayload
+// call; the jest-mocked client here would otherwise hide that contract.
+const P1 = '00000000-0000-4000-8000-000000000001';
+const MISSING = '00000000-0000-4000-8000-0000000000ff';
+const A = '00000000-0000-4000-8000-00000000000a';
+const B = '00000000-0000-4000-8000-00000000000b';
+const C = '00000000-0000-4000-8000-00000000000c';
+
 function makeNamespace() {
   const client = {
     setPayload: jest.fn().mockResolvedValue({ status: 'ok' }),
@@ -46,12 +55,12 @@ function makeThread() {
 describe('Namespace.setMetadata', () => {
   it('calls client.setPayload with payload={metadata: ...} and the id wrapped in an array', async () => {
     const { ns, client } = makeNamespace();
-    const out = await ns.setMetadata('p1', { foo: 1, bar: true });
+    const out = await ns.setMetadata(P1, { foo: 1, bar: true });
 
     expect(client.setPayload).toHaveBeenCalledWith(
       'user_X_my-ns',
       { metadata: { foo: 1, bar: true } },
-      ['p1']
+      [P1]
     );
     expect(out).toEqual({ status: 'ok' });
   });
@@ -72,13 +81,13 @@ describe('Namespace.iter', () => {
   it('yields each point from client.scrollIter', async () => {
     const { ns, client } = makeNamespace();
     client.scrollIter.mockReturnValue(
-      makeAsyncIter([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
+      makeAsyncIter([{ id: A }, { id: B }, { id: C }])
     );
 
     const out: Array<string | number> = [];
     for await (const p of ns.iter()) out.push(p.id);
 
-    expect(out).toEqual(['a', 'b', 'c']);
+    expect(out).toEqual([A, B, C]);
     expect(client.scrollIter).toHaveBeenCalledWith(
       'user_X_my-ns',
       expect.objectContaining({
@@ -129,11 +138,11 @@ describe('Namespace.iter', () => {
 describe('Namespace.mergeMetadata', () => {
   it('calls client.setPayload with key="metadata" and the partial as payload', async () => {
     const { ns, client } = makeNamespace();
-    const out = await ns.mergeMetadata('p1', { reviewed: true });
+    const out = await ns.mergeMetadata(P1, { reviewed: true });
     expect(client.setPayload).toHaveBeenCalledWith(
       'user_X_my-ns',
       { reviewed: true },
-      ['p1'],
+      [P1],
       { key: 'metadata' }
     );
     expect(out).toEqual({ status: 'ok' });
@@ -149,30 +158,30 @@ describe('Namespace.mergeMetadata', () => {
     const { ns, client } = makeNamespace();
     await expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ns.mergeMetadata('p1', 'nope' as any)
+      ns.mergeMetadata(P1, 'nope' as any)
     ).rejects.toBeInstanceOf(TypeError);
     await expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ns.mergeMetadata('p1', [1, 2] as any)
+      ns.mergeMetadata(P1, [1, 2] as any)
     ).rejects.toBeInstanceOf(TypeError);
     await expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ns.mergeMetadata('p1', null as any)
+      ns.mergeMetadata(P1, null as any)
     ).rejects.toBeInstanceOf(TypeError);
     expect(client.setPayload).not.toHaveBeenCalled();
   });
 
   it('Namespace rejects reserved key "text" in partial', async () => {
     const { ns, client } = makeNamespace();
-    await expect(
-      ns.mergeMetadata('p1', { text: 'oops', ok: 1 })
-    ).rejects.toThrow(/Reserved keys/);
+    await expect(ns.mergeMetadata(P1, { text: 'oops', ok: 1 })).rejects.toThrow(
+      /Reserved keys/
+    );
     expect(client.setPayload).not.toHaveBeenCalled();
   });
 
   it('Namespace allows role/content/ts (Thread-only reserved set)', async () => {
     const { ns, client } = makeNamespace();
-    await ns.mergeMetadata('p1', { role: 'x', content: 'y', ts: 1 });
+    await ns.mergeMetadata(P1, { role: 'x', content: 'y', ts: 1 });
     expect(client.setPayload).toHaveBeenCalled();
   });
 
@@ -188,7 +197,7 @@ describe('Namespace.mergeMetadata', () => {
 
   it('Thread allows "text" (Namespace-only reserved key)', async () => {
     const { th, client } = makeThread();
-    await th.mergeMetadata('p1', { text: 'free-on-thread' });
+    await th.mergeMetadata(P1, { text: 'free-on-thread' });
     expect(client.setPayload).toHaveBeenCalled();
   });
 
@@ -197,7 +206,7 @@ describe('Namespace.mergeMetadata', () => {
     client.setPayload.mockRejectedValue(
       new AetherfyVectorsError('Not found', undefined, 404)
     );
-    await expect(ns.mergeMetadata('missing', { k: 1 })).rejects.toBeInstanceOf(
+    await expect(ns.mergeMetadata(MISSING, { k: 1 })).rejects.toBeInstanceOf(
       PointNotFoundError
     );
   });
@@ -206,11 +215,11 @@ describe('Namespace.mergeMetadata', () => {
 describe('Namespace.deleteMetadataKeys', () => {
   it('calls client.deletePayload with dotted metadata.<k> keys', async () => {
     const { ns, client } = makeNamespace();
-    const out = await ns.deleteMetadataKeys('p1', ['k1', 'k2']);
+    const out = await ns.deleteMetadataKeys(P1, ['k1', 'k2']);
     expect(client.deletePayload).toHaveBeenCalledWith(
       'user_X_my-ns',
       ['metadata.k1', 'metadata.k2'],
-      ['p1']
+      [P1]
     );
     expect(out).toEqual({ status: 'ok' });
   });
@@ -219,18 +228,18 @@ describe('Namespace.deleteMetadataKeys', () => {
     const { ns, client } = makeNamespace();
     await expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ns.deleteMetadataKeys('p1', 'k1' as any)
+      ns.deleteMetadataKeys(P1, 'k1' as any)
     ).rejects.toBeInstanceOf(TypeError);
     await expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ns.deleteMetadataKeys('p1', ['k1', 2] as any)
+      ns.deleteMetadataKeys(P1, ['k1', 2] as any)
     ).rejects.toBeInstanceOf(TypeError);
     expect(client.deletePayload).not.toHaveBeenCalled();
   });
 
   it('Namespace rejects reserved key "text" in keys list', async () => {
     const { ns, client } = makeNamespace();
-    await expect(ns.deleteMetadataKeys('p1', ['text'])).rejects.toThrow(
+    await expect(ns.deleteMetadataKeys(P1, ['text'])).rejects.toThrow(
       /Reserved keys/
     );
     expect(client.deletePayload).not.toHaveBeenCalled();
@@ -239,7 +248,7 @@ describe('Namespace.deleteMetadataKeys', () => {
   it('Thread rejects reserved keys role/content/ts in keys list', async () => {
     for (const bad of ['role', 'content', 'ts']) {
       const { th, client } = makeThread();
-      await expect(th.deleteMetadataKeys('p1', [bad])).rejects.toThrow(
+      await expect(th.deleteMetadataKeys(P1, [bad])).rejects.toThrow(
         /Reserved keys/
       );
       expect(client.deletePayload).not.toHaveBeenCalled();
@@ -251,9 +260,9 @@ describe('Namespace.deleteMetadataKeys', () => {
     client.deletePayload.mockRejectedValue(
       new AetherfyVectorsError('Not found', undefined, 404)
     );
-    await expect(
-      ns.deleteMetadataKeys('missing', ['k1'])
-    ).rejects.toBeInstanceOf(PointNotFoundError);
+    await expect(ns.deleteMetadataKeys(MISSING, ['k1'])).rejects.toBeInstanceOf(
+      PointNotFoundError
+    );
   });
 });
 
@@ -263,5 +272,5 @@ async function ns_merge_thread(
   th: Thread,
   partial: Record<string, unknown>
 ): Promise<unknown> {
-  return th.mergeMetadata('p1', partial);
+  return th.mergeMetadata(P1, partial);
 }

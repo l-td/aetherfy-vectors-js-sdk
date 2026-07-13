@@ -375,7 +375,7 @@ describe('AetherfyVectorsClient', () => {
         .reply(404, { message: 'Collection not found' });
 
       await expect(
-        client.upsert('ghost', [{ id: 'p1', vector: [0.1, 0.2, 0.3, 0.4] }])
+        client.upsert('ghost', [{ id: 1, vector: [0.1, 0.2, 0.3, 0.4] }])
       ).rejects.toThrow();
 
       expect(c.schemaCache.has('ghost')).toBe(false);
@@ -424,7 +424,7 @@ describe('AetherfyVectorsClient', () => {
           .reply(503, { message: 'Service Unavailable' });
 
         const expectation = expect(
-          client.upsert('intact', [{ id: 'p1', vector: [0.1, 0.2, 0.3, 0.4] }])
+          client.upsert('intact', [{ id: 1, vector: [0.1, 0.2, 0.3, 0.4] }])
         ).rejects.toThrow();
         await jest.runAllTimersAsync();
         await expectation;
@@ -660,7 +660,7 @@ describe('AetherfyVectorsClient', () => {
 
       const points = [
         {
-          id: 'point1',
+          id: 1,
           vector: [0.1, 0.2, 0.3],
           payload: { category: 'test' },
         },
@@ -702,7 +702,7 @@ describe('AetherfyVectorsClient', () => {
       // No need to mock GET again - schema is cached from first call
       const invalidVector = [
         {
-          id: 'point1',
+          id: 1,
           vector: [0.1, 'invalid', 0.3], // Invalid vector component
           payload: { category: 'test' },
         },
@@ -716,7 +716,7 @@ describe('AetherfyVectorsClient', () => {
     it('should search vectors', async () => {
       const mockResults = [
         {
-          id: 'point1',
+          id: 1,
           score: 0.95,
           payload: { category: 'test' },
         },
@@ -789,7 +789,7 @@ describe('AetherfyVectorsClient', () => {
 
       const invalidPoints = [
         {
-          id: 'point1',
+          id: 1,
           vector: 'not-an-array' as unknown as number[],
         },
       ];
@@ -804,10 +804,7 @@ describe('AetherfyVectorsClient', () => {
         .post('/api/v1/collections/test-collection/points/delete')
         .reply(200, { success: true });
 
-      const result = await client.delete('test-collection', [
-        'point1',
-        'point2',
-      ]);
+      const result = await client.delete('test-collection', [1, 2]);
 
       expect(result).toBe(true);
     });
@@ -826,12 +823,12 @@ describe('AetherfyVectorsClient', () => {
     it('should retrieve points by IDs', async () => {
       const mockPoints = [
         {
-          id: 'point1',
+          id: 1,
           vector: [0.1, 0.2, 0.3],
           payload: { category: 'test' },
         },
         {
-          id: 'point2',
+          id: 2,
           vector: [0.4, 0.5, 0.6],
           payload: { category: 'test' },
         },
@@ -846,10 +843,7 @@ describe('AetherfyVectorsClient', () => {
         .post('/api/v1/collections/test-collection/points/retrieve')
         .reply(200, { result: mockPoints });
 
-      const result = await client.retrieve('test-collection', [
-        'point1',
-        'point2',
-      ]);
+      const result = await client.retrieve('test-collection', [1, 2]);
 
       expect(result).toEqual(mockPoints);
     });
@@ -863,7 +857,7 @@ describe('AetherfyVectorsClient', () => {
         .post('/api/v1/collections/test-collection/points/retrieve', body => {
           return (
             Array.isArray(body.ids) &&
-            body.ids[0] === 'point1' &&
+            body.ids[0] === 1 &&
             body.with_payload === false &&
             body.with_vector === true &&
             !('with_vectors' in body)
@@ -871,7 +865,7 @@ describe('AetherfyVectorsClient', () => {
         })
         .reply(200, { result: [] });
 
-      await client.retrieve('test-collection', ['point1'], {
+      await client.retrieve('test-collection', [1], {
         withPayload: false,
         withVectors: true,
       });
@@ -1116,7 +1110,7 @@ describe('AetherfyVectorsClient', () => {
 
       const points = [
         {
-          id: 'point1',
+          id: 1,
           vector: [0.1, 0.2, 0.3],
           payload: { category: 'test' },
         },
@@ -1146,9 +1140,7 @@ describe('AetherfyVectorsClient', () => {
           code: 'INTERNAL_ERROR',
         });
 
-      await expect(
-        client.delete('test-collection', ['point1'])
-      ).rejects.toThrow();
+      await expect(client.delete('test-collection', [1])).rejects.toThrow();
     });
 
     it('should handle errors in retrieve operation', async () => {
@@ -1159,9 +1151,7 @@ describe('AetherfyVectorsClient', () => {
           code: 'SERVICE_UNAVAILABLE',
         });
 
-      await expect(
-        client.retrieve('test-collection', ['point1'])
-      ).rejects.toThrow();
+      await expect(client.retrieve('test-collection', [1])).rejects.toThrow();
     });
 
     it('should handle errors in count operation', async () => {
@@ -1335,7 +1325,7 @@ describe('AetherfyVectorsClient', () => {
 
       await expect(
         client.upsert('invalid-schema', [
-          { id: '1', vector: [0.1, 0.2, 0.3], payload: {} },
+          { id: 1, vector: [0.1, 0.2, 0.3], payload: {} },
         ])
       ).rejects.toThrow(ValidationError);
     });
@@ -1359,7 +1349,7 @@ describe('AetherfyVectorsClient', () => {
 
       const pointsWithoutVector = [
         {
-          id: 'point1',
+          id: 1,
           payload: { category: 'test' },
         } as unknown as Point,
       ];
@@ -1388,7 +1378,7 @@ describe('AetherfyVectorsClient', () => {
 
       const pointsWithNullVector = [
         {
-          id: 'point1',
+          id: 1,
           vector: null,
           payload: { category: 'test' },
         } as unknown as Point,
@@ -1418,7 +1408,7 @@ describe('AetherfyVectorsClient', () => {
 
       const pointsWithStringVector = [
         {
-          id: 'point1',
+          id: 1,
           vector: 'not an array',
           payload: { category: 'test' },
         } as unknown as Point,
@@ -1511,7 +1501,7 @@ describe('AetherfyVectorsClient', () => {
         .reply(200, { status: 'ok' });
 
       await client.upsert('test-collection', [
-        { id: '0', vector: [0.1, 0.2, 0.3], payload: {} },
+        { id: 0, vector: [0.1, 0.2, 0.3], payload: {} },
       ]);
 
       jest.useFakeTimers();
@@ -1524,7 +1514,7 @@ describe('AetherfyVectorsClient', () => {
 
         const expectation = expect(
           client.upsert('test-collection', [
-            { id: '1', vector: [0.1, 0.2, 0.3], payload: {} },
+            { id: 1, vector: [0.1, 0.2, 0.3], payload: {} },
           ])
         ).rejects.toThrow(NetworkError);
         await jest.runAllTimersAsync();
@@ -1934,7 +1924,7 @@ describe('AetherfyVectorsClient', () => {
 
         await expect(
           client.upsert('test-collection', [
-            { id: 'p1', vector: [0.1, 0.2, 0.3, 0.4] },
+            { id: 1, vector: [0.1, 0.2, 0.3, 0.4] },
           ])
         ).rejects.toThrow();
       });
@@ -1964,7 +1954,7 @@ describe('AetherfyVectorsClient', () => {
           .reply(200, { status: 'ok' });
 
         await client.upsert('test-collection', [
-          { id: '1', vector: [0.1, 0.2], payload: {} },
+          { id: 1, vector: [0.1, 0.2], payload: {} },
         ]);
 
         // refreshSchema clears payloadSchemaCache and re-populates it with the new schema
@@ -1986,7 +1976,7 @@ describe('AetherfyVectorsClient', () => {
         // must throw SchemaValidationError, confirming the new schema is enforced.
         await expect(
           client.upsert('test-collection', [
-            { id: '2', vector: [0.1, 0.2], payload: {} },
+            { id: 2, vector: [0.1, 0.2], payload: {} },
           ])
         ).rejects.toThrow(SchemaValidationError);
       });

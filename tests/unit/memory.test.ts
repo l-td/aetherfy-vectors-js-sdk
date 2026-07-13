@@ -30,7 +30,27 @@ import {
   ThreadNotFoundError,
 } from '../../src/memory';
 import { AetherfyVectorsClient } from '../../src/client';
-import { Collection, DistanceMetric, VectorConfig } from '../../src/models';
+import {
+  Collection,
+  DistanceMetric,
+  VectorConfig,
+  Point,
+  ScrollPoint,
+} from '../../src/models';
+import { validatePointId } from '../../src/utils';
+import { ValidationError } from '../../src/exceptions';
+
+// Mock upsert that runs the real point-id validator on each point, mirroring
+// what AetherfyVectorsClient.upsert does. Lets memory tests pin that an
+// invalid explicit id reaches — and is rejected by — the validator, rather
+// than being masked by a no-op mock upsert. Signature matches upsert's.
+function validatingUpsert(
+  _collection: string,
+  points: Point[] | Record<string, unknown>[]
+): Promise<boolean> {
+  points.forEach(p => validatePointId((p as { id: string | number }).id));
+  return Promise.resolve(true);
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -423,8 +443,48 @@ describe('Namespace operations', () => {
   it('add respects a custom id', async () => {
     const mock = buildMockClient();
     const ns = await openNs(mock);
-    await ns.add({ id: 'fixed-id-1', text: 'x', vector: [0.1] });
-    expect(mock.upsert.mock.calls[0][1][0].id).toBe('fixed-id-1');
+    await ns.add({
+      id: '11111111-1111-4111-8111-111111111111',
+      text: 'x',
+      vector: [0.1],
+    });
+    expect(mock.upsert.mock.calls[0][1][0].id).toBe(
+      '11111111-1111-4111-8111-111111111111'
+    );
+  });
+
+  it('add sends an integer id to upsert as a number (not stringified)', async () => {
+    const mock = buildMockClient();
+    const ns = await openNs(mock);
+    // A number is a valid unsigned-integer point id. It must reach the wire
+    // AS A NUMBER — a prior String() coercion turned 42 into '42', a numeric
+    // string the ingress validator rejects.
+    const returned = await ns.add({ id: 42, text: 'x', vector: [0.1] });
+    const sentId = mock.upsert.mock.calls[0][1][0].id;
+    expect(sentId).toBe(42);
+    expect(typeof sentId).toBe('number');
+    expect(returned).toBe(42);
+  });
+
+  it('add default id is a valid UUID string', async () => {
+    const mock = buildMockClient();
+    const ns = await openNs(mock);
+    const returned = await ns.add({ text: 'x', vector: [0.1] });
+    const sentId = mock.upsert.mock.calls[0][1][0].id;
+    expect(typeof sentId).toBe('string');
+    expect(() => validatePointId(sentId as string)).not.toThrow();
+    expect(returned).toBe(sentId);
+  });
+
+  it('add of a non-UUID string id is rejected by the client validator', async () => {
+    const mock = buildMockClient();
+    mock.upsert.mockImplementation(validatingUpsert);
+    const ns = await openNs(mock);
+    // The (b) boundary: a semantic string key is not a valid point id.
+    // Memory passes it through; the client's upsert validator rejects it.
+    await expect(
+      ns.add({ id: 'user-42-preferences', text: 'x', vector: [0.1] })
+    ).rejects.toBeInstanceOf(ValidationError);
   });
 
   it('addMany([]) returns [] without a round trip', async () => {
@@ -440,11 +500,15 @@ describe('Namespace operations', () => {
     const ns = await openNs(mock);
     const ids = await ns.addMany([
       { text: 'a', vector: [0.1], metadata: { i: 0 } },
-      { text: 'b', vector: [0.2], id: 'fixed-1' },
+      {
+        text: 'b',
+        vector: [0.2],
+        id: '22222222-2222-4222-8222-222222222222',
+      },
       { text: 'c', vector: [0.3] },
     ]);
     expect(ids).toHaveLength(3);
-    expect(ids[1]).toBe('fixed-1');
+    expect(ids[1]).toBe('22222222-2222-4222-8222-222222222222');
     expect(mock.upsert).toHaveBeenCalledTimes(1);
     const [coll, points] = mock.upsert.mock.calls[0];
     expect(coll).toBe('customer-42');
@@ -660,6 +724,30 @@ describe('Thread operations', () => {
     });
   });
 
+  it('add sends an integer id to upsert as a number', async () => {
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    const pid = await t.add({
+      role: 'user',
+      content: 'hi',
+      vector: [0.1],
+      id: 99,
+    });
+    const sentId = mock.upsert.mock.calls[0][1][0].id;
+    expect(sentId).toBe(99);
+    expect(typeof sentId).toBe('number');
+    expect(pid).toBe(99);
+  });
+
+  it('add of a non-UUID string id is rejected by the client validator', async () => {
+    const mock = buildMockClient();
+    mock.upsert.mockImplementation(validatingUpsert);
+    const t = await openThread(mock);
+    await expect(
+      t.add({ role: 'user', content: 'hi', vector: [0.1], id: 'conv-99-msg-1' })
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
   it('add sets ts when omitted', async () => {
     const mock = buildMockClient();
     const t = await openThread(mock);
@@ -689,10 +777,10 @@ describe('Thread operations', () => {
         content: 'hello',
         vector: [0.2],
         ts: 1001,
-        id: 'fixed',
+        id: '33333333-3333-4333-8333-333333333333',
       },
     ]);
-    expect(ids).toEqual([ids[0], 'fixed']);
+    expect(ids).toEqual([ids[0], '33333333-3333-4333-8333-333333333333']);
     expect(mock.upsert).toHaveBeenCalledTimes(1);
     const [coll, points] = mock.upsert.mock.calls[0];
     expect(coll).toBe('__thread__conv-99');
@@ -771,10 +859,15 @@ describe('Thread operations', () => {
     expect(mock.upsert).not.toHaveBeenCalled();
   });
 
-  it('addMany on a Thread throws guidance toward appendMany', async () => {
+  it('Thread has no addMany method (uses appendMany instead)', async () => {
     const mock = buildMockClient();
     const t = await openThread(mock);
-    await expect(t.addMany([])).rejects.toThrow(/appendMany/);
+    // Thread and Namespace both extend Scope but declare their own write
+    // API; Thread does NOT inherit Namespace.addMany, so the method does not
+    // exist (previously a throw-override existed at runtime — now it is
+    // simply absent). Callers use appendMany.
+    expect((t as unknown as { addMany?: unknown }).addMany).toBeUndefined();
+    expect(typeof t.appendMany).toBe('function');
     expect(mock.upsert).not.toHaveBeenCalled();
   });
 
@@ -784,9 +877,18 @@ describe('Thread operations', () => {
     mock.scroll.mockResolvedValue({
       nextPageOffset: null,
       points: [
-        { id: 'p3', payload: { role: 'user', content: 'third', ts: 3.0 } },
-        { id: 'p1', payload: { role: 'user', content: 'first', ts: 1.0 } },
-        { id: 'p2', payload: { role: 'bot', content: 'second', ts: 2.0 } },
+        {
+          id: '00000000-0000-4000-8000-000000000003',
+          payload: { role: 'user', content: 'third', ts: 3.0 },
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          payload: { role: 'user', content: 'first', ts: 1.0 },
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000002',
+          payload: { role: 'bot', content: 'second', ts: 2.0 },
+        },
       ],
     });
     const hist = await t.history({ limit: 10 });
@@ -799,8 +901,14 @@ describe('Thread operations', () => {
     mock.scroll.mockResolvedValue({
       nextPageOffset: null,
       points: [
-        { id: 'p1', payload: { role: 'u', content: 'a', ts: 1.0 } },
-        { id: 'p2', payload: { role: 'u', content: 'b', ts: 2.0 } },
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          payload: { role: 'u', content: 'a', ts: 1.0 },
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000002',
+          payload: { role: 'u', content: 'b', ts: 2.0 },
+        },
       ],
     });
     const hist = await t.history({ limit: 10, order: 'desc' });
@@ -820,6 +928,63 @@ describe('Thread operations', () => {
     const hist = await t.history({ limit: 3 });
     expect(hist).toHaveLength(3);
     expect(hist.map(m => m.content)).toEqual(['0', '1', '2']);
+  });
+
+  // Round-trip: what add() writes is what history() reads back, id TYPE intact.
+  it('round-trips an integer id through add → history (number, not string)', async () => {
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    await t.add({ role: 'user', content: 'hi', vector: [0.1], id: 42, ts: 5 });
+    // Feed back exactly what add wrote, as the server would return it.
+    const written = mock.upsert.mock.calls[0][1][0];
+    mock.scroll.mockResolvedValue({
+      nextPageOffset: null,
+      points: [written as unknown as ScrollPoint],
+    });
+    const hist = await t.history({ limit: 10 });
+    expect(hist).toHaveLength(1);
+    expect(hist[0].id).toBe(42);
+    expect(typeof hist[0].id).toBe('number');
+  });
+
+  it('round-trips a uuid id through add → history (string)', async () => {
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    const uuid = '550e8400-e29b-41d4-a716-446655440000';
+    await t.add({
+      role: 'user',
+      content: 'hi',
+      vector: [0.1],
+      id: uuid,
+      ts: 5,
+    });
+    const written = mock.upsert.mock.calls[0][1][0];
+    mock.scroll.mockResolvedValue({
+      nextPageOffset: null,
+      points: [written as unknown as ScrollPoint],
+    });
+    const hist = await t.history({ limit: 10 });
+    expect(hist[0].id).toBe(uuid);
+    expect(typeof hist[0].id).toBe('string');
+  });
+
+  it('round-trips a default (uuid4) id through add → history (string)', async () => {
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    const pid = await t.add({
+      role: 'user',
+      content: 'hi',
+      vector: [0.1],
+      ts: 5,
+    });
+    expect(typeof pid).toBe('string');
+    const written = mock.upsert.mock.calls[0][1][0];
+    mock.scroll.mockResolvedValue({
+      nextPageOffset: null,
+      points: [written as unknown as ScrollPoint],
+    });
+    const hist = await t.history({ limit: 10 });
+    expect(hist[0].id).toBe(pid);
   });
 
   it('history rejects bad order', async () => {

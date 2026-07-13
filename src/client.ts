@@ -64,10 +64,10 @@ import { validateVectors } from './schema';
  *   distance: DistanceMetric.COSINE
  * });
  *
- * // Add points
+ * // Add points — id is an unsigned integer (≤ 2^53 − 1) or a UUID string
  * await client.upsert('products', [
  *   {
- *     id: 'product_1',
+ *     id: 1,
  *     vector: [0.1, 0.2, ...], // 128-dimensional
  *     payload: { name: 'Product A' }
  *   }
@@ -663,9 +663,10 @@ export class AetherfyVectorsClient {
    *
    * @example
    * ```typescript
+   * // id is an unsigned integer (≤ 2^53 − 1) or a UUID string
    * await client.upsert('products', [
    *   {
-   *     id: 'product_1',
+   *     id: '550e8400-e29b-41d4-a716-446655440000',
    *     vector: [0.1, 0.2, 0.3, ...],
    *     payload: { name: 'Product A', category: 'electronics' }
    *   }
@@ -965,6 +966,9 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     const isFilter = !Array.isArray(pointsSelector);
+    if (!isFilter) {
+      pointsSelector.forEach(validatePointId);
+    }
     const body = isFilter
       ? { filter: pointsSelector }
       : { points: pointsSelector };
@@ -1177,6 +1181,7 @@ export class AetherfyVectorsClient {
     options: RetrieveOptions = {}
   ): Promise<Point[]> {
     this.validateCollectionName(collectionName);
+    ids.forEach(validatePointId);
 
     const scopedName = this.scopeCollection(collectionName);
 
@@ -1712,6 +1717,7 @@ export class AetherfyVectorsClient {
         throw new ValidationError('Each point must have an id');
       }
 
+      validatePointId(point.id as string | number);
       this.validateVector(point.vector as number[]);
 
       return {

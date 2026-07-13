@@ -108,7 +108,7 @@ describe('Workspace Support', () => {
           }
         )
         .reply(200, {
-          result: [{ id: '1', score: 0.95, payload: { text: 'test' } }],
+          result: [{ id: 1, score: 0.95, payload: { text: 'test' } }],
         });
 
       const queryVector = new Array(384).fill(0.1);
@@ -163,7 +163,7 @@ describe('Workspace Support', () => {
 
       const vector = new Array(384).fill(0.1);
       await client.upsert('documents', [
-        { id: '1', vector, payload: { text: 'test' } },
+        { id: 1, vector, payload: { text: 'test' } },
       ]);
 
       expect(upsertScope.isDone()).toBe(true);

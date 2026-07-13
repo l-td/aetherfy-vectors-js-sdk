@@ -1,5 +1,5 @@
 /**
- * Thread — a conversation-shaped specialization of Namespace.
+ * Thread — a conversation-shaped scope.
  *
  * Payloads follow a `{ role, content, ts, metadata }` schema. Adds expose
  * `history(limit, order)` for ordered retrieval of messages.
@@ -7,13 +7,18 @@
  * Every add writes three reserved fields on the point payload:
  * `role`, `content`, and `ts` (Unix seconds). User metadata lives
  * under `metadata` so it can't shadow reserved fields.
+ *
+ * Thread does NOT extend Namespace: their write APIs differ (a message
+ * requires `role`/`content`; a memory uses `text`), so a Thread is not
+ * add-substitutable for a Namespace. Both share the read/scope surface via
+ * `Scope`.
  */
 
 import { AetherfyVectorsClient } from '../client';
 import { assertAllowedOptionKeys } from '../utils/options';
 import { EmbeddingNotSupportedError } from './errors';
 import { generateId, Message, messageFromPoint } from './models';
-import { Namespace, NamespaceAddOptions } from './namespace';
+import { Scope } from './scope';
 
 export interface ThreadAddOptions {
   role: string;
@@ -35,12 +40,12 @@ export interface ThreadHistoryOptions {
   order?: 'asc' | 'desc';
 }
 
-export class Thread extends Namespace {
+export class Thread extends Scope {
   /**
-   * Thread payload top-level reserved fields. Overrides Namespace's
-   * `{text}` set — Thread payload is `{ role, content, ts, metadata }`,
-   * so role/content/ts are the names that shouldn't appear in user
-   * metadata partials.
+   * Thread payload top-level reserved fields — a Thread payload is
+   * `{ role, content, ts, metadata }`, so role/content/ts are the names
+   * that shouldn't appear in a user metadata partial. See
+   * `Scope.mergeMetadata`.
    * @internal
    */
   protected static override readonly RESERVED_KEYS: ReadonlySet<string> =
@@ -64,10 +69,10 @@ export class Thread extends Namespace {
   }
 
   // -------------------------------------------------------------------
-  // Write — shadows Namespace.add with a role/content schema
+  // Write — a role/content message schema
   // -------------------------------------------------------------------
 
-  async add(options: ThreadAddOptions): Promise<string> {
+  async add(options: ThreadAddOptions): Promise<string | number> {
     const { role, content, vector, metadata, id, ts } = options;
     if (!vector) throw new EmbeddingNotSupportedError();
     if (typeof role !== 'string' || role.length === 0) {
@@ -77,7 +82,9 @@ export class Thread extends Namespace {
       throw new Error('content must be a string');
     }
 
-    const pointId = id !== undefined ? String(id) : generateId();
+    // Explicit id as-authored (a number stays a number); default UUID when
+    // omitted. No blanket String() coercion — see Namespace.add.
+    const pointId = id !== undefined ? id : generateId();
     const timestamp = ts ?? Date.now() / 1000;
 
     const payload: Record<string, unknown> = {
@@ -106,7 +113,9 @@ export class Thread extends Namespace {
    * round trip. Server handles streaming-chunking; this method does
    * not chunk client-side.
    */
-  async appendMany(messages: ThreadAddOptions[]): Promise<string[]> {
+  async appendMany(
+    messages: ThreadAddOptions[]
+  ): Promise<Array<string | number>> {
     if (!Array.isArray(messages)) {
       throw new TypeError('appendMany requires an array of ThreadAddOptions');
     }
@@ -123,7 +132,9 @@ export class Thread extends Namespace {
       if (typeof content !== 'string') {
         throw new Error(`appendMany[${idx}]: content must be a string`);
       }
-      const pointId = id !== undefined ? String(id) : generateId();
+      // Explicit id as-authored (a number stays a number); default UUID when
+      // omitted. See Namespace.add — no blanket String() coercion.
+      const pointId = id !== undefined ? id : generateId();
       const timestamp = ts ?? Date.now() / 1000;
       const payload: Record<string, unknown> = { role, content, ts: timestamp };
       if (metadata) payload.metadata = metadata;
@@ -132,24 +143,6 @@ export class Thread extends Namespace {
 
     await this.client.upsert(this.collection, points);
     return points.map(p => p.id);
-  }
-
-  /**
-   * Inherited Namespace.addMany would write `text`/`metadata` payloads
-   * into a thread-shaped collection — the Thread schema is
-   * `role`/`content`/`ts`/`metadata`. Calling addMany on a Thread is
-   * almost always a mistake; redirect to appendMany.
-   *
-   * Keeps the parent's parameter signature so JS callers reach the
-   * runtime guidance regardless of typing strictness; narrows the
-   * return to `Promise<never>` since this function never resolves.
-   */
-  async addMany(_items: NamespaceAddOptions[]): Promise<never> {
-    throw new Error(
-      'Thread.addMany is not supported (writes wrong payload shape). ' +
-        'Use Thread.appendMany(messages) — each message takes ' +
-        '{role, content, vector, metadata?, id?, ts?}.'
-    );
   }
 
   // -------------------------------------------------------------------
@@ -217,7 +210,7 @@ export class Thread extends Namespace {
       throw new Error("order must be 'asc' or 'desc'");
     }
 
-    // Reuse Namespace.iter for paging — same scrollIter under the hood.
+    // Reuse Scope.iter for paging — same scrollIter under the hood.
     // Skip points without payload or without ts (matches history()).
     const messages: Message[] = [];
     for await (const point of this.iter({
