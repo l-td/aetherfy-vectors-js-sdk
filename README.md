@@ -257,10 +257,11 @@ const msgs = [
 const msgIds = await thread.appendMany(msgs);
 ```
 
-`Thread.addMany()` is overridden to throw with guidance toward
-`appendMany()` — `addMany` would write `text`/`metadata` payloads into
-a `role`/`content`/`ts` schema, which is almost always a mistake. Reach
-for `appendMany()` on threads.
+Threads have no `addMany()` — a `Thread` is not a `Namespace` subclass
+(they share a scope base but declare their own write API), so there is
+no `addMany` to call. `addMany` writes `text`/`metadata` payloads,
+which don't fit a thread's `role`/`content`/`ts` schema. Use
+`appendMany()` on threads.
 
 ### setMetadata — atomic replace, explicit-compose merge
 
