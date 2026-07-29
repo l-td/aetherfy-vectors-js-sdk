@@ -552,6 +552,44 @@ describe('Namespace operations', () => {
     expect(call[2]).toMatchObject({ limit: 5, queryFilter: { must: [] } });
   });
 
+  it('search forwards searchParams to the client', async () => {
+    // The scope layer must not be a place where the option quietly dies.
+    // Memory search is recall-sensitive — retrieving the right memory beats
+    // saving a millisecond — so a Namespace user has to be able to reach
+    // hnsw_ef. Wire-level proof lives in search-params.test.ts; here we pin
+    // that the scope forwards it untouched.
+    const mock = buildMockClient();
+    const ns = await openNs(mock);
+    await ns.search([0.1, 0.2], { searchParams: { hnsw_ef: 256 } });
+    expect(mock.search.mock.calls[0][2]).toMatchObject({
+      searchParams: { hnsw_ef: 256 },
+    });
+  });
+
+  it('search defaults to no searchParams', async () => {
+    // Default stays the tuned server default: the scope forwards undefined,
+    // which JSON.stringify drops from the body entirely.
+    const mock = buildMockClient();
+    const ns = await openNs(mock);
+    await ns.search([0.1, 0.2]);
+    const options = mock.search.mock.calls[0][2] as Record<string, unknown>;
+    expect(options).toBeDefined();
+    expect(options.searchParams).toBeUndefined();
+  });
+
+  it('search throws on an unknown option instead of dropping it', async () => {
+    // Same loud-failure contract as client.search and iter/iterHistory. This
+    // layer needs its own guard: it rebuilds the options object key by key,
+    // so an unknown key would die here without ever reaching the client's.
+    const mock = buildMockClient();
+    const ns = await openNs(mock);
+    const options: Record<string, unknown> = { limit: 5, hnswEf: 256 };
+    await expect(ns.search([0.1, 0.2], options)).rejects.toThrow(
+      /Namespace\.search: unknown option\(s\): hnswEf/
+    );
+    expect(mock.search).not.toHaveBeenCalled();
+  });
+
   it('count delegates', async () => {
     const mock = buildMockClient();
     const ns = await openNs(mock);
@@ -681,6 +719,19 @@ describe('Thread operations', () => {
     await expect(t.add({ role: 'user', content: 'hi' })).rejects.toThrow(
       EmbeddingNotSupportedError
     );
+  });
+
+  it('search forwards searchParams (Thread does not extend Namespace)', async () => {
+    // Thread is NOT a Namespace subclass — it is not add-substitutable — so
+    // option parity across the two scope shapes is not something the type
+    // system gives us. Both inherit Scope.search; pin that a Thread reaches
+    // the option too.
+    const mock = buildMockClient();
+    const t = await openThread(mock);
+    await t.search([0.1, 0.2], { searchParams: { hnsw_ef: 128 } });
+    expect(mock.search.mock.calls[0][2]).toMatchObject({
+      searchParams: { hnsw_ef: 128 },
+    });
   });
 
   it('add rejects empty role', async () => {

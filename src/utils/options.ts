@@ -11,7 +11,9 @@
  * contract.
  *
  * Sites currently guarded:
+ *   - AetherfyVectorsClient.search      (src/client.ts)
  *   - AetherfyVectorsClient.scrollIter  (src/client.ts)
+ *   - Scope.search                      (src/memory/scope.ts)
  *   - Namespace.iter                    (src/memory/namespace.ts)
  *   - Thread.iterHistory                (src/memory/thread.ts)
  *

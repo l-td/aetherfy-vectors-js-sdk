@@ -1226,12 +1226,24 @@ export class AetherfyVectorsClient {
    * @param options - Search options
    * @returns Promise that resolves to search results
    *
+   * `searchParams` trades latency for recall: `{ hnsw_ef: 256 }` makes the
+   * HNSW walk visit more candidates than the server-side default of
+   * hnsw_ef=100 (recall@10 ≈ 0.996 on a realistic corpus); a smaller ef does
+   * the reverse. It is sent verbatim as the body's `params` field — see
+   * {@link SearchOptions.searchParams} for the cache-key note.
+   *
    * @example
    * ```typescript
    * const results = await client.search('products', queryVector, {
    *   limit: 10,
    *   withPayload: true,
    *   scoreThreshold: 0.7
+   * });
+   *
+   * // Recall-first: spend latency on a wider graph walk.
+   * const precise = await client.search('products', queryVector, {
+   *   limit: 10,
+   *   searchParams: { hnsw_ef: 256 },
    * });
    * ```
    */
@@ -1240,6 +1252,27 @@ export class AetherfyVectorsClient {
     queryVector: number[],
     options: SearchOptions = {}
   ): Promise<SearchResult[]> {
+    // Runtime kwarg allowlist — same contract as scrollIter. TypeScript's
+    // excess-property check only fires on fresh object literals, so a
+    // pre-built options variable, an `as any` cast, or any untyped JS caller
+    // could pass `{ hnswEf: 256 }` and have it silently dropped from the
+    // body. Silent drop is exactly how the missing search-params passthrough
+    // stayed invisible on the Python side; fail loudly instead.
+    assertAllowedOptionKeys(
+      options as Record<string, unknown>,
+      [
+        'limit',
+        'offset',
+        'queryFilter',
+        'withPayload',
+        'withVectors',
+        'scoreThreshold',
+        'searchParams',
+      ],
+      'search',
+      'Engine-level search tuning goes in searchParams, e.g. { searchParams: { hnsw_ef: 256 } }.'
+    );
+
     this.validateCollectionName(collectionName);
     this.validateVector(queryVector);
 
@@ -1259,6 +1292,11 @@ export class AetherfyVectorsClient {
             with_payload: options.withPayload ?? true,
             with_vector: options.withVectors ?? false,
             score_threshold: options.scoreThreshold,
+            // Untranslated pass-through: the API and Qdrant own the schema,
+            // so the SDK enumerates nothing. Last key, and `undefined` when
+            // unset — JSON.stringify omits it, keeping the default body
+            // byte-for-byte what it was (server cache keys are body-derived).
+            params: options.searchParams,
           }
         )
       );

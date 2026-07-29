@@ -49,6 +49,21 @@ export interface NamespaceSearchOptions {
   withPayload?: boolean;
   withVectors?: boolean;
   scoreThreshold?: number;
+  /**
+   * Search-time engine parameters, forwarded verbatim as the request body's
+   * `params` field. The headline use is `{ hnsw_ef: 256 }`: a larger ef makes
+   * the HNSW graph walk visit more candidates, buying recall at the cost of
+   * latency. Recall matters here — retrieving the *right* memory usually
+   * beats saving a millisecond. Omit it to keep the tuned server-side default
+   * (hnsw_ef=100).
+   *
+   * Different params values produce different request bodies and therefore
+   * different server cache entries, so the same query at a different ef is a
+   * separate entry, never a wrong hit.
+   *
+   * Passed through untranslated; see {@link SearchOptions.searchParams}.
+   */
+  searchParams?: Record<string, unknown>;
 }
 
 export interface NamespaceRetrieveOptions {
@@ -210,6 +225,24 @@ export class Scope {
     vector: number[],
     options: NamespaceSearchOptions = {}
   ): Promise<SearchResult[]> {
+    // Same runtime allowlist as iter/iterHistory. The client's own search()
+    // guard cannot cover this layer: the object below is rebuilt key by key,
+    // so an unknown option dies here silently rather than reaching it.
+    assertAllowedOptionKeys(
+      options as Record<string, unknown>,
+      [
+        'limit',
+        'offset',
+        'filter',
+        'withPayload',
+        'withVectors',
+        'scoreThreshold',
+        'searchParams',
+      ],
+      'Namespace.search',
+      'Engine-level search tuning goes in searchParams, e.g. { searchParams: { hnsw_ef: 256 } }.'
+    );
+
     return this.client.search(this.collection, vector, {
       limit: options.limit,
       offset: options.offset,
@@ -217,6 +250,7 @@ export class Scope {
       withPayload: options.withPayload,
       withVectors: options.withVectors,
       scoreThreshold: options.scoreThreshold,
+      searchParams: options.searchParams,
     });
   }
 

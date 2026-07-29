@@ -2,8 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- `searchParams` on `client.search()` and `Namespace`/`Thread.search()` —
+  engine params sent verbatim as the body's `params`, e.g.
+  `{ searchParams: { hnsw_ef: 256 } }` to trade latency for recall. Omitting
+  it leaves the default body unchanged. Works against every deployed backend:
+  the API has always forwarded the search body verbatim, so there is no
+  version gate.
+
 ### Changed
 
+- `client.search()` and `Namespace`/`Thread.search()` now run the
+  `assertAllowedOptionKeys` guard, so unknown options throw instead of being
+  silently dropped. TypeScript did not cover this — excess-property checking
+  fires only on fresh object literals.
 - `validatePointId` now enforces the server's point-id rule client-side:
   an id must be an unsigned integer ≤ 2^53 − 1 (`Number.MAX_SAFE_INTEGER`)
   or a UUID string in any of the four Qdrant-accepted forms (canonical,

@@ -551,7 +551,19 @@ const filteredResults = await client.search('collection-name', queryVector, {
     ],
   },
 });
+
+// Trade latency for recall: a larger hnsw_ef makes the graph walk visit more
+// candidates. Omit searchParams to keep the tuned server default (hnsw_ef=100).
+const preciseResults = await client.search('collection-name', queryVector, {
+  searchParams: { hnsw_ef: 256 },
+});
 ```
+
+`searchParams` is passed through untranslated as the request body's `params` —
+the API and Qdrant own the schema, so the SDK validates nothing and needs no
+release to track new params. Note that the server cache key is derived from the
+request body, so the same query at a different `hnsw_ef` is a separate cache
+entry (never a wrong hit).
 
 ## 📊 Analytics & Monitoring
 
@@ -783,6 +795,7 @@ interface SearchOptions {
   withVectors?: boolean; // Include vectors (default: false)
   scoreThreshold?: number; // Min similarity score
   queryFilter?: Filter; // Filter conditions
+  searchParams?: Record<string, unknown>; // Engine params, sent verbatim as `params`
 }
 
 interface SearchResult {

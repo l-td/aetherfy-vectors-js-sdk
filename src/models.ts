@@ -173,6 +173,22 @@ export interface SearchOptions {
   withVectors?: boolean;
   /** Minimum similarity score threshold */
   scoreThreshold?: number;
+  /**
+   * Search-time engine parameters, sent verbatim as the request body's
+   * `params` field. The headline use is `{ hnsw_ef: 256 }`: a larger ef makes
+   * the HNSW graph walk visit more candidates, buying recall at the cost of
+   * latency (and a smaller ef does the reverse). Omit it to keep the
+   * server-side default of hnsw_ef=100, which is the tuned default and
+   * measures recall@10 ≈ 0.996 on a realistic corpus.
+   *
+   * Cache note: the server cache key is derived from the request body bytes,
+   * so the same query at a different ef is a separate cache entry — a
+   * params-varying call can never hit an entry stored under different params.
+   *
+   * Keys are passed through untranslated (snake_case, as the engine expects)
+   * and are not validated here; the API and Qdrant own the schema.
+   */
+  searchParams?: Record<string, unknown>;
 }
 
 /**
