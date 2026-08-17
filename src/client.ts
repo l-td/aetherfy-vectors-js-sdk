@@ -40,6 +40,7 @@ import {
 } from './exceptions';
 import { retryWithBackoff, validatePointId } from './utils';
 import { assertAllowedOptionKeys } from './utils/options';
+import { serializeFilter } from './utils/filter';
 import { chunkPointsByBytes, MAX_REQUEST_BYTES } from './utils/chunking';
 import { validateVectors } from './schema';
 
@@ -970,7 +971,7 @@ export class AetherfyVectorsClient {
       pointsSelector.forEach(validatePointId);
     }
     const body = isFilter
-      ? { filter: pointsSelector }
+      ? { filter: serializeFilter(pointsSelector, 'delete') }
       : { points: pointsSelector };
 
     try {
@@ -1288,7 +1289,7 @@ export class AetherfyVectorsClient {
             vector: queryVector,
             limit: options.limit ?? 10,
             offset: options.offset ?? 0,
-            filter: options.queryFilter,
+            filter: serializeFilter(options.queryFilter, 'search'),
             with_payload: options.withPayload ?? true,
             with_vector: options.withVectors ?? false,
             score_threshold: options.scoreThreshold,
@@ -1332,7 +1333,8 @@ export class AetherfyVectorsClient {
       with_vector: options.withVectors ?? false,
     };
     if (options.offset !== undefined) body.offset = options.offset;
-    if (options.scrollFilter) body.filter = options.scrollFilter;
+    if (options.scrollFilter)
+      body.filter = serializeFilter(options.scrollFilter, 'scroll');
 
     try {
       const response = await this.httpClient.post<{
@@ -1452,7 +1454,7 @@ export class AetherfyVectorsClient {
       }>(
         this.apiUrl(this.buildCollectionPath(collectionName, '/points/count')),
         {
-          filter: options.countFilter,
+          filter: serializeFilter(options.countFilter, 'count'),
           exact: options.exact ?? false,
         }
       );

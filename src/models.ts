@@ -146,14 +146,20 @@ export interface UsageStats {
 }
 
 /**
- * Filter conditions for queries
+ * Filter conditions for queries.
+ *
+ * Written in the SDK's camelCase vocabulary; `serializeFilter`
+ * (src/utils/filter.ts) translates it to the wire vocabulary on the way
+ * out, so `mustNot` reaches the engine as `must_not`. Write the wire
+ * spelling here and the SDK throws rather than forwarding a clause the
+ * engine will ignore.
  */
 export interface Filter {
-  /** Conditions that must be true */
+  /** Conditions that must be true. Wire key: `must`. */
   must?: Array<Record<string, unknown>>;
-  /** Conditions that must not be true */
+  /** Conditions that must not be true. Wire key: `must_not`. */
   mustNot?: Array<Record<string, unknown>>;
-  /** Conditions where at least one should be true */
+  /** Conditions where at least one should be true. Wire key: `should`. */
   should?: Array<Record<string, unknown>>;
 }
 
