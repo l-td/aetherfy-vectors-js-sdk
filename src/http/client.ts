@@ -5,6 +5,8 @@ import {
   ErrorResponse,
 } from './types';
 import axios, { AxiosInstance, AxiosError as AxiosErrorType } from 'axios';
+import http from 'http';
+import https from 'https';
 
 // Type guard for axios errors
 function isAxiosError(error: unknown): error is AxiosErrorType {
@@ -64,12 +66,23 @@ export class HttpClient {
       validateStatus: () => true, // Handle all status codes ourselves
     };
 
-    // Add connection pooling for Node.js environment when enabled
+    // Add connection pooling for Node.js environment when enabled.
+    //
+    // `http`/`https` are imported STATICALLY at module scope, not pulled in
+    // with `require()` here. A bare `require` survives into the ES-module
+    // bundle unchanged, and `require` is not defined in ESM scope — so
+    // `new AetherfyVectorsClient({apiKey})` threw a ReferenceError on
+    // construction for every `import`-based consumer. It never showed up in
+    // the test suite because the tests construct with
+    // `enableConnectionPooling: false`, which skips this branch, and the
+    // CJS bundle (which the tests load) defines `require` anyway.
+    //
+    // The static imports are also free in practice: axios already drags
+    // both builtins into the bundle, the browser build stubs them via
+    // rollup-plugin-polyfill-node, and neither is TOUCHED outside this
+    // Node-only branch.
     if (typeof process !== 'undefined' && process.versions?.node) {
       if (this.enableConnectionPooling) {
-        const http = require('http');
-        const https = require('https');
-
         this.httpAgent = new http.Agent({
           keepAlive: true,
           maxSockets: 50,

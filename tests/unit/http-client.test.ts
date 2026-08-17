@@ -25,6 +25,25 @@ describe('HttpClient', () => {
       });
       expect(customClient).toBeInstanceOf(HttpClient);
     });
+
+    it('constructs with pooling ON — the default every real caller gets', () => {
+      // Every other test in this repo opts OUT of pooling, which meant the
+      // entire pooling branch of createAxiosInstance was never executed.
+      // That branch used to call bare `require('http')`, which survives into
+      // the ES-module bundle where `require` is undefined — so the
+      // documented `new AetherfyVectorsClient({ apiKey })` threw a
+      // ReferenceError on construction for every `import`-based consumer
+      // while the whole suite stayed green.
+      //
+      // This runs against src/ (CJS under ts-jest) so it cannot catch the
+      // bundle-format failure by itself; its job is to stop the pooling
+      // branch from being dead code in CI. The bundle-level proof is the
+      // ESM/CJS smoke against the packed tarball.
+      expect(new HttpClient()).toBeInstanceOf(HttpClient);
+      expect(new HttpClient({ enableConnectionPooling: true })).toBeInstanceOf(
+        HttpClient
+      );
+    });
   });
 
   describe('HTTP Methods', () => {
