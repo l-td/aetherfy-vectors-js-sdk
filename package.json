@@ -64,11 +64,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/aetherfy/aetherfy-vectors-js.git"
+    "url": "git+https://github.com/l-td/aetherfy-vectors-js-sdk.git"
   },
-  "homepage": "https://aetherfy.com",
+  "homepage": "https://docs.aetherfy.com/vectors",
   "bugs": {
-    "url": "https://github.com/aetherfy/aetherfy-vectors-js/issues"
+    "url": "https://github.com/l-td/aetherfy-vectors-js-sdk/issues"
   },
   "author": "Aetherfy <developers@aetherfy.com>",
   "license": "MIT",
