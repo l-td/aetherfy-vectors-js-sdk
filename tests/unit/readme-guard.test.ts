@@ -160,6 +160,17 @@ const OPTIONS_INTERFACE: Record<string, { argIndex: number; iface: string }> = {
   retrieve: { argIndex: 2, iface: 'RetrieveOptions' },
   count: { argIndex: 1, iface: 'CountOptions' },
   scrollIter: { argIndex: 1, iface: 'ScrollIterOptions' },
+  // Added because the skip counter reported them: they had interfaces all
+  // along and were going unchecked purely because nothing listed them. That is
+  // exactly the coverage rot the counter exists to expose.
+  iter: { argIndex: 0, iface: 'NamespaceIterOptions' },
+  iterHistory: { argIndex: 0, iface: 'ThreadHistoryOptions' },
+  history: { argIndex: 0, iface: 'ThreadHistoryOptions' },
+  createCollection: { argIndex: 1, iface: 'VectorConfig' },
+  // `delete(name, selector)` takes point ids OR a filter; when a sample writes
+  // the filter inline, its clauses are checkable — and this is where a
+  // snake_case `must_not` in a sample would be caught.
+  delete: { argIndex: 1, iface: 'Filter' },
 };
 
 /**
@@ -180,10 +191,22 @@ export function normalizeEllipsis(code: string): string {
  * Type-level truth of one sample. `bindings` is mutated so later fences see
  * receivers declared in earlier ones.
  */
+/** What the checker looked at, and what it declined to look at. */
+export interface CheckStats {
+  checkedOptionBags: number;
+  /** `Class.method#argIndex` for every options bag NOT checked. */
+  skippedOptionBags: string[];
+}
+
+export function emptyStats(): CheckStats {
+  return { checkedOptionBags: 0, skippedOptionBags: [] };
+}
+
 export function checkSample(
   code: string,
   bindings: Map<string, string>,
-  typeNames: Set<string>
+  typeNames: Set<string>,
+  stats: CheckStats = emptyStats()
 ): string[] {
   const problems: string[] = [];
   const src = ts.createSourceFile(
@@ -291,26 +314,37 @@ export function checkSample(
               `\`${recv.text}.${method}(...)\` — ${clsName} has no method ${method}`
             );
           } else {
+            // Every object literal handed to a tracked receiver is either
+            // CHECKED against a mapped options interface or COUNTED as a skip.
+            // Silence is not allowed: without the counter, adding a method with
+            // an options bag — or moving one to a different argument position —
+            // quietly shrinks coverage while the suite stays green.
             const spec = OPTIONS_INTERFACE[method];
-            if (spec) {
-              const arg = node.arguments[spec.argIndex];
-              if (arg && ts.isObjectLiteralExpression(arg)) {
-                const allowed = interfaceMembers(spec.iface);
-                if (allowed) {
-                  for (const prop of arg.properties) {
-                    if (prop.name && ts.isIdentifier(prop.name)) {
-                      if (!allowed.has(prop.name.text)) {
-                        problems.push(
-                          `\`${recv.text}.${method}({ ${prop.name.text}: ... })\` — ` +
-                            `no such option on ${spec.iface}. Accepted: ` +
-                            `${[...allowed].join(', ')}`
-                        );
-                      }
-                    }
+            node.arguments.forEach((arg, argIndex) => {
+              if (!ts.isObjectLiteralExpression(arg)) return;
+              const allowed =
+                spec && spec.argIndex === argIndex
+                  ? interfaceMembers(spec.iface)
+                  : null;
+              if (!allowed) {
+                stats.skippedOptionBags.push(
+                  `${clsName}.${method}#${argIndex}`
+                );
+                return;
+              }
+              stats.checkedOptionBags++;
+              for (const prop of arg.properties) {
+                if (prop.name && ts.isIdentifier(prop.name)) {
+                  if (!allowed.has(prop.name.text)) {
+                    problems.push(
+                      `\`${recv.text}.${method}({ ${prop.name.text}: ... })\` — ` +
+                        `no such option on ${spec!.iface}. Accepted: ` +
+                        `${[...allowed].join(', ')}`
+                    );
                   }
                 }
               }
-            }
+            });
           }
         }
       }
@@ -325,6 +359,30 @@ export function checkSample(
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Object literals the checker deliberately does NOT validate, pinned so
+ * coverage cannot shrink in silence.
+ *
+ * All four are USER DATA, not option bags: a payload and a metadata partial
+ * have free-form keys by definition, so there is no interface to check them
+ * against and a check would be wrong, not merely absent.
+ *
+ * Everything else that used to sit in this list had an interface all along and
+ * was unchecked only because nothing listed it — `Namespace.iter`,
+ * `Thread.iterHistory`, `createCollection`'s vector config and `delete`'s
+ * filter are now mapped in OPTIONS_INTERFACE and checked. The counter is what
+ * surfaced them; that is the point of counting skips rather than ignoring them.
+ *
+ * Compared as a deduplicated set: the unit that matters is the KIND of skip,
+ * not how many times the README happens to repeat it.
+ */
+const EXPECTED_SKIPS: string[] = [
+  'AetherfyVectorsClient.overwritePayload#1', // free-form payload object
+  'AetherfyVectorsClient.setPayload#1', // free-form payload object
+  'Namespace.mergeMetadata#1', // free-form metadata partial
+  'Namespace.setMetadata#1', // free-form metadata partial
+];
+
 describe('README code samples', () => {
   const typeNames = declaredTypeNames();
 
@@ -335,14 +393,26 @@ describe('README code samples', () => {
     expect(samples.length).toBeGreaterThanOrEqual(15);
 
     const bindings = new Map<string, string>();
+    const stats = emptyStats();
     const problems: string[] = [];
     samples.forEach((sample, i) => {
-      for (const p of checkSample(sample, bindings, typeNames)) {
+      for (const p of checkSample(sample, bindings, typeNames, stats)) {
         problems.push(`README.md fence #${i + 1}: ${p}`);
       }
     });
 
     expect(problems).toEqual([]);
+
+    // NO SILENT SKIPS. Every options bag is either checked against a mapped
+    // interface or listed here. The pin is the point: add a method with an
+    // options bag, or move one to a different argument position, and this reds
+    // instead of coverage quietly shrinking. To resolve a red, either add the
+    // method to OPTIONS_INTERFACE (preferred — it becomes checked) or move the
+    // entry into EXPECTED_SKIPS deliberately, with a reason.
+    expect([...new Set(stats.skippedOptionBags)].sort()).toEqual(
+      EXPECTED_SKIPS
+    );
+    expect(stats.checkedOptionBags).toBeGreaterThanOrEqual(4);
 
     // The scan means nothing if it never resolved a receiver.
     expect(bindings.get('client')).toBe('AetherfyVectorsClient');
@@ -422,21 +492,26 @@ describe('README code samples', () => {
 
 const GITHUB_OWNER = 'l-td';
 
-// Routes that exist on docs.aetherfy.com. Liveness is not CI-checkable (no
-// network here); the docs verification pass owns whether they resolve. This
-// pins the STRINGS so an invented path cannot ship — docs.aetherfy.com/api and
-// vectors.aetherfy.com/docs were both invented and both 404'd.
-const KNOWN_DOCS_ROUTES = new Set([
-  'https://docs.aetherfy.com',
-  'https://docs.aetherfy.com/vectors',
-  'https://docs.aetherfy.com/vectors/api',
-  'https://docs.aetherfy.com/vectors/sdk',
-  'https://docs.aetherfy.com/vectors/filtering',
-  'https://docs.aetherfy.com/vectors/limits',
-  'https://docs.aetherfy.com/vectors/errors',
-  'https://docs.aetherfy.com/vectors/search-tuning',
-  'https://docs.aetherfy.com/quickstart',
-]);
+const DOCS_ROUTES_FILE = path.join(REPO_ROOT, '.github', 'docs-routes.txt');
+
+/**
+ * The one list of documented routes, shared with the liveness workflow.
+ *
+ * Deliberately not a literal here. This guard can only check that a URL is in
+ * the list; whether the list still RESOLVES is checked for real by
+ * .github/workflows/docs-links.yml on a weekly schedule. Two copies would let
+ * those answers disagree, which is the shape of the bug this batch exists to
+ * kill.
+ */
+function knownDocsRoutes(): Set<string> {
+  return new Set(
+    fs
+      .readFileSync(DOCS_ROUTES_FILE, 'utf8')
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l !== '' && !l.startsWith('#'))
+  );
+}
 
 describe('README links', () => {
   it('every github.com URL names a repository we own', () => {
@@ -484,14 +559,58 @@ describe('README links', () => {
   });
 
   it('every docs.aetherfy.com path is a known route', () => {
+    const routes = knownDocsRoutes();
+    // The loader must actually load, or every check below passes vacuously.
+    expect(routes.size).toBeGreaterThanOrEqual(5);
+
+    const unknown: string[] = [];
     let found = 0;
     for (const url of readme().match(
       /https:\/\/docs\.aetherfy\.com[A-Za-z0-9_.\-/]*/g
     ) ?? []) {
       found++;
-      expect(KNOWN_DOCS_ROUTES.has(url.replace(/\/$/, ''))).toBe(true);
+      if (!routes.has(url.replace(/\/$/, ''))) {
+        unknown.push(
+          `${url} is not in .github/docs-routes.txt — add it there only after ` +
+            `confirming it resolves; docs.aetherfy.com/api was invented and 404'd`
+        );
+      }
     }
+    expect(unknown).toEqual([]);
     expect(found).toBeGreaterThanOrEqual(2);
+  });
+
+  it('the liveness workflow still guards these routes', () => {
+    // This guard cannot see a docs-site restructure; that scheduled job can.
+    // A check nothing references can be deleted without any red, so the
+    // offline guard asserts the online one exists and reads the same list.
+    const workflow = path.join(
+      REPO_ROOT,
+      '.github',
+      'workflows',
+      'docs-links.yml'
+    );
+    expect(fs.existsSync(workflow)).toBe(true);
+    const body = fs.readFileSync(workflow, 'utf8');
+    expect(body).toContain('.github/docs-routes.txt');
+    expect(body).toContain('schedule:');
+  });
+
+  it('CI actually runs this guard on README changes', () => {
+    // A path-filtered workflow can switch this whole file off, silently.
+    // Found by audit: .github/workflows/ci.yml filtered on src/**, tests/**,
+    // package.json, tsconfig.json, jest.config.js — and NOT on README.md. A
+    // commit touching only the README triggered no workflow at all, so the
+    // guard never ran on the exact change it exists to police. It would still
+    // have caught a README made stale by a CODE change, which is why nothing
+    // looked broken. A missing path filter fails GREEN: no run, no red, no
+    // signal. So the trigger is asserted here, where a red is visible.
+    const workflow = fs.readFileSync(
+      path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'),
+      'utf8'
+    );
+    const blocks = workflow.split("- 'README.md'").length - 1;
+    expect(blocks).toBeGreaterThanOrEqual(2);
   });
 
   it('leaves the install lines alone', () => {
