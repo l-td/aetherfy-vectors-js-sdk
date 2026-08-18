@@ -1,7 +1,7 @@
 {
   "name": "aetherfy-vectors",
   "version": "1.0.0",
-  "description": "JavaScript/TypeScript SDK for Aetherfy Vectors - Global vector database with automatic replication and sub-50ms latency worldwide",
+  "description": "JavaScript/TypeScript SDK for Aetherfy Vectors - Global vector database with automatic replication and low latency worldwide",
   "main": "./dist/index.cjs.js",
   "module": "./dist/index.esm.js",
   "browser": "./dist/browser.js",

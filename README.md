@@ -4,12 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/%3C%2F%3E-TypeScript-%230074c1.svg)](http://www.typescriptlang.org/)
 
-Global vector database with automatic replication and sub-50ms latency worldwide.
+Global vector database with automatic replication and low latency worldwide.
 
 ## 🌟 Features
 
 - **🌍 Global Performance** - Automatic replication across all three regions: `us-east-1`, `eu-central-1`, `ap-southeast-1`
-- **⚡ Intelligent Caching** - 94%+ cache hit rate with sub-50ms response times
+- **⚡ Intelligent Caching** - High cache hit rate, with responses served from cache where possible
 - **🛡️ Zero DevOps** - Fully managed infrastructure, no setup required
 - **📊 Built-in Analytics** - Real-time performance metrics and insights
 - **🔧 Auto-Failover** - Seamless failover and disaster recovery
@@ -875,12 +875,11 @@ npm run format
 
 ## 📊 Performance
 
-### Benchmarks
+### Characteristics
 
-- **Latency**: Sub-50ms average globally
-- **Throughput**: 100,000+ queries per second
-- **Cache Hit Rate**: 94%+ typical
-- **Availability**: 99.9% SLA
+- **Latency**: served from the region nearest the caller
+- **Caching**: built in, on by default
+- **Failover**: automatic between regions
 - **Regions**: `us-east-1`, `eu-central-1`, `ap-southeast-1`
 
 ### Best Practices
