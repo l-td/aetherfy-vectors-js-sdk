@@ -8,7 +8,7 @@ Global vector database with automatic replication and sub-50ms latency worldwide
 
 ## 🌟 Features
 
-- **🌍 Global Performance** - Automatic replication across 12+ global regions
+- **🌍 Global Performance** - Automatic replication across all three regions: `us-east-1`, `eu-central-1`, `ap-southeast-1`
 - **⚡ Intelligent Caching** - 94%+ cache hit rate with sub-50ms response times
 - **🛡️ Zero DevOps** - Fully managed infrastructure, no setup required
 - **📊 Built-in Analytics** - Real-time performance metrics and insights
@@ -538,7 +538,8 @@ const results = await client.search('collection-name', queryVector, {
   withVectors: false,
 });
 
-// Advanced search with filtering
+// Advanced search with filtering. Three clauses, and only three:
+// must, mustNot, should.
 const filteredResults = await client.search('collection-name', queryVector, {
   limit: 20,
   offset: 10,
@@ -549,6 +550,7 @@ const filteredResults = await client.search('collection-name', queryVector, {
       { key: 'category', match: { value: 'electronics' } },
       { key: 'price', range: { gte: 100, lte: 500 } },
     ],
+    mustNot: [{ key: 'status', match: { value: 'discontinued' } }],
   },
 });
 
@@ -564,6 +566,29 @@ the API and Qdrant own the schema, so the SDK validates nothing and needs no
 release to track new params. Note that the server cache key is derived from the
 request body, so the same query at a different `hnsw_ef` is a separate cache
 entry (never a wrong hit).
+
+### Filter clauses
+
+This SDK speaks camelCase: the clause is `mustNot`, and the SDK translates it
+to the engine's `must_not` on the wire. A clause name outside
+`must` / `mustNot` / `should` throws before the request is sent — including
+`must_not`, which is the Python SDK's spelling and is rejected with a message
+naming the camelCase form. Nothing unknown is forwarded, and nothing is
+dropped: an unrecognized clause used to vanish silently, turning a narrowing
+filter into a match-everything query. The rule holds everywhere a filter is
+accepted — `search`, `scroll`, `scrollIter`, `count`, `delete`.
+
+```typescript
+import type { Filter } from 'aetherfy-vectors';
+
+const filter: Filter = {
+  must: [{ key: 'category', match: { value: 'electronics' } }],
+  mustNot: [{ key: 'status', match: { value: 'discontinued' } }],
+};
+
+const inStock = await client.count('collection-name', { countFilter: filter });
+await client.delete('collection-name', filter);
+```
 
 ## 📊 Analytics & Monitoring
 
@@ -673,7 +698,8 @@ try {
   } else if (error instanceof CollectionNotFoundError) {
     console.error(`Collection ${error.collectionName} not found`);
   } else if (error instanceof SchemaValidationError) {
-    console.error('Schema violations:', error.details);
+    // `errors` is one entry per rejected point: { index, id, errors: [{ field, code, message }] }
+    console.error('Schema violations:', error.errors);
   } else if (error instanceof QuotaExceededError) {
     console.error(
       `Quota '${error.quotaType}' exceeded: ${error.current}/${error.limit}`
@@ -748,7 +774,7 @@ client.destroy();
 | `getCollection(name)`                                    | Get collection info                                                                | `Promise<Collection>`            |
 | `upsert(collection, points)`                             | Insert/update vectors                                                              | `Promise<boolean>`               |
 | `delete(collection, selector)`                           | Delete vectors                                                                     | `Promise<boolean>`               |
-| `retrieve(collection, ids, options)`                     | Get vectors by ID                                                                  | `Promise<Record<string, any>[]>` |
+| `retrieve(collection, ids, options)`                     | Get vectors by ID                                                                  | `Promise<Point[]>`               |
 | `search(collection, vector, options)`                    | Similarity search                                                                  | `Promise<SearchResult[]>`        |
 | `count(collection, options)`                             | Count vectors                                                                      | `Promise<number>`                |
 | `getSchema(collection)`                                  | Get payload schema                                                                 | `Promise<Schema \| null>`        |
@@ -855,7 +881,7 @@ npm run format
 - **Throughput**: 100,000+ queries per second
 - **Cache Hit Rate**: 94%+ typical
 - **Availability**: 99.9% SLA
-- **Regions**: 12+ global locations
+- **Regions**: `us-east-1`, `eu-central-1`, `ap-southeast-1`
 
 ### Best Practices
 
@@ -867,14 +893,15 @@ npm run format
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+We welcome contributions! Open an issue or a pull request on
+[GitHub](https://github.com/l-td/aetherfy-vectors-js-sdk).
 
 ### Development Setup
 
 ```bash
 # Clone the repository
-git clone https://github.com/aetherfy/aetherfy-vectors-js.git
-cd aetherfy-vectors-js
+git clone https://github.com/l-td/aetherfy-vectors-js-sdk.git
+cd aetherfy-vectors-js-sdk
 
 # Install dependencies
 npm install
@@ -892,15 +919,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🆘 Support
 
-- **Documentation**: [https://docs.aetherfy.com](https://docs.aetherfy.com)
-- **API Reference**: [https://docs.aetherfy.com/api](https://docs.aetherfy.com/api)
-- **GitHub Issues**: [Report bugs and request features](https://github.com/aetherfy/aetherfy-vectors-js/issues)
-- **Community**: [Join our Discord](https://discord.gg/aetherfy)
+- **Documentation**: [https://docs.aetherfy.com/vectors](https://docs.aetherfy.com/vectors)
+- **API Reference**: [https://docs.aetherfy.com/vectors/api](https://docs.aetherfy.com/vectors/api)
+- **SDK Reference**: [https://docs.aetherfy.com/vectors/sdk](https://docs.aetherfy.com/vectors/sdk)
+- **GitHub Issues**: [Report bugs and request features](https://github.com/l-td/aetherfy-vectors-js-sdk/issues)
 - **Email**: [developers@aetherfy.com](mailto:developers@aetherfy.com)
 
 ## 🔗 Related Projects
 
-- **Python SDK**: [aetherfy-vectors-python](https://github.com/aetherfy/aetherfy-vectors-python)
+- **Python SDK**: [aetherfy-vectors (Python)](https://github.com/l-td/aetherfy-vectors-python-sdk)
 
 ---
 
