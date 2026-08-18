@@ -30,6 +30,9 @@ pnpm add aetherfy-vectors
 
 ## 📖 Quick Start
 
+The snippets below build on each other; each assumes the imports and client
+from the previous ones.
+
 ```typescript
 import { AetherfyVectorsClient, DistanceMetric } from 'aetherfy-vectors';
 
