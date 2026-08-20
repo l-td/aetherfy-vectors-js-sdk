@@ -16,7 +16,6 @@ import {
   ScrollIterOptions,
   Filter,
   PerformanceAnalytics,
-  CollectionAnalytics,
   UsageStats,
   ClientConfig,
   DistanceMetric,
@@ -1480,21 +1479,6 @@ export class AetherfyVectorsClient {
     region?: string
   ): Promise<PerformanceAnalytics> {
     return this.analytics.getPerformanceAnalytics(timeRange, region);
-  }
-
-  /**
-   * Get analytics for a specific collection
-   *
-   * @param collectionName - Name of the collection
-   * @param timeRange - Time range for analytics
-   * @returns Promise that resolves to collection analytics
-   */
-  async getCollectionAnalytics(
-    collectionName: string,
-    timeRange: string = '24h'
-  ): Promise<CollectionAnalytics> {
-    this.validateCollectionName(collectionName);
-    return this.analytics.getCollectionAnalytics(collectionName, timeRange);
   }
 
   /**

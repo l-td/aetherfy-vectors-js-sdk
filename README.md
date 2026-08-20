@@ -602,11 +602,6 @@ console.log(`Cache hit rate: ${analytics.cacheHitRate}%`);
 console.log(`Average latency: ${analytics.avgLatencyMs}ms`);
 console.log(`Active regions: ${analytics.activeRegions.join(', ')}`);
 
-// Get collection-specific analytics
-const collectionStats = await client.getCollectionAnalytics('products', '7d');
-console.log(`Search requests: ${collectionStats.searchRequests}`);
-console.log(`Average search latency: ${collectionStats.avgSearchLatencyMs}ms`);
-
 // Monitor usage and limits
 const usage = await client.getUsageStats();
 console.log(`Collections: ${usage.currentCollections}/${usage.maxCollections}`);
@@ -787,7 +782,6 @@ client.destroy();
 | `refreshSchema(collection)`                              | Force schema cache refresh                                                         | `Promise<void>`                  |
 | `clearSchemaCache(collection?)`                          | Clear schema cache                                                                 | `void`                           |
 | `getPerformanceAnalytics(timeRange, region)`             | Performance metrics                                                                | `Promise<PerformanceAnalytics>`  |
-| `getCollectionAnalytics(collection, timeRange)`          | Collection metrics                                                                 | `Promise<CollectionAnalytics>`   |
 | `getUsageStats()`                                        | Account usage                                                                      | `Promise<UsageStats>`            |
 | `testConnection()`                                       | Test API connection                                                                | `Promise<boolean>`               |
 | `destroy()`                                              | Close HTTP connections                                                             | `void`                           |

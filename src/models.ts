@@ -102,26 +102,6 @@ export interface PerformanceAnalytics {
 }
 
 /**
- * Analytics data for a specific collection
- */
-export interface CollectionAnalytics {
-  /** Collection name */
-  collectionName: string;
-  /** Total number of points */
-  totalPoints: number;
-  /** Number of search requests */
-  searchRequests: number;
-  /** Average search latency in milliseconds */
-  avgSearchLatencyMs: number;
-  /** Cache hit rate percentage */
-  cacheHitRate: number;
-  /** Top performing regions */
-  topRegions: string[];
-  /** Storage size in MB (optional) */
-  storageSizeMb?: number;
-}
-
-/**
  * Usage statistics for the account
  */
 export interface UsageStats {
@@ -380,18 +360,6 @@ export interface CacheStats {
     used: number;
     available: number;
   };
-}
-
-/**
- * Top collection analytics entry
- */
-export interface TopCollectionEntry {
-  /** Collection name */
-  collectionName: string;
-  /** Metric value (requests, points, searches, storage, etc.) */
-  value: number;
-  /** Optional additional metrics */
-  [key: string]: string | number;
 }
 
 /**

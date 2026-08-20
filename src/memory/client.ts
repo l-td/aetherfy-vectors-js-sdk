@@ -15,7 +15,6 @@ import { AetherfyVectorsClient } from '../client';
 import {
   ClientConfig,
   Collection,
-  CollectionAnalytics,
   DistanceMetric,
   PerformanceAnalytics,
   UsageStats,
@@ -265,29 +264,6 @@ export class MemoryClient {
     region?: string
   ): Promise<PerformanceAnalytics> {
     return this._client.getPerformanceAnalytics(timeRange, region);
-  }
-
-  async getNamespaceAnalytics(
-    name: string,
-    timeRange: string = '24h'
-  ): Promise<CollectionAnalytics> {
-    validateUserName(name, 'namespace name');
-    if (!(await this._client.collectionExists(name))) {
-      throw new NamespaceNotFoundError(name);
-    }
-    return this._client.getCollectionAnalytics(name, timeRange);
-  }
-
-  async getThreadAnalytics(
-    threadId: string,
-    timeRange: string = '24h'
-  ): Promise<CollectionAnalytics> {
-    validateUserName(threadId, 'thread id');
-    const collection = THREAD_PREFIX + threadId;
-    if (!(await this._client.collectionExists(collection))) {
-      throw new ThreadNotFoundError(threadId);
-    }
-    return this._client.getCollectionAnalytics(collection, timeRange);
   }
 
   async getUsageStats(): Promise<UsageStats> {

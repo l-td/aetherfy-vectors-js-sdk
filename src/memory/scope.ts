@@ -21,7 +21,6 @@ import {
 } from '../exceptions';
 import {
   AnalysisResult,
-  CollectionAnalytics,
   EnforcementMode,
   Filter,
   Point,
@@ -350,13 +349,5 @@ export class Scope {
 
   clearSchemaCache(): void {
     this.client.clearSchemaCache(this.collection);
-  }
-
-  // -------------------------------------------------------------------
-  // Analytics
-  // -------------------------------------------------------------------
-
-  async getAnalytics(timeRange: string = '24h'): Promise<CollectionAnalytics> {
-    return this.client.getCollectionAnalytics(this.collection, timeRange);
   }
 }

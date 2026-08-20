@@ -57,7 +57,6 @@ export {
 
   // Analytics interfaces
   PerformanceAnalytics,
-  CollectionAnalytics,
   UsageStats,
   CacheStats,
   RegionInfo,

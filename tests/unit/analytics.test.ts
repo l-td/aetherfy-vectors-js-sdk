@@ -8,14 +8,11 @@ import { AnalyticsClient } from '../../src/analytics';
 import { HttpClient } from '../../src/http/client';
 import {
   PerformanceAnalytics,
-  CollectionAnalytics,
   UsageStats,
   CacheStats,
   RegionInfo,
-  TopCollectionEntry,
 } from '../../src/models';
 import {
-  ValidationError,
   AuthenticationError,
   RateLimitExceededError,
 } from '../../src/exceptions';
@@ -107,78 +104,6 @@ describe('AnalyticsClient', () => {
       await expect(client.getPerformanceAnalytics()).rejects.toThrow(
         AuthenticationError
       );
-    });
-  });
-
-  describe('getCollectionAnalytics', () => {
-    it('should get analytics for specific collection with default time range', async () => {
-      const mockAnalytics: CollectionAnalytics = {
-        collectionName: 'products',
-        totalPoints: 50000,
-        searchRequests: 12000,
-        avgSearchLatencyMs: 35,
-        cacheHitRate: 90.5,
-        topRegions: ['us-east-1', 'eu-west-1'],
-      };
-
-      nock(baseUrl)
-        .get('/api/v1/analytics/collections/products?time_range=24h')
-        .reply(200, mockAnalytics);
-
-      const result = await client.getCollectionAnalytics('products');
-
-      expect(result).toEqual(mockAnalytics);
-    });
-
-    it('should get analytics for specific collection with custom time range', async () => {
-      const mockAnalytics: CollectionAnalytics = {
-        collectionName: 'users',
-        totalPoints: 100000,
-        searchRequests: 25000,
-        avgSearchLatencyMs: 40,
-        cacheHitRate: 88.0,
-        topRegions: ['us-east-1'],
-      };
-
-      nock(baseUrl)
-        .get('/api/v1/analytics/collections/users?time_range=7d')
-        .reply(200, mockAnalytics);
-
-      const result = await client.getCollectionAnalytics('users', '7d');
-
-      expect(result).toEqual(mockAnalytics);
-    });
-
-    it('should properly encode collection name', async () => {
-      const mockAnalytics: CollectionAnalytics = {
-        collectionName: 'test collection',
-        totalPoints: 1000,
-        searchRequests: 500,
-        avgSearchLatencyMs: 30,
-        cacheHitRate: 85.0,
-        topRegions: ['us-east-1'],
-      };
-
-      nock(baseUrl)
-        .get('/api/v1/analytics/collections/test%20collection?time_range=24h')
-        .reply(200, mockAnalytics);
-
-      const result = await client.getCollectionAnalytics('test collection');
-
-      expect(result).toEqual(mockAnalytics);
-    });
-
-    it('should handle not found error for non-existent collection', async () => {
-      nock(baseUrl)
-        .get('/api/v1/analytics/collections/non-existent?time_range=24h')
-        .reply(404, {
-          message: 'Collection not found',
-          code: 'COLLECTION_NOT_FOUND',
-        });
-
-      await expect(
-        client.getCollectionAnalytics('non-existent')
-      ).rejects.toThrow();
     });
   });
 
@@ -309,68 +234,6 @@ describe('AnalyticsClient', () => {
       });
 
       await expect(client.getCacheAnalytics()).rejects.toThrow();
-    });
-  });
-
-  describe('getTopCollections', () => {
-    it('should get top collections with default parameters', async () => {
-      const mockCollections: TopCollectionEntry[] = [
-        { collectionName: 'products', value: 15000 },
-        { collectionName: 'users', value: 12000 },
-        { collectionName: 'documents', value: 8000 },
-      ];
-
-      nock(baseUrl)
-        .get(
-          '/api/v1/analytics/collections/top?metric=requests&time_range=24h&limit=10'
-        )
-        .reply(200, { collections: mockCollections });
-
-      const result = await client.getTopCollections();
-
-      expect(result).toEqual(mockCollections);
-    });
-
-    it('should get top collections with custom parameters', async () => {
-      const mockCollections: TopCollectionEntry[] = [
-        { collectionName: 'large-dataset', value: 1000000 },
-        { collectionName: 'medium-dataset', value: 500000 },
-      ];
-
-      nock(baseUrl)
-        .get(
-          '/api/v1/analytics/collections/top?metric=points&time_range=7d&limit=5'
-        )
-        .reply(200, { collections: mockCollections });
-
-      const result = await client.getTopCollections('points', '7d', 5);
-
-      expect(result).toEqual(mockCollections);
-    });
-
-    it('should return empty array if collections are missing', async () => {
-      nock(baseUrl)
-        .get(
-          '/api/v1/analytics/collections/top?metric=requests&time_range=24h&limit=10'
-        )
-        .reply(200, {});
-
-      const result = await client.getTopCollections();
-
-      expect(result).toEqual([]);
-    });
-
-    it('should handle errors properly', async () => {
-      nock(baseUrl)
-        .get(
-          '/api/v1/analytics/collections/top?metric=requests&time_range=24h&limit=10'
-        )
-        .reply(400, {
-          message: 'Bad request',
-          code: 'VALIDATION_ERROR',
-        });
-
-      await expect(client.getTopCollections()).rejects.toThrow(ValidationError);
     });
   });
 

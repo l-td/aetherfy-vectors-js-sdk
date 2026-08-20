@@ -120,18 +120,6 @@ async function basicUsageExample() {
     console.log(`Average latency: ${analytics.avgLatencyMs}ms`);
     console.log(`Active regions: ${analytics.activeRegions.join(', ')}`);
 
-    // Get collection-specific analytics
-    const collectionStats = await client.getCollectionAnalytics(
-      collectionName,
-      '1h'
-    );
-    console.log(`Collection stats for ${collectionName}:`);
-    console.log(`- Total points: ${collectionStats.totalPoints}`);
-    console.log(`- Search requests: ${collectionStats.searchRequests}`);
-    console.log(
-      `- Avg search latency: ${collectionStats.avgSearchLatencyMs}ms`
-    );
-
     // Get usage information
     const usage = await client.getUsageStats();
     console.log('Account usage:');

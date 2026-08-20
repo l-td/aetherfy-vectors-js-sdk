@@ -943,33 +943,6 @@ describe('AetherfyVectorsClient', () => {
       const usage = await client.getUsageStats();
       expect(usage).toEqual(mockUsage);
     });
-
-    it('should get collection analytics', async () => {
-      const mockAnalytics = {
-        name: 'test-collection',
-        totalPoints: 1000,
-        searchRequests: 500,
-        upsertRequests: 50,
-        deleteRequests: 10,
-        avgSearchLatencyMs: 30,
-      };
-
-      nock('https://vectors.aetherfy.com')
-        .get('/api/v1/analytics/collections/test-collection?time_range=7d')
-        .reply(200, mockAnalytics);
-
-      const analytics = await client.getCollectionAnalytics(
-        'test-collection',
-        '7d'
-      );
-      expect(analytics).toEqual(mockAnalytics);
-    });
-
-    it('should validate collection name for collection analytics', async () => {
-      await expect(client.getCollectionAnalytics('')).rejects.toThrow(
-        'Collection name must be a non-empty string'
-      );
-    });
   });
 
   describe('Utility Methods', () => {

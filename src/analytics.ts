@@ -1,11 +1,9 @@
 import { HttpClient } from './http/client';
 import {
   PerformanceAnalytics,
-  CollectionAnalytics,
   UsageStats,
   CacheStats,
   RegionInfo,
-  TopCollectionEntry,
 } from './models';
 import { createErrorFromResponse } from './exceptions';
 
@@ -63,39 +61,6 @@ export class AnalyticsClient {
 
       const response = await this.httpClient.get<PerformanceAnalytics>(
         `${this.apiUrl('/analytics/performance')}?${params}`
-      );
-
-      return response.data;
-    } catch (error: unknown) {
-      throw this.handleError(error);
-    }
-  }
-
-  /**
-   * Get analytics for a specific collection
-   *
-   * @param collectionName - Name of the collection
-   * @param timeRange - Time range for analytics
-   * @returns Promise that resolves to collection analytics
-   *
-   * @example
-   * ```typescript
-   * const stats = await client.getCollectionAnalytics('products', '7d');
-   * console.log(`Total points: ${stats.totalPoints}`);
-   * console.log(`Search requests: ${stats.searchRequests}`);
-   * ```
-   */
-  async getCollectionAnalytics(
-    collectionName: string,
-    timeRange: string = '24h'
-  ): Promise<CollectionAnalytics> {
-    try {
-      const params = new URLSearchParams({
-        time_range: timeRange,
-      });
-
-      const response = await this.httpClient.get<CollectionAnalytics>(
-        `${this.apiUrl(`/analytics/collections/${encodeURIComponent(collectionName)}`)}?${params}`
       );
 
       return response.data;
@@ -170,36 +135,6 @@ export class AnalyticsClient {
       );
 
       return response.data;
-    } catch (error: unknown) {
-      throw this.handleError(error);
-    }
-  }
-
-  /**
-   * Get top collections by specified metric
-   *
-   * @param metric - Metric to sort by ('requests', 'points', 'searches', 'storage')
-   * @param timeRange - Time range for analytics
-   * @param limit - Maximum number of collections to return
-   * @returns Promise that resolves to top collections
-   */
-  async getTopCollections(
-    metric: string = 'requests',
-    timeRange: string = '24h',
-    limit: number = 10
-  ): Promise<TopCollectionEntry[]> {
-    try {
-      const params = new URLSearchParams({
-        metric,
-        time_range: timeRange,
-        limit: limit.toString(),
-      });
-
-      const response = await this.httpClient.get<{
-        collections: TopCollectionEntry[];
-      }>(`${this.apiUrl('/analytics/collections/top')}?${params}`);
-
-      return response.data.collections || [];
     } catch (error: unknown) {
       throw this.handleError(error);
     }

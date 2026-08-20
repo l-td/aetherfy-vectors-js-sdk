@@ -90,7 +90,6 @@ function buildMockClient(): MockedClient {
     refreshSchema: jest.fn(),
     clearSchemaCache: jest.fn(),
     getPerformanceAnalytics: jest.fn(),
-    getCollectionAnalytics: jest.fn(),
     getUsageStats: jest.fn(),
     dispose: jest.fn().mockResolvedValue(undefined),
   } as unknown as MockedClient;
@@ -688,16 +687,6 @@ describe('Namespace operations', () => {
     ns.clearSchemaCache();
     expect(mock.clearSchemaCache).toHaveBeenCalledWith('customer-42');
   });
-
-  it('getAnalytics forwards time range', async () => {
-    const mock = buildMockClient();
-    const ns = await openNs(mock);
-    await ns.getAnalytics('7d');
-    expect(mock.getCollectionAnalytics).toHaveBeenCalledWith(
-      'customer-42',
-      '7d'
-    );
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1070,46 +1059,6 @@ describe('Analytics parity', () => {
     expect(mock.getPerformanceAnalytics).toHaveBeenCalledWith(
       '7d',
       'us-east-1'
-    );
-  });
-
-  it('getNamespaceAnalytics requires existence', async () => {
-    const mock = buildMockClient();
-    mock.collectionExists.mockResolvedValue(false);
-    const m = newMemory(mock);
-    await expect(m.getNamespaceAnalytics('nope')).rejects.toThrow(
-      NamespaceNotFoundError
-    );
-  });
-
-  it('getNamespaceAnalytics delegates', async () => {
-    const mock = buildMockClient();
-    mock.collectionExists.mockResolvedValue(true);
-    const m = newMemory(mock);
-    await m.getNamespaceAnalytics('customer-42', '1h');
-    expect(mock.getCollectionAnalytics).toHaveBeenCalledWith(
-      'customer-42',
-      '1h'
-    );
-  });
-
-  it('getThreadAnalytics uses the prefixed collection', async () => {
-    const mock = buildMockClient();
-    mock.collectionExists.mockResolvedValue(true);
-    const m = newMemory(mock);
-    await m.getThreadAnalytics('conv-99');
-    expect(mock.getCollectionAnalytics).toHaveBeenCalledWith(
-      '__thread__conv-99',
-      '24h'
-    );
-  });
-
-  it('getThreadAnalytics requires existence', async () => {
-    const mock = buildMockClient();
-    mock.collectionExists.mockResolvedValue(false);
-    const m = newMemory(mock);
-    await expect(m.getThreadAnalytics('nope')).rejects.toThrow(
-      ThreadNotFoundError
     );
   });
 
