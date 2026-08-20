@@ -113,13 +113,6 @@ async function basicUsageExample() {
       console.log(`- ${product.payload.name} (ID: ${product.id})`);
     });
 
-    // Get analytics
-    console.log('Getting analytics...');
-    const analytics = await client.getPerformanceAnalytics('1h');
-    console.log(`Cache hit rate: ${analytics.cacheHitRate}%`);
-    console.log(`Average latency: ${analytics.avgLatencyMs}ms`);
-    console.log(`Active regions: ${analytics.activeRegions.join(', ')}`);
-
     // Get usage information
     const usage = await client.getUsageStats();
     console.log('Account usage:');

@@ -431,15 +431,6 @@
           return mockResults.slice(0, options.limit || 5);
         }
 
-        async getPerformanceAnalytics(timeRange) {
-          await this.delay(400);
-          return {
-            cacheHitRate: 94.2,
-            avgLatencyMs: 45,
-            activeRegions: ['us-east-1', 'eu-west-1', 'ap-southeast-1'],
-          };
-        }
-
         async getUsageStats() {
           await this.delay(300);
           return {
@@ -610,23 +601,19 @@
           );
         }
 
-        async showAnalytics() {
+        // Usage against plan limits. This panel used to show a cache hit
+        // rate and an average latency as well; those came from
+        // getPerformanceAnalytics, whose numbers the backend synthesised
+        // rather than measured, so the method was deleted. Time your own
+        // calls if you want latency.
+        async showUsage() {
           try {
-            const analytics = await this.client.getPerformanceAnalytics('1h');
             const usage = await this.client.getUsageStats();
 
-            const analyticsHtml = `
+            const usageHtml = `
                         <div class="analytics-panel">
-                            <h3>Analytics Dashboard</h3>
+                            <h3>Usage</h3>
                             <div class="metric-grid">
-                                <div class="metric">
-                                    <div class="metric-value">${analytics.cacheHitRate}%</div>
-                                    <div class="metric-label">Cache Hit Rate</div>
-                                </div>
-                                <div class="metric">
-                                    <div class="metric-value">${analytics.avgLatencyMs}ms</div>
-                                    <div class="metric-label">Avg Latency</div>
-                                </div>
                                 <div class="metric">
                                     <div class="metric-value">${usage.currentCollections}</div>
                                     <div class="metric-label">Collections</div>
@@ -637,13 +624,12 @@
                                 </div>
                             </div>
                             <p class="plan-info">Current Plan: ${usage.planName}</p>
-                            <p class="regions">Active Regions: ${analytics.activeRegions.join(', ')}</p>
                         </div>
                     `;
 
-            const analyticsContainer = document.getElementById('analytics');
-            if (analyticsContainer) {
-              analyticsContainer.innerHTML = analyticsHtml;
+            const usageContainer = document.getElementById('analytics');
+            if (usageContainer) {
+              usageContainer.innerHTML = usageHtml;
             }
           } catch (error) {
             this.handleError(error);
@@ -696,7 +682,7 @@
         }
 
         if (analyticsButton) {
-          analyticsButton.onclick = () => app.showAnalytics();
+          analyticsButton.onclick = () => app.showUsage();
         }
       });
 

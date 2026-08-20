@@ -593,15 +593,13 @@ const inStock = await client.count('collection-name', { countFilter: filter });
 await client.delete('collection-name', filter);
 ```
 
-## 📊 Analytics & Monitoring
+## 📊 Usage & Limits
+
+Aetherfy does not report latency or cache-hit telemetry through this SDK. Time
+your own calls — that figure includes your network path to us, and it is the
+only latency your users actually experience.
 
 ```typescript
-// Get performance analytics
-const analytics = await client.getPerformanceAnalytics('24h');
-console.log(`Cache hit rate: ${analytics.cacheHitRate}%`);
-console.log(`Average latency: ${analytics.avgLatencyMs}ms`);
-console.log(`Active regions: ${analytics.activeRegions.join(', ')}`);
-
 // Monitor usage and limits
 const usage = await client.getUsageStats();
 console.log(`Collections: ${usage.currentCollections}/${usage.maxCollections}`);
@@ -781,7 +779,6 @@ client.destroy();
 | `analyzeSchema(collection, sampleSize?)`                 | Infer schema from data                                                             | `Promise<AnalysisResult>`        |
 | `refreshSchema(collection)`                              | Force schema cache refresh                                                         | `Promise<void>`                  |
 | `clearSchemaCache(collection?)`                          | Clear schema cache                                                                 | `void`                           |
-| `getPerformanceAnalytics(timeRange, region)`             | Performance metrics                                                                | `Promise<PerformanceAnalytics>`  |
 | `getUsageStats()`                                        | Account usage                                                                      | `Promise<UsageStats>`            |
 | `testConnection()`                                       | Test API connection                                                                | `Promise<boolean>`               |
 | `destroy()`                                              | Close HTTP connections                                                             | `void`                           |

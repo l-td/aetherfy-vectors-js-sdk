@@ -16,7 +16,6 @@ import {
   ClientConfig,
   Collection,
   DistanceMetric,
-  PerformanceAnalytics,
   UsageStats,
   VectorConfigInput,
 } from '../models';
@@ -256,15 +255,8 @@ export class MemoryClient {
   }
 
   // -------------------------------------------------------------------
-  // Global analytics (parity with AetherfyVectorsClient)
+  // Usage stats (parity with AetherfyVectorsClient)
   // -------------------------------------------------------------------
-
-  async getPerformanceAnalytics(
-    timeRange: string = '24h',
-    region?: string
-  ): Promise<PerformanceAnalytics> {
-    return this._client.getPerformanceAnalytics(timeRange, region);
-  }
 
   async getUsageStats(): Promise<UsageStats> {
     return this._client.getUsageStats();

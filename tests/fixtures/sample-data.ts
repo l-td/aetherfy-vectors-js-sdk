@@ -6,7 +6,6 @@ import {
   Point,
   Collection,
   SearchResult,
-  PerformanceAnalytics,
   DistanceMetric,
 } from '../../src/models';
 
@@ -113,29 +112,6 @@ export const sampleSearchResults: SearchResult[] = [
   },
 ];
 
-export const sampleAnalytics: PerformanceAnalytics = {
-  cacheHitRate: 94.2,
-  avgLatencyMs: 45,
-  requestsPerSecond: 1250,
-  activeRegions: ['us-east-1', 'eu-west-1', 'ap-southeast-1'],
-  regionPerformance: {
-    'us-east-1': {
-      latency: 35,
-      requests: 800,
-    },
-    'eu-west-1': {
-      latency: 42,
-      requests: 300,
-    },
-    'ap-southeast-1': {
-      latency: 58,
-      requests: 150,
-    },
-  },
-  totalRequests: 12500,
-  errorRate: 0.02,
-};
-
 // Test vectors of different dimensions
 export const testVectors = {
   small: [0.1, 0.2, 0.3],
@@ -162,7 +138,6 @@ export const mockApiResponses = {
     },
   },
   analytics: {
-    performance: sampleAnalytics,
     usage: {
       currentCollections: 5,
       maxCollections: 100,
@@ -235,7 +210,6 @@ export default {
   samplePoints,
   sampleCollections,
   sampleSearchResults,
-  sampleAnalytics,
   testVectors,
   mockApiResponses,
   testApiKeys,

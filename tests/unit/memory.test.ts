@@ -89,7 +89,6 @@ function buildMockClient(): MockedClient {
     analyzeSchema: jest.fn(),
     refreshSchema: jest.fn(),
     clearSchemaCache: jest.fn(),
-    getPerformanceAnalytics: jest.fn(),
     getUsageStats: jest.fn(),
     dispose: jest.fn().mockResolvedValue(undefined),
   } as unknown as MockedClient;
@@ -1048,20 +1047,10 @@ describe('Thread operations', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Analytics parity
+// Usage-stats parity
 // ---------------------------------------------------------------------------
 
-describe('Analytics parity', () => {
-  it('getPerformanceAnalytics delegates', async () => {
-    const mock = buildMockClient();
-    const m = newMemory(mock);
-    await m.getPerformanceAnalytics('7d', 'us-east-1');
-    expect(mock.getPerformanceAnalytics).toHaveBeenCalledWith(
-      '7d',
-      'us-east-1'
-    );
-  });
-
+describe('Usage-stats parity', () => {
   it('getUsageStats delegates', async () => {
     const mock = buildMockClient();
     const m = newMemory(mock);

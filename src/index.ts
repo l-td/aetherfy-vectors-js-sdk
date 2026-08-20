@@ -28,9 +28,6 @@
 // Main client export
 export { AetherfyVectorsClient } from './client';
 
-// Analytics client export
-export { AnalyticsClient } from './analytics';
-
 // Authentication exports
 export { APIKeyManager, AuthenticationError as AuthError } from './auth';
 
@@ -55,11 +52,8 @@ export {
   ScrollPoint,
   ClientConfig,
 
-  // Analytics interfaces
-  PerformanceAnalytics,
+  // Usage statistics
   UsageStats,
-  CacheStats,
-  RegionInfo,
 
   // Utility interfaces
   ApiResponse,

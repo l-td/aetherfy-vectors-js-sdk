@@ -1,6 +1,5 @@
 import { HttpClient } from './http/client';
 import { APIKeyManager } from './auth';
-import { AnalyticsClient } from './analytics';
 import {
   VectorConfig,
   VectorConfigInput,
@@ -15,7 +14,6 @@ import {
   ScrollPoint,
   ScrollIterOptions,
   Filter,
-  PerformanceAnalytics,
   UsageStats,
   ClientConfig,
   DistanceMetric,
@@ -112,7 +110,6 @@ export class AetherfyVectorsClient {
 
   private httpClient: HttpClient;
   private authManager: APIKeyManager;
-  private analytics: AnalyticsClient;
   private readonly endpoint: string;
   /**
    * The active workspace, or `undefined` if workspace scoping is disabled.
@@ -224,15 +221,6 @@ export class AetherfyVectorsClient {
 
     this.schemaCache = new Map();
     this.payloadSchemaCache = new Map();
-
-    // Initialize analytics client. By now `this.endpoint` is final —
-    // either it was passed in synchronously, or create() ran discovery
-    // and is constructing us with the resolved URL.
-    this.analytics = new AnalyticsClient(
-      this.httpClient,
-      this.endpoint,
-      this.authManager.getAuthHeaders()
-    );
   }
 
   /**
@@ -1468,26 +1456,34 @@ export class AetherfyVectorsClient {
   // Analytics Methods
 
   /**
-   * Get performance analytics
-   *
-   * @param timeRange - Time range for analytics (e.g., '24h', '7d')
-   * @param region - Optional specific region to analyze
-   * @returns Promise that resolves to performance analytics
-   */
-  async getPerformanceAnalytics(
-    timeRange: string = '24h',
-    region?: string
-  ): Promise<PerformanceAnalytics> {
-    return this.analytics.getPerformanceAnalytics(timeRange, region);
-  }
-
-  /**
    * Get account usage statistics
    *
+   * The only analytics endpoint this SDK exposes. It is implemented here
+   * rather than behind an AnalyticsClient sub-client because it is the only
+   * one left: `GET /api/v1/analytics/usage` reports measured values (the
+   * backend reads Postgres for it), while every other analytics method was
+   * deleted for reporting synthesised or unreachable data.
+   *
    * @returns Promise that resolves to usage stats
+   *
+   * @example
+   * ```typescript
+   * const usage = await client.getUsageStats();
+   * if (usage.currentPoints > usage.maxPoints * 0.8) {
+   *   console.warn('Approaching point limit');
+   * }
+   * ```
    */
   async getUsageStats(): Promise<UsageStats> {
-    return this.analytics.getUsageStats();
+    try {
+      const response = await this.httpClient.get<UsageStats>(
+        this.apiUrl('/analytics/usage')
+      );
+
+      return response.data;
+    } catch (error: unknown) {
+      throw this.handleError(error);
+    }
   }
 
   // Utility Methods

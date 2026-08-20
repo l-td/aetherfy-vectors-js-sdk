@@ -216,24 +216,21 @@ class VectorSearchApp {
     this.updateStatus(`Found ${results.length} matching products`, 'success');
   }
 
-  // Get and display analytics
-  async showAnalytics() {
+  // Get and display usage against plan limits.
+  //
+  // This panel used to show a cache hit rate and an average latency too. Those
+  // came from getPerformanceAnalytics, which was deleted: the backend
+  // synthesised the numbers rather than measuring them. If you want latency,
+  // time your own calls — that is the only figure that includes the browser's
+  // network path, which is most of what a user feels.
+  async showUsage() {
     try {
-      const analytics = await this.client.getPerformanceAnalytics('1h');
       const usage = await this.client.getUsageStats();
 
-      const analyticsHtml = `
+      const usageHtml = `
         <div class="analytics-panel">
-          <h3>Analytics Dashboard</h3>
+          <h3>Usage</h3>
           <div class="metric-grid">
-            <div class="metric">
-              <div class="metric-value">${analytics.cacheHitRate}%</div>
-              <div class="metric-label">Cache Hit Rate</div>
-            </div>
-            <div class="metric">
-              <div class="metric-value">${analytics.avgLatencyMs}ms</div>
-              <div class="metric-label">Avg Latency</div>
-            </div>
             <div class="metric">
               <div class="metric-value">${usage.currentCollections}</div>
               <div class="metric-label">Collections</div>
@@ -244,13 +241,12 @@ class VectorSearchApp {
             </div>
           </div>
           <p class="plan-info">Current Plan: ${usage.planName}</p>
-          <p class="regions">Active Regions: ${analytics.activeRegions.join(', ')}</p>
         </div>
       `;
 
-      const analyticsContainer = document.getElementById('analytics');
-      if (analyticsContainer) {
-        analyticsContainer.innerHTML = analyticsHtml;
+      const usageContainer = document.getElementById('analytics');
+      if (usageContainer) {
+        usageContainer.innerHTML = usageHtml;
       }
     } catch (error) {
       this.handleError(error);
@@ -323,7 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   if (analyticsButton) {
-    analyticsButton.onclick = () => app.showAnalytics();
+    analyticsButton.onclick = () => app.showUsage();
   }
 });
 

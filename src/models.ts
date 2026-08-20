@@ -82,26 +82,6 @@ export interface Collection {
 }
 
 /**
- * Performance analytics data
- */
-export interface PerformanceAnalytics {
-  /** Cache hit rate percentage */
-  cacheHitRate: number;
-  /** Average latency in milliseconds */
-  avgLatencyMs: number;
-  /** Requests per second */
-  requestsPerSecond: number;
-  /** List of active regions */
-  activeRegions: string[];
-  /** Performance metrics by region */
-  regionPerformance: Record<string, Record<string, number>>;
-  /** Total number of requests (optional) */
-  totalRequests?: number;
-  /** Error rate percentage (optional) */
-  errorRate?: number;
-}
-
-/**
  * Usage statistics for the account
  */
 export interface UsageStats {
@@ -329,37 +309,6 @@ export interface PaginationInfo {
   total?: number;
   /** Whether there are more items */
   hasMore?: boolean;
-}
-
-/**
- * Region information
- */
-export interface RegionInfo {
-  /** Region identifier */
-  id: string;
-  /** Region display name */
-  name: string;
-  /** Whether the region is active */
-  active: boolean;
-  /** Region latency metrics */
-  latencyMs?: number;
-}
-
-/**
- * Cache statistics
- */
-export interface CacheStats {
-  /** Hit rate percentage */
-  hitRate: number;
-  /** Total cache hits */
-  hits: number;
-  /** Total cache misses */
-  misses: number;
-  /** Cache size information */
-  size?: {
-    used: number;
-    available: number;
-  };
 }
 
 /**

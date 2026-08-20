@@ -237,10 +237,15 @@ describe('AetherfyVectorsClient apiRegion= + discovery', () => {
   });
 
   describe('analytics endpoint follows apiRegion', () => {
-    // create() returns a client with analytics already pinned to the
-    // resolved per-region URL — analytics is constructed AFTER the
-    // endpoint is final. No transient state, no setBaseUrl shenanigans.
-    it('analytics.baseUrl matches the resolved per-region URL', async () => {
+    // This used to reach into `client.analytics.baseUrl`. The AnalyticsClient
+    // sub-client is gone — getUsageStats is the only analytics method left and
+    // it lives on the client itself, building its URL from the same resolved
+    // `endpoint` as every other call. So the contract is now directly
+    // OBSERVABLE and is asserted as such: the request must land on the
+    // resolved per-region host, and must not touch the default one. That is a
+    // stronger claim than the old field read, which could have passed while
+    // the request still went somewhere else.
+    it('getUsageStats hits the resolved per-region URL, not the default', async () => {
       nock(DEFAULT).get('/api/v1/regions').reply(200, {
         'us-east-1': 'https://vectors-iad.aetherfy.run',
         'eu-central-1': 'https://vectors-fra.aetherfy.run',
@@ -251,10 +256,30 @@ describe('AetherfyVectorsClient apiRegion= + discovery', () => {
         apiRegion: 'eu-central-1',
         enableConnectionPooling: false,
       });
-      const analytics = (
-        client as unknown as { analytics: { baseUrl: string } }
-      ).analytics;
-      expect(analytics.baseUrl).toBe('https://vectors-fra.aetherfy.run');
+
+      const regional = nock('https://vectors-fra.aetherfy.run')
+        .get('/api/v1/analytics/usage')
+        .reply(200, {
+          currentCollections: 1,
+          maxCollections: 100,
+          currentPoints: 10,
+          maxPoints: 1000,
+          requestsThisMonth: 5,
+          maxRequestsPerMonth: 1000,
+          storageUsedMb: 1,
+          maxStorageMb: 100,
+          planName: 'Developer',
+        });
+      // Negative control: if the call went to the default host instead, this
+      // interceptor would be consumed and the assertion below would catch it.
+      const wrongHost = nock(DEFAULT)
+        .get('/api/v1/analytics/usage')
+        .reply(200, {});
+
+      await client.getUsageStats();
+
+      expect(regional.isDone()).toBe(true);
+      expect(wrongHost.isDone()).toBe(false);
     });
   });
 

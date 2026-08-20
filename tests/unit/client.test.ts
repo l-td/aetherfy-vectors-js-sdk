@@ -911,22 +911,6 @@ describe('AetherfyVectorsClient', () => {
       });
     });
 
-    it('should get performance analytics', async () => {
-      const mockAnalytics = {
-        cacheHitRate: 94.2,
-        avgLatencyMs: 45,
-        requestsPerSecond: 1250,
-        activeRegions: ['us-east-1', 'eu-west-1'],
-      };
-
-      nock('https://vectors.aetherfy.com')
-        .get('/api/v1/analytics/performance?time_range=24h')
-        .reply(200, mockAnalytics);
-
-      const analytics = await client.getPerformanceAnalytics('24h');
-      expect(analytics).toEqual(mockAnalytics);
-    });
-
     it('should get usage stats', async () => {
       const mockUsage = {
         currentCollections: 5,
