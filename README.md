@@ -4,17 +4,22 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/%3C%2F%3E-TypeScript-%230074c1.svg)](http://www.typescriptlang.org/)
 
-Global vector database with automatic replication and low latency worldwide.
+**Memory for AI agents** — conversations, knowledge bases, scrape logs, trading
+histories. Named scopes you create and search, replicated across regions, with
+no infrastructure to run.
 
 ## 🌟 Features
 
+- **🧠 Memory Primitives** - `Namespace` for any named scope, `Thread` for conversations — not a raw collection API
 - **🌍 Global Performance** - Automatic replication across all three regions: `us-east-1`, `eu-central-1`, `ap-southeast-1`
 - **⚡ Intelligent Caching** - High cache hit rate, with responses served from cache where possible
 - **🛡️ Zero DevOps** - Fully managed infrastructure, no setup required
+- **🤝 Workspace Scoping** - Multi-agent tenancy, auto-detected inside deployed agents
 - **📊 Built-in Analytics** - Real-time performance metrics and insights
 - **🔧 Auto-Failover** - Seamless failover and disaster recovery
 - **🔒 Enterprise Security** - End-to-end encryption and compliance ready
 - **🚀 Developer Friendly** - TypeScript-first with comprehensive documentation
+- **🪜 Escape Hatch** - `AetherfyVectorsClient` underneath for raw collections and points
 
 ## 🚀 Installation
 
@@ -29,6 +34,57 @@ pnpm add aetherfy-vectors
 ```
 
 ## 📖 Quick Start
+
+Every memory lives in a scope you create by name. Two kinds: a **namespace** for
+anything with a name, a **thread** for a conversation. Bring your own embedding
+vectors — Aetherfy stores and searches them, it does not generate them.
+
+```typescript
+import { MemoryClient } from 'aetherfy-vectors';
+
+const memory = new MemoryClient();  // reads AETHERFY_API_KEY; workspace auto-detected
+
+// --- A namespace: any named scope ---------------------------------------
+await memory.createNamespace('customer-42');
+const customer = await memory.namespace('customer-42');
+
+await customer.add({
+  text: 'Lives in NYC, prefers email',
+  vector: await embed('Lives in NYC, prefers email'),
+});
+const hits = await customer.search(
+  await embed('where is this customer based?'),
+  { limit: 5 }
+);
+
+// --- A thread: a conversation -------------------------------------------
+await memory.createThread('conv-99');
+const thread = await memory.thread('conv-99');
+
+await thread.add({ role: 'user',      content: 'hi',    vector: await embed('hi') });
+await thread.add({ role: 'assistant', content: 'hello', vector: await embed('hello') });
+const recent = await thread.history({ limit: 20 });   // in message order
+
+// Deleting a scope is atomic — it drops the whole backing collection.
+await thread.clear();
+```
+
+Scopes must be created before you write to them, so a typo throws instead of
+silently creating a second store. Vector size defaults to 384; pass your model's
+dimension to `createNamespace` / `createThread` if it differs (1536 for OpenAI
+small, 3072 for large, 1024 for Cohere v3).
+
+Deployed on Aetherfy, `new MemoryClient()` takes no arguments at all: the control
+plane injects `AETHERFY_API_KEY` and the workspace at deploy time.
+
+Full memory API — iteration, bulk loading, metadata — under
+[Memory SDK](#-memory-sdk--iter-bulk-load-setmetadata) below.
+
+## 🧱 The Low-Level Client
+
+`AetherfyVectorsClient` is the layer `MemoryClient` is built on, exported and
+supported. Use it when you want raw collections and points rather than named
+scopes, or an operation the memory layer doesn't expose.
 
 The snippets below build on each other; each assumes the imports and client
 from the previous ones.

@@ -154,7 +154,18 @@ const FACTORY_RETURNS: Record<string, string> = {
   createThread: 'Thread',
 };
 
-/** method -> the interface its options bag must satisfy. A map, not inference. */
+/**
+ * method -> the interface its options bag must satisfy. A map, not inference.
+ *
+ * Keys are either a bare method name (applies to every receiver class) or a
+ * qualified `Class.method`, which wins over the bare form. The qualified form
+ * exists because the same method name takes its bag at a different position on
+ * different classes: `client.search(collection, vector, opts)` is arg 2, while
+ * `namespace.search(vector, opts)` is arg 1. Keyed by method alone, the memory
+ * layer's bags could never be checked — they would miss the argIndex and fall
+ * to the skip counter forever, which is a permanent hole wearing the costume of
+ * a deliberate skip.
+ */
 const OPTIONS_INTERFACE: Record<string, { argIndex: number; iface: string }> = {
   search: { argIndex: 2, iface: 'SearchOptions' },
   retrieve: { argIndex: 2, iface: 'RetrieveOptions' },
@@ -171,6 +182,13 @@ const OPTIONS_INTERFACE: Record<string, { argIndex: number; iface: string }> = {
   // the filter inline, its clauses are checkable — and this is where a
   // snake_case `must_not` in a sample would be caught.
   delete: { argIndex: 1, iface: 'Filter' },
+  // Memory-layer bags. Qualified because their argIndex differs from the
+  // same-named client methods above, and because Namespace and Thread take
+  // genuinely different add() shapes (text/metadata vs role/content/ts) — the
+  // exact confusion a README sample is most likely to ship.
+  'Namespace.search': { argIndex: 1, iface: 'NamespaceSearchOptions' },
+  'Namespace.add': { argIndex: 0, iface: 'NamespaceAddOptions' },
+  'Thread.add': { argIndex: 0, iface: 'ThreadAddOptions' },
 };
 
 /**
@@ -319,7 +337,9 @@ export function checkSample(
             // Silence is not allowed: without the counter, adding a method with
             // an options bag — or moving one to a different argument position —
             // quietly shrinks coverage while the suite stays green.
-            const spec = OPTIONS_INTERFACE[method];
+            const spec =
+              OPTIONS_INTERFACE[`${clsName}.${method}`] ??
+              OPTIONS_INTERFACE[method];
             node.arguments.forEach((arg, argIndex) => {
               if (!ts.isObjectLiteralExpression(arg)) return;
               const allowed =
