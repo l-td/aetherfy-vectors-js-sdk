@@ -434,9 +434,13 @@
         async getUsageStats() {
           await this.delay(300);
           return {
-            currentCollections: 3,
-            currentPoints: 1250,
-            planName: 'Developer',
+            storage_bytes_used: 131596288,
+            storage_limit_bytes: 10737418240,
+            collections_count: 3,
+            collections_limit: 100,
+            tier: 'developer',
+            active_regions: ['us-east-1'],
+            usage_percentage: 1,
           };
         }
 
@@ -615,15 +619,15 @@
                             <h3>Usage</h3>
                             <div class="metric-grid">
                                 <div class="metric">
-                                    <div class="metric-value">${usage.currentCollections}</div>
+                                    <div class="metric-value">${usage.collections_count}</div>
                                     <div class="metric-label">Collections</div>
                                 </div>
                                 <div class="metric">
-                                    <div class="metric-value">${usage.currentPoints}</div>
-                                    <div class="metric-label">Total Points</div>
+                                    <div class="metric-value">${usage.storage_bytes_used}</div>
+                                    <div class="metric-label">Bytes Stored</div>
                                 </div>
                             </div>
-                            <p class="plan-info">Current Plan: ${usage.planName}</p>
+                            <p class="plan-info">Current Tier: ${usage.tier}</p>
                         </div>
                     `;
 

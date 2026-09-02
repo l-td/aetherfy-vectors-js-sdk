@@ -232,15 +232,15 @@ class VectorSearchApp {
           <h3>Usage</h3>
           <div class="metric-grid">
             <div class="metric">
-              <div class="metric-value">${usage.currentCollections}</div>
+              <div class="metric-value">${usage.collections_count}</div>
               <div class="metric-label">Collections</div>
             </div>
             <div class="metric">
-              <div class="metric-value">${usage.currentPoints}</div>
-              <div class="metric-label">Total Points</div>
+              <div class="metric-value">${usage.storage_bytes_used}</div>
+              <div class="metric-label">Bytes Stored</div>
             </div>
           </div>
-          <p class="plan-info">Current Plan: ${usage.planName}</p>
+          <p class="plan-info">Current Tier: ${usage.tier}</p>
         </div>
       `;
 

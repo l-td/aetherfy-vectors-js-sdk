@@ -260,15 +260,13 @@ describe('AetherfyVectorsClient apiRegion= + discovery', () => {
       const regional = nock('https://vectors-fra.aetherfy.run')
         .get('/api/v1/analytics/usage')
         .reply(200, {
-          currentCollections: 1,
-          maxCollections: 100,
-          currentPoints: 10,
-          maxPoints: 1000,
-          requestsThisMonth: 5,
-          maxRequestsPerMonth: 1000,
-          storageUsedMb: 1,
-          maxStorageMb: 100,
-          planName: 'Developer',
+          storage_bytes_used: 1024,
+          storage_limit_bytes: 1_073_741_824,
+          collections_count: 1,
+          collections_limit: 100,
+          tier: 'developer',
+          active_regions: ['eu-central-1'],
+          usage_percentage: 0,
         });
       // Negative control: if the call went to the default host instead, this
       // interceptor would be consumed and the assertion below would catch it.

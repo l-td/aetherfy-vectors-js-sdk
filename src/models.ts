@@ -82,27 +82,45 @@ export interface Collection {
 }
 
 /**
- * Usage statistics for the account
+ * Usage statistics for the account.
+ *
+ * SNAKE_CASE ON PURPOSE, and the one place in this file where that is true.
+ * `getUsageStats()` returns the HTTP response body untouched — there is no
+ * inbound transform layer in this SDK. The camelCase vocabulary is OUTBOUND
+ * only (`serializeFilter`, and the explicit per-call-site option mapping);
+ * the single inbound rename anywhere is `scroll()`'s hand-written
+ * `next_page_offset` -> `nextPageOffset`. So the honest type for a raw body
+ * is the body's own spelling.
+ *
+ * The fields mirror `GET /api/v1/analytics/usage` verbatim — no derived
+ * values, no unit conversion, no renaming. The shape is pinned live by the
+ * e2e SDK guard (aetherfy-e2e-tests tests/sdk/js_usage_stats.test.js), which
+ * calls the real endpoint and type-checks every field below. See
+ * aetherfy-dashboard docs/TELEMETRY.md for the endpoint's contract history.
+ *
+ * This interface previously declared nine camelCase fields
+ * (currentCollections, maxCollections, currentPoints, maxPoints,
+ * requestsThisMonth, maxRequestsPerMonth, storageUsedMb, maxStorageMb,
+ * planName) that no response has ever carried. Nothing caught it because
+ * `response.data` is cast to this type rather than validated against it, and
+ * every test mocked the invented payload.
  */
 export interface UsageStats {
-  /** Current number of collections */
-  currentCollections: number;
-  /** Maximum allowed collections */
-  maxCollections: number;
-  /** Current number of points across all collections */
-  currentPoints: number;
-  /** Maximum allowed points */
-  maxPoints: number;
-  /** Requests made this month */
-  requestsThisMonth: number;
-  /** Maximum requests per month */
-  maxRequestsPerMonth: number;
-  /** Storage used in MB */
-  storageUsedMb: number;
-  /** Maximum storage allowed in MB */
-  maxStorageMb: number;
-  /** Account plan name */
-  planName: string;
+  /** Bytes stored across every active collection */
+  storage_bytes_used: number;
+  /** Plan storage limit in bytes; `null` on an unlimited tier */
+  storage_limit_bytes: number | null;
+  /** Number of active collections */
+  collections_count: number;
+  /** Plan collection limit; `null` on an unlimited tier — the same sentinel
+   *  `storage_limit_bytes` uses, because the endpoint normalises both. */
+  collections_limit: number | null;
+  /** The account's tier name */
+  tier: string;
+  /** Replication footprint: the union of every active collection's regions */
+  active_regions: string[];
+  /** Storage percentage; `0` when there is no limit to be a percentage of */
+  usage_percentage: number;
 }
 
 /**

@@ -912,12 +912,16 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should get usage stats', async () => {
+      // Wire shape — see tests/unit/usage-stats.test.ts, which owns the
+      // full coverage for this endpoint; the live pin is the e2e guard.
       const mockUsage = {
-        currentCollections: 5,
-        maxCollections: 100,
-        currentPoints: 50000,
-        maxPoints: 1000000,
-        planName: 'Developer',
+        storage_bytes_used: 268_435_456,
+        storage_limit_bytes: 1_073_741_824,
+        collections_count: 5,
+        collections_limit: 100,
+        tier: 'developer',
+        active_regions: ['us-east-1'],
+        usage_percentage: 25,
       };
 
       nock('https://vectors.aetherfy.com')

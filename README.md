@@ -658,15 +658,28 @@ only latency your users actually experience.
 ```typescript
 // Monitor usage and limits
 const usage = await client.getUsageStats();
-console.log(`Collections: ${usage.currentCollections}/${usage.maxCollections}`);
-console.log(`Points: ${usage.currentPoints}/${usage.maxPoints}`);
-console.log(`Plan: ${usage.planName}`);
+
+usage.storage_bytes_used; // number      — bytes stored across every collection
+usage.storage_limit_bytes; // number|null — null on an unlimited tier
+usage.collections_count; // number       — active collections
+usage.collections_limit; // number|null  — null on an unlimited tier
+usage.tier; // string                    — the plan's tier name
+usage.active_regions; // string[]        — union of your collections' regions
+usage.usage_percentage; // number        — storage %, 0 when there is no limit
+
+console.log(`Collections: ${usage.collections_count}/${usage.collections_limit}`);
+console.log(`Storage: ${usage.storage_bytes_used} bytes`);
+console.log(`Tier: ${usage.tier}`);
 
 // Usage warning example
-if (usage.currentPoints > usage.maxPoints * 0.8) {
-  console.warn('⚠️ Approaching point limit');
+if (usage.storage_limit_bytes !== null && usage.usage_percentage > 80) {
+  console.warn('⚠️ Approaching storage limit');
 }
 ```
+
+These are the endpoint's own field names, in its own snake_case, returned
+untouched — the SDK's camelCase vocabulary is for the options you send, not for
+the bodies you get back.
 
 ## 🌐 Browser Usage
 

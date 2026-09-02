@@ -1464,13 +1464,19 @@ export class AetherfyVectorsClient {
    * backend reads Postgres for it), while every other analytics method was
    * deleted for reporting synthesised or unreachable data.
    *
+   * The response body is returned untouched, so `UsageStats` carries the
+   * endpoint's own snake_case field names — see the type's own note.
+   *
    * @returns Promise that resolves to usage stats
    *
    * @example
    * ```typescript
    * const usage = await client.getUsageStats();
-   * if (usage.currentPoints > usage.maxPoints * 0.8) {
-   *   console.warn('Approaching point limit');
+   * if (
+   *   usage.storage_limit_bytes !== null &&
+   *   usage.usage_percentage > 80
+   * ) {
+   *   console.warn('Approaching storage limit');
    * }
    * ```
    */

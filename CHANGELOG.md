@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- `UsageStats` now describes the response `GET /api/v1/analytics/usage`
+  actually serves: `storage_bytes_used`, `storage_limit_bytes` (`null` on an
+  unlimited tier), `collections_count`, `collections_limit` (also `null` on an
+  unlimited tier — one sentinel for both),
+  `tier`, `active_regions` and `usage_percentage`. The nine camelCase fields it
+  declared before (`currentCollections`, `maxCollections`, `currentPoints`,
+  `maxPoints`, `requestsThisMonth`, `maxRequestsPerMonth`, `storageUsedMb`,
+  `maxStorageMb`, `planName`) have never appeared in any response body:
+  `getUsageStats()` returns `response.data` untouched, so every one of them was
+  `undefined` at runtime while TypeScript said otherwise. The type is
+  snake_case on purpose — this SDK's camelCase vocabulary is outbound only,
+  and the body is returned verbatim. A live e2e call now pins the shape
+  (aetherfy-e2e-tests `tests/sdk/js_usage_stats.test.js`).
+
 ## [1.0.0] - 2026-08-17
 
 First public release on npm. Everything below ships in it: the `1.0.0`

@@ -117,10 +117,11 @@ async function basicUsageExample() {
     const usage = await client.getUsageStats();
     console.log('Account usage:');
     console.log(
-      `- Collections: ${usage.currentCollections}/${usage.maxCollections}`
+      `- Collections: ${usage.collections_count}/${usage.collections_limit}`
     );
-    console.log(`- Points: ${usage.currentPoints}/${usage.maxPoints}`);
-    console.log(`- Plan: ${usage.planName}`);
+    console.log(`- Storage: ${usage.storage_bytes_used} bytes`);
+    console.log(`- Tier: ${usage.tier}`);
+    console.log(`- Regions: ${usage.active_regions.join(', ')}`);
 
     // List all collections
     const collections = await client.getCollections();

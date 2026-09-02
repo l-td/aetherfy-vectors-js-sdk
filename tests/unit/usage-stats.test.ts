@@ -29,16 +29,21 @@ describe('getUsageStats', () => {
   let client: AetherfyVectorsClient;
   const baseUrl = 'https://vectors.aetherfy.com';
 
+  // A GET /api/v1/analytics/usage body, copied from the wire. THIS IS A COPY
+  // OF THE TRUTH, NOT THE TRUTH — the authoritative pin is the live call in
+  // aetherfy-e2e-tests tests/sdk/js_usage_stats.test.js, and this mock must
+  // only ever be changed together with it. Everything in this file is nocked,
+  // so nothing here can tell you the endpoint still serves this shape: that is
+  // precisely how UsageStats spent its whole life declaring nine camelCase
+  // fields no response has ever carried.
   const mockUsage: UsageStats = {
-    currentCollections: 5,
-    maxCollections: 100,
-    currentPoints: 50000,
-    maxPoints: 1000000,
-    requestsThisMonth: 125000,
-    maxRequestsPerMonth: 1000000,
-    storageUsedMb: 250,
-    maxStorageMb: 10000,
-    planName: 'Developer',
+    storage_bytes_used: 268_435_456,
+    storage_limit_bytes: 1_073_741_824,
+    collections_count: 5,
+    collections_limit: 100,
+    tier: 'developer',
+    active_regions: ['us-east-1', 'eu-central-1'],
+    usage_percentage: 25,
   };
 
   beforeEach(() => {
@@ -64,6 +69,55 @@ describe('getUsageStats', () => {
     // The path is pinned, not just the payload: this is the contract the
     // backend keeps serving now that every sibling endpoint is gone.
     expect(scope.isDone()).toBe(true);
+  });
+
+  it('does not require or expose a request count', async () => {
+    // `requests_this_hour` was deleted from the endpoint in 2026-09 (it read
+    // a Redis key nothing had ever written, so every customer was told 0),
+    // and `requests_this_month` never existed — it was one of the nine
+    // invented fields this type used to declare. A body carrying only the
+    // seven real fields must come back whole, and must not answer to either
+    // name.
+    expect(mockUsage).not.toHaveProperty('requests_this_hour');
+    expect(mockUsage).not.toHaveProperty('requests_this_month');
+
+    nock(baseUrl).get('/api/v1/analytics/usage').reply(200, mockUsage);
+
+    const result = await client.getUsageStats();
+
+    expect(result).not.toHaveProperty('requests_this_hour');
+    expect(result).not.toHaveProperty('requests_this_month');
+  });
+
+  it('carries BOTH unlimited-tier limits through as null', async () => {
+    // One sentinel, not two. vectordb's `customerStore` represents "no limit"
+    // as the STRING 'unlimited' internally, but that is a limits-vocabulary
+    // convention and the endpoint normalises both fields to null before they
+    // reach the wire — pinned server-side by vectordb
+    // tests/unit/analyticsMetricsRead.test.js, "an unlimited tier reports
+    // BOTH limits as null, in one vocabulary".
+    //
+    // This case previously used `collections_limit: -1`, a payload the
+    // backend has never sent. Inventing a sentinel to test against is the
+    // exact defect this file exists to close.
+    const unlimited: UsageStats = {
+      storage_bytes_used: 42,
+      storage_limit_bytes: null,
+      collections_count: 3,
+      collections_limit: null,
+      tier: 'enterprise',
+      active_regions: [],
+      usage_percentage: 0,
+    };
+
+    nock(baseUrl).get('/api/v1/analytics/usage').reply(200, unlimited);
+
+    const result = await client.getUsageStats();
+
+    expect(result.storage_limit_bytes).toBeNull();
+    expect(result.collections_limit).toBeNull();
+    expect(result.active_regions).toEqual([]);
+    expect(result.usage_percentage).toBe(0);
   });
 
   it('maps a 429 to RateLimitExceededError', async () => {
