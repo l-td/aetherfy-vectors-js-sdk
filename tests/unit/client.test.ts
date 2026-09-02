@@ -437,10 +437,13 @@ describe('AetherfyVectorsClient', () => {
     });
 
     it('should get collection information', async () => {
+      // Wire spelling. `getCollection` returns `response.data.result`
+      // untouched, so the mock IS the returned object — a camelCase key here
+      // would be asserting on a body the backend has never sent.
       const mockCollection = {
         name: 'test-collection',
         config: { size: 128, distance: 'Cosine' },
-        pointsCount: 1000,
+        points_count: 1000,
       };
 
       nock('https://vectors.aetherfy.com')
@@ -450,6 +453,10 @@ describe('AetherfyVectorsClient', () => {
       const collection = await client.getCollection('test-collection');
 
       expect(collection).toEqual(mockCollection);
+      expect(collection.points_count).toBe(1000);
+      // The field was declared `pointsCount` until 2026-09-02 and was
+      // therefore undefined on every real call. It must not come back.
+      expect(collection).not.toHaveProperty('pointsCount');
     });
 
     it('should validate collection name length', async () => {

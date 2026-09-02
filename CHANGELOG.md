@@ -4,6 +4,16 @@
 
 ### Fixed
 
+- **`Collection.pointsCount` is now `Collection.points_count`.** It was
+  `undefined` on every call: `getCollection()` returns `response.data.result`
+  verbatim, there is no inbound transform in this SDK, and the wire field is
+  `points_count`. The same defect `UsageStats` carried, one interface over —
+  and it was provable the whole time, because the e2e suite reads the
+  snake_case name *through this method* and passes against live infrastructure.
+  `name`, `description`, `status` and `regions` were correct only because the
+  two vocabularies spell them identically; that is coincidence, not a
+  transform, and the type now says so. Pinned by a new live e2e shape guard.
+
 - `UsageStats` now describes the response `GET /api/v1/analytics/usage`
   actually serves: `storage_bytes_used`, `storage_limit_bytes` (`null` on an
   unlimited tier), `collections_count`, `collections_limit` (also `null` on an

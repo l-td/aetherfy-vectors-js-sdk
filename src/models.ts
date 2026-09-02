@@ -60,7 +60,26 @@ export interface SearchResult {
 }
 
 /**
- * Collection information
+ * Collection information.
+ *
+ * SNAKE_CASE ON PURPOSE, for the same reason `UsageStats` is: `getCollection()`
+ * returns `response.data.result` VERBATIM and there is no inbound transform in
+ * this SDK. The camelCase vocabulary is OUTBOUND only (`serializeFilter`, and
+ * the explicit per-call-site option mapping); the single inbound rename
+ * anywhere is `scroll()`'s hand-written `next_page_offset` -> `nextPageOffset`.
+ * So the honest type for a raw body is the body's own spelling.
+ *
+ * `points_count` was declared `pointsCount` until 2026-09-02 and was therefore
+ * `undefined` on every call — the identical defect `UsageStats` carried, one
+ * interface over, and proven by a live e2e test that reads the snake_case name
+ * through this very method and passes. Pinned now by
+ * aetherfy-e2e-tests tests/sdk/js_collection_shape.test.js.
+ *
+ * `name`, `description`, `status` and `regions` are spelled identically in both
+ * vocabularies, so they were correct BY COINCIDENCE rather than by any
+ * transform — the same accident that let `must`/`should` survive the `mustNot`
+ * filter bug. Nothing here is renamed on the way out; when a wire field's
+ * spelling and the SDK convention agree, that is luck, not design.
  */
 export interface Collection {
   /** Collection name */
@@ -70,7 +89,7 @@ export interface Collection {
   /** Vector configuration */
   config: VectorConfig;
   /** Number of points in collection (if available) */
-  pointsCount?: number;
+  points_count?: number;
   /** Collection status */
   status?: string;
   /**

@@ -284,12 +284,13 @@ describe('Namespace lifecycle', () => {
   it('getNamespace returns metadata', async () => {
     const mock = buildMockClient();
     mock.collectionExists.mockResolvedValue(true);
-    const info = fakeCollection('customer-42', { pointsCount: 123 });
+    const info = fakeCollection('customer-42', { points_count: 123 });
     mock.getCollection.mockResolvedValue(info);
     const m = newMemory(mock);
     const returned = await m.getNamespace('customer-42');
     expect(returned.name).toBe('customer-42');
-    expect(returned.pointsCount).toBe(123);
+    expect(returned.points_count).toBe(123);
+    expect(returned).not.toHaveProperty('pointsCount');
     expect(mock.getCollection).toHaveBeenCalledWith('customer-42');
   });
 
@@ -345,12 +346,13 @@ describe('Thread lifecycle', () => {
     const mock = buildMockClient();
     mock.collectionExists.mockResolvedValue(true);
     mock.getCollection.mockResolvedValue(
-      fakeCollection('__thread__conv-99', { pointsCount: 42 })
+      fakeCollection('__thread__conv-99', { points_count: 42 })
     );
     const m = newMemory(mock);
     const returned = await m.getThread('conv-99');
     expect(returned.name).toBe('conv-99');
-    expect(returned.pointsCount).toBe(42);
+    expect(returned.points_count).toBe(42);
+    expect(returned).not.toHaveProperty('pointsCount');
     expect(mock.getCollection).toHaveBeenCalledWith('__thread__conv-99');
   });
 
