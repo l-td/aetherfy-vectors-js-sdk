@@ -156,6 +156,10 @@ module.exports = [
         afterAll: true,
         Headers: 'readonly',
         Response: 'readonly',
+        // Beside Response and Headers, and for the same reason: the agent
+        // helper's transport is the runtime's own fetch, so its tests replace
+        // it and name its type.
+        fetch: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         window: 'readonly',

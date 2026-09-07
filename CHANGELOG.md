@@ -2,6 +2,75 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-07
+
+### Added
+
+- **`aetherfy-vectors/agent` — the four things code running on an Aetherfy
+  agent does.** A new subpath export on this same package, beside the root
+  entry:
+
+  - `payload()` reads this run's input. The file named by
+    `AETHERFY_SPAWN_PAYLOAD_PATH` first, then the documented HTTP fallback
+    when the machine could not write it; `{}` for a run given no input, which
+    is the normal case for a scheduled fire.
+  - `machine()` returns the run's `MachineShape` — `vcpus`, `memory_mb`,
+    `region` — as numbers rather than the strings the environment carries.
+  - `fanOut(fn, items, { width })` runs an in-machine pool and resolves with
+    results in INPUT order, re-throwing the lowest-indexed rejection rather
+    than swallowing it. Width is promise concurrency and defaults to
+    `vcpus * 8` for the I/O-bound work most tasks do; CPU-bound work belongs
+    in `worker_threads`, sized from `machine().vcpus`. It prints one line to
+    stdout before running, so a run's width is visible in its logs afterwards.
+  - `spawn(child, payload?)` runs a different task agent. `413` becomes
+    `PayloadTooLarge` (carrying `payloadBytes` / `maxBytes`), `429` becomes
+    `TooManyRunsInFlight` — the one refusal worth retrying — and every other
+    status becomes `SpawnError` with the platform's stable `code`.
+    `TooManyRunsInFlight` carries `inFlightCount`, `limit` (which plan limit
+    was hit, `"max_in_flight_runs"` today) and `maxInFlightRuns` (its value,
+    `null` on a plan that declares no cap). The cap is the ACCOUNT's, set by
+    the plan — not a per-agent spawn ceiling. All three are `null` rather
+    than `undefined` when absent, so they read the same as the Python
+    helper's `None`.
+
+  Each of these was already a documented platform contract that every task
+  hand-rolled; none of them is a new protocol. The module adds NO dependency:
+  its transport is the runtime's own `fetch` and `node:fs/promises`. Both
+  requests set an explicit `User-Agent`, because the default is blocked at the
+  edge and produces a 403 that reads exactly like an auth failure.
+
+  `MachineShape` and `Spawn` are snake_case, matching the Python helper and
+  this SDK's rule that inbound shapes keep their wire spelling — the camelCase
+  vocabulary is outbound only.
+
+  There is deliberately no `result()` and no `wait()`: a run reports its
+  outcome through its exit code, and the platform's result path does not exist
+  yet.
+
+  The standard runtime image preinstalls this package, so a plain agent gets
+  the helper with nothing in its `package.json`, and a version the customer
+  pins wins over it.
+
+### Changed
+
+- The `.` export condition list is unchanged; the new `./agent` entry resolves
+  to `dist/agent.esm.mjs` (import), `dist/agent.cjs.js` (require) and
+  `dist/agent/index.d.ts` (types). The ESM bundle is `.mjs` rather than
+  `.esm.js` on purpose: this package has no `"type": "module"`, so Node has to
+  reparse a `.js` ESM file and prints a `MODULE_TYPELESS_PACKAGE_JSON` warning
+  into the importing process's stdout — which on an Aetherfy machine IS the
+  run's logs. `dist/index.esm.js` has the same shape and is left alone, being
+  a published entry point.
+- **There is now ONE version literal**, `SDK_VERSION` in `src/version.ts`.
+  `VERSION` re-exports it, the HTTP client's `User-Agent` interpolates it,
+  and the agent helper's User-Agent reads it. There were three literals, and
+  the client's had already drifted — it announced `Aetherfy-Vectors-JS/1.0.0`
+  from a 1.1.0 package, which is only ever discovered by someone trying to
+  reproduce a bug report from a User-Agent naming the wrong release. A unit
+  test pins the constant against `package.json`, pins all three consumers
+  against the constant, and fails if a second literal of the version
+  reappears anywhere under `src/`.
+
 ### Fixed
 
 - **`Collection.pointsCount` is now `Collection.points_count`.** It was

@@ -182,8 +182,10 @@ export type {
   ThreadHistoryOptions,
 } from './memory';
 
-// Version information
-export const VERSION = '1.0.0';
+// Version information. The literal lives in src/version.ts, which is also what
+// the HTTP client's User-Agent and the agent helper read — one literal, three
+// consumers, pinned against package.json by a unit test.
+export { SDK_VERSION as VERSION } from './version';
 
 // Default export for convenience
 import { AetherfyVectorsClient } from './client';

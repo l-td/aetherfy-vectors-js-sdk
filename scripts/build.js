@@ -118,11 +118,17 @@ function buildBundle() {
 function validateBuild() {
   logStep('Validating build output');
 
+  // Every file the exports map in package.json points at. A subpath export
+  // that resolves to nothing is invisible until someone imports it, and by
+  // then the package is published.
   const requiredFiles = [
     'dist/index.cjs.js',
     'dist/index.esm.js',
     'dist/browser.js',
     'dist/index.d.ts',
+    'dist/agent.cjs.js',
+    'dist/agent.esm.mjs',
+    'dist/agent/index.d.ts',
   ];
 
   const missingFiles = requiredFiles.filter(file => !fs.existsSync(file));

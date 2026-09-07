@@ -8,6 +8,8 @@ import axios, { AxiosInstance, AxiosError as AxiosErrorType } from 'axios';
 import http from 'http';
 import https from 'https';
 
+import { SDK_VERSION } from '../version';
+
 // Type guard for axios errors
 function isAxiosError(error: unknown): error is AxiosErrorType {
   return axios.isAxiosError(error);
@@ -48,7 +50,7 @@ export class HttpClient {
     this.timeout = options.timeout || 30000;
     this.defaultHeaders = {
       'Content-Type': 'application/json',
-      'User-Agent': 'Aetherfy-Vectors-JS/1.0.0',
+      'User-Agent': `Aetherfy-Vectors-JS/${SDK_VERSION}`,
       ...options.defaultHeaders,
     };
     this.enableConnectionPooling = options.enableConnectionPooling ?? true;

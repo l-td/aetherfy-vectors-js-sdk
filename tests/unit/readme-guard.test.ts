@@ -44,7 +44,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as ts from 'typescript';
 
+import * as agentSdk from '../../src/agent';
 import * as sdk from '../../src/index';
+
+/**
+ * The package's entry points, keyed by the specifier a README sample writes.
+ * Every one of them must be here: an import from an entry this map does not
+ * know is silently unchecked, which is how a subpath export ships with a
+ * sample nothing ever read.
+ */
+const ENTRY_MODULES: Record<string, { module: unknown; source: string }> = {
+  'aetherfy-vectors': { module: sdk, source: 'src/index.ts' },
+  'aetherfy-vectors/agent': { module: agentSdk, source: 'src/agent/index.ts' },
+};
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const README_PATH = path.join(REPO_ROOT, 'README.md');
@@ -279,21 +291,25 @@ export function checkSample(
     // ---- imports ----
     if (ts.isImportDeclaration(node)) {
       const spec = (node.moduleSpecifier as ts.StringLiteral).text;
-      if (spec === 'aetherfy-vectors') {
+      // The package has two entry points and the README imports from both.
+      // Checking only the root would leave every `aetherfy-vectors/agent`
+      // import unread — which is the whole of the agent helper's surface.
+      const entry = ENTRY_MODULES[spec];
+      if (entry) {
         const clause = node.importClause;
         const named = clause?.namedBindings;
         if (named && ts.isNamedImports(named)) {
           for (const el of named.elements) {
             const name = el.name.text;
             const isTypeOnly = clause!.isTypeOnly || el.isTypeOnly;
-            const existsAtRuntime = name in (sdk as any);
+            const existsAtRuntime = name in (entry.module as any);
             const existsAsType = typeNames.has(name);
             if (
               isTypeOnly ? !existsAsType : !existsAtRuntime && !existsAsType
             ) {
               problems.push(
-                `\`import { ${name} } from 'aetherfy-vectors'\` — not exported ` +
-                  `by src/index.ts${isTypeOnly ? ' as a type' : ''}`
+                `\`import { ${name} } from '${spec}'\` — not exported ` +
+                  `by ${entry.source}${isTypeOnly ? ' as a type' : ''}`
               );
             }
           }
@@ -448,6 +464,14 @@ describe('README code samples', () => {
         'has no method',
       ],
       [`import { NoSuchExport } from 'aetherfy-vectors';`, 'not exported'],
+      // The subpath is a second entry point, checked against a second module.
+      // (`typeNames` is package-wide, so this only catches a name that is
+      // neither a runtime export nor a declared type anywhere — which is what
+      // an invented helper like `result` is.)
+      [
+        `import { result } from 'aetherfy-vectors/agent';`,
+        'not exported by src/agent/index.ts',
+      ],
       [
         `import { AetherfyVectorsClient } from 'aetherfy-vectors';
          const client = new AetherfyVectorsClient({ apiKey: 'k' });

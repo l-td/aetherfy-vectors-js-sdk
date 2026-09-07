@@ -467,6 +467,84 @@ await client.createCollection('my-global-collection', {
 
 > **Tip:** Workspaces are created explicitly in the Aetherfy control plane before use (`afy workspaces create invoice-pipeline`). Agents deployed to a workspace automatically receive their workspace name via the `AETHERFY_WORKSPACE` environment variable. Pass `workspace: 'auto'` to opt into auto-detection.
 
+## 🤖 Running as an Agent
+
+Code deployed to Aetherfy as an agent gets four helpers from the same package,
+on the `aetherfy-vectors/agent` subpath. Nothing to add to your
+`package.json`: the standard runtime image preinstalls `aetherfy-vectors`, and
+a version you pin yourself wins over it. A custom container installs it like
+any other package.
+
+Each of these is a thin wrapper over a platform contract the docs already
+publish; the helper exists so the contract stops being copied into every task.
+
+```typescript
+import { payload, machine, fanOut, spawn } from 'aetherfy-vectors/agent';
+
+// This run's input. A scheduled fire sends none, so {} is the normal case.
+const data = await payload();
+
+// The machine this run is on: numbers, not the strings the env carries.
+const shape = machine();
+
+// An in-machine pool. Results come back in INPUT order and no failure is
+// swallowed: the lowest-indexed rejection is re-thrown once every worker has
+// settled. Width defaults to vcpus x 8, which suits I/O-bound work.
+const answers = await fanOut(summarise, (data.items as string[]) ?? []);
+
+// Narrower, when each item is heavy.
+const digests = await fanOut(hashOne, files, { width: shape.vcpus });
+
+// Run a different task agent, on its own machine, with its own lifecycle.
+const run = await spawn('nightly-rollup', { date: '2026-09-07' });
+console.log(run.spawn_id, run.region, run.status);
+```
+
+`fanOut` prints one line to the run's logs before it starts, so how wide a run
+went is visible after the fact:
+
+```text
+aetherfy: fanning out 32 wide on 4 vCPU / 8192 MB (120 tasks)
+```
+
+`fanOut` is promise concurrency, which is all I/O-bound work needs — model
+calls and HTTP requests fan out on the event loop and never touch a thread.
+CPU-bound work belongs in `worker_threads`, sized from `shape.vcpus`.
+
+Spawning has three outcomes worth telling apart. The payload cap and the
+concurrent-run cap get their own types; everything else carries the platform's
+stable error code, which is the thing to branch on:
+
+```typescript
+import { spawn, PayloadTooLarge, SpawnError, TooManyRunsInFlight } from 'aetherfy-vectors/agent';
+
+try {
+  await spawn('nightly-rollup', { date: '2026-09-07' });
+} catch (error) {
+  if (error instanceof PayloadTooLarge) {
+    // The payload is for parameters and references, not data. Write the data
+    // to a collection and pass its id.
+    console.error(error.payloadBytes, 'exceeds', error.maxBytes);
+  } else if (error instanceof TooManyRunsInFlight) {
+    // The one refusal here worth retrying: runs are finishing all the time.
+    // The cap is the ACCOUNT's and is set by your plan; `limit` names which
+    // plan limit was hit, and `maxInFlightRuns` is null on an uncapped plan.
+    console.error('waiting on', error.inFlightCount, 'of', error.maxInFlightRuns);
+  } else if (error instanceof SpawnError) {
+    console.error(error.code);
+  } else {
+    throw error;
+  }
+}
+```
+
+There is deliberately no `result()` and no `wait()`. A run reports its outcome
+through its exit code, and a helper that pretended otherwise would be inventing
+protocol the platform does not have.
+
+Full contract, including the environment variables behind all four calls:
+[docs.aetherfy.com/agents/task-contract](https://docs.aetherfy.com/agents/task-contract).
+
 ## 🧩 Payload Schemas
 
 Collections can carry an optional payload schema that the SDK validates against **before** upsert — catching malformed payloads client-side without a round trip. Schemas are cached and automatically revalidated when they change server-side (via ETag).
