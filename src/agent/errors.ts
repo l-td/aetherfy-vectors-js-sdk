@@ -7,12 +7,29 @@
  * including the prototype re-set after `super()` that ES5-target Error
  * subclassing requires — without it `instanceof` breaks for every subclass.
  *
- * Only three spawn outcomes are worth telling apart, and they are the three
- * the control plane distinguishes: the payload was too big (413), too many
- * runs are already in flight (429), and everything else.
+ * Only three spawn outcomes are worth telling apart, and they are the three the
+ * control plane distinguishes: the payload was too big
+ * (413 RUN_PAYLOAD_TOO_LARGE), too many runs are already in flight
+ * (429 AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED), and everything else.
+ * "Everything else" is any other status AND any other code on those two
+ * statuses: the pairing is what selects a type, so a 413 the platform grows for
+ * some new reason arrives as a plain SpawnError reporting its own code rather
+ * than wearing this one's.
  */
 
 import { AetherfyVectorsError } from '../exceptions';
+
+/**
+ * The two platform error codes this module gives a type of its own.
+ *
+ * ONE definition each, because they are used TWICE: to decide which type a
+ * refusal becomes, and to stamp that type's `code`. Two literals would let the
+ * dispatch and the stamp disagree, which is the one way an error could report
+ * a code the platform never sent.
+ */
+export const RUN_PAYLOAD_TOO_LARGE = 'RUN_PAYLOAD_TOO_LARGE';
+export const AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED =
+  'AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED';
 
 export class AgentError extends AetherfyVectorsError {
   constructor(message: string) {
@@ -102,7 +119,7 @@ export class PayloadTooLarge extends SpawnError {
   ) {
     super(message, {
       status: 413,
-      code: 'RUN_PAYLOAD_TOO_LARGE',
+      code: RUN_PAYLOAD_TOO_LARGE,
       detail: options.detail,
     });
     this.name = 'PayloadTooLarge';
@@ -145,7 +162,7 @@ export class TooManyRunsInFlight extends SpawnError {
   ) {
     super(message, {
       status: 429,
-      code: 'AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED',
+      code: AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED,
       detail: options.detail,
     });
     this.name = 'TooManyRunsInFlight';

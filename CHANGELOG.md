@@ -22,10 +22,16 @@
     `vcpus * 8` for the I/O-bound work most tasks do; CPU-bound work belongs
     in `worker_threads`, sized from `machine().vcpus`. It prints one line to
     stdout before running, so a run's width is visible in its logs afterwards.
-  - `spawn(child, payload?)` runs a different task agent. `413` becomes
-    `PayloadTooLarge` (carrying `payloadBytes` / `maxBytes`), `429` becomes
-    `TooManyRunsInFlight` — the one refusal worth retrying — and every other
-    status becomes `SpawnError` with the platform's stable `code`.
+  - `spawn(child, payload?)` runs a different task agent.
+    `413 RUN_PAYLOAD_TOO_LARGE` becomes `PayloadTooLarge` (carrying
+    `payloadBytes` / `maxBytes`) and
+    `429 AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED` becomes
+    `TooManyRunsInFlight`, the one refusal worth retrying. THE STATUS AND
+    THE CODE TOGETHER select the type: a 413 or 429 carrying any other
+    code, or none, becomes a plain `SpawnError` reporting the code and
+    message that actually arrived, rather than wearing a code the platform
+    never sent. Every other status becomes `SpawnError` with the
+    platform's stable `code` too.
     `TooManyRunsInFlight` carries `inFlightCount`, `limit` (which plan limit
     was hit, `"max_in_flight_runs"` today) and `maxInFlightRuns` (its value,
     `null` on a plan that declares no cap). The cap is the ACCOUNT's, set by

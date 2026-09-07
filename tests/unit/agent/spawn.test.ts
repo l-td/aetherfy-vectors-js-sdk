@@ -199,6 +199,59 @@ describe('spawn()', () => {
     expect(error.limit).toBe('max_agents');
   });
 
+  it('treats a 413 carrying another code as a plain SpawnError', async () => {
+    // THE PAIRING SELECTS THE TYPE. A status is a category the platform reuses;
+    // the code is what it promises not to rename. A 413 grown for some new
+    // reason must arrive reporting ITS code, not wearing RUN_PAYLOAD_TOO_LARGE's.
+    fetchMock.mockResolvedValue(
+      reply(413, {
+        detail: {
+          code: 'AGENT_IMAGE_TOO_LARGE',
+          message: 'The built image is larger than the runtime allows.',
+        },
+      })
+    );
+
+    const error = await spawn('nightly-rollup').catch(e => e);
+    expect(error).toBeInstanceOf(SpawnError);
+    expect(error).not.toBeInstanceOf(PayloadTooLarge);
+    expect(error.code).toBe('AGENT_IMAGE_TOO_LARGE');
+    expect(error.status).toBe(413);
+    expect(error.message).toContain('larger than the runtime allows');
+  });
+
+  it('treats a 429 carrying another code as a plain SpawnError', async () => {
+    fetchMock.mockResolvedValue(
+      reply(429, {
+        detail: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests.' },
+      })
+    );
+
+    const error = await spawn('nightly-rollup').catch(e => e);
+    expect(error).toBeInstanceOf(SpawnError);
+    expect(error).not.toBeInstanceOf(TooManyRunsInFlight);
+    expect(error.code).toBe('RATE_LIMIT_EXCEEDED');
+    expect(error.status).toBe(429);
+  });
+
+  it.each([413, 429])(
+    'treats a codeless %i body as a plain SpawnError',
+    async status => {
+      // No code is not the expected code. Reporting one of the typed errors
+      // here would attach a code the platform never sent.
+      fetchMock.mockResolvedValue(
+        reply(status, { detail: { message: 'no code here' } })
+      );
+
+      const error = await spawn('nightly-rollup').catch(e => e);
+      expect(error).toBeInstanceOf(SpawnError);
+      expect(error).not.toBeInstanceOf(PayloadTooLarge);
+      expect(error).not.toBeInstanceOf(TooManyRunsInFlight);
+      expect(error.code).toBeUndefined();
+      expect(error.status).toBe(status);
+    }
+  );
+
   it('maps a 429 carrying no extras', async () => {
     fetchMock.mockResolvedValue(
       reply(429, {

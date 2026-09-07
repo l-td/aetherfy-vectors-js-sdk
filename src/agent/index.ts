@@ -33,11 +33,13 @@
 import { readFile } from 'node:fs/promises';
 
 import {
+  AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED,
   AgentError,
   AgentTransportError,
   NotRunningOnAgent,
   PayloadTooLarge,
   PayloadUnavailable,
+  RUN_PAYLOAD_TOO_LARGE,
   SpawnError,
   TooManyRunsInFlight,
 } from './errors';
@@ -395,14 +397,21 @@ export async function spawn(
       : `Spawning '${child}' failed with status ${status}.`;
   const code = typeof detail.code === 'string' ? detail.code : undefined;
 
-  if (status === 413) {
+  // THE CODE DECIDES, NOT THE STATUS ALONE. A status is a category the platform
+  // reuses; the code is the thing it promises not to rename. Mapping on 413
+  // alone would stamp RUN_PAYLOAD_TOO_LARGE onto the next unrelated 413 the
+  // control plane grows, and the caller would branch on a lie it could not see
+  // through — the typed error carries the wrong code AND the right message. An
+  // unrecognised pairing falls through to SpawnError, which reports exactly
+  // what arrived.
+  if (status === 413 && code === RUN_PAYLOAD_TOO_LARGE) {
     throw new PayloadTooLarge(message, {
       payloadBytes: numberOf(detail, 'payload_bytes'),
       maxBytes: numberOf(detail, 'max_bytes'),
       detail,
     });
   }
-  if (status === 429) {
+  if (status === 429 && code === AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED) {
     throw new TooManyRunsInFlight(message, {
       inFlightCount: numberOf(detail, 'in_flight_count'),
       limit: stringOrNull(detail, 'limit'),
