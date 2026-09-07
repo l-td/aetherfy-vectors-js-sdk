@@ -123,7 +123,7 @@ function validateBuild() {
   // then the package is published.
   const requiredFiles = [
     'dist/index.cjs.js',
-    'dist/index.esm.js',
+    'dist/index.mjs',
     'dist/browser.js',
     'dist/index.d.ts',
     'dist/agent.cjs.js',

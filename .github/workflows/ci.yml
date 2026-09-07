@@ -79,9 +79,12 @@ jobs:
       - name: Verify build artifacts
         run: |
           test -f dist/index.cjs.js
-          test -f dist/index.esm.js
+          test -f dist/index.mjs
           test -f dist/browser.js
           test -f dist/index.d.ts
+          test -f dist/agent.cjs.js
+          test -f dist/agent.esm.mjs
+          test -f dist/agent/index.d.ts
 
   security:
     runs-on: ubuntu-latest

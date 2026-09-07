@@ -53,14 +53,21 @@
 
 ### Changed
 
-- The `.` export condition list is unchanged; the new `./agent` entry resolves
-  to `dist/agent.esm.mjs` (import), `dist/agent.cjs.js` (require) and
-  `dist/agent/index.d.ts` (types). The ESM bundle is `.mjs` rather than
-  `.esm.js` on purpose: this package has no `"type": "module"`, so Node has to
-  reparse a `.js` ESM file and prints a `MODULE_TYPELESS_PACKAGE_JSON` warning
-  into the importing process's stdout — which on an Aetherfy machine IS the
-  run's logs. `dist/index.esm.js` has the same shape and is left alone, being
-  a published entry point.
+- **Both ESM bundles are now `.mjs`.** The root entry moves from
+  `dist/index.esm.js` to `dist/index.mjs`, and the new `./agent` entry
+  resolves to `dist/agent.esm.mjs` (import), `dist/agent.cjs.js` (require)
+  and `dist/agent/index.d.ts` (types). This package has no
+  `"type": "module"`, so Node has to reparse a `.js` ESM file and prints a
+  `MODULE_TYPELESS_PACKAGE_JSON` warning. Measured on node 22.20.0 with the
+  same bytes in two places: the warning prints from a repo checkout and is
+  suppressed under `node_modules`, so a normal `npm install` never showed
+  it — the reparse, which Node calls out as a performance overhead, happens
+  either way. The gain is the correct extension, one less reparse per
+  import, and a clean console for anyone consuming the package outside
+  `node_modules` (a linked workspace, a vendored copy, a bundler's dev
+  server). The `main`, `module`, `browser` and `types` fields and the export
+  conditions are otherwise unchanged, and nothing resolves these paths by
+  hand: the exports map is the only way in.
 - **There is now ONE version literal**, `SDK_VERSION` in `src/version.ts`.
   `VERSION` re-exports it, the HTTP client's `User-Agent` interpolates it,
   and the agent helper's User-Agent reads it. There were three literals, and

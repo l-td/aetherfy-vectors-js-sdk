@@ -68,7 +68,7 @@ function validateBuild() {
 
   const requiredFiles = [
     'dist/index.cjs.js',
-    'dist/index.esm.js',
+    'dist/index.mjs',
     'dist/browser.js',
     'dist/index.d.ts',
   ];

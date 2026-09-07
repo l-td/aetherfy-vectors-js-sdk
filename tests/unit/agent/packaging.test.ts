@@ -91,6 +91,20 @@ describe('packaging', () => {
     });
   });
 
+  it('serves both ESM bundles from a .mjs path', () => {
+    // Not cosmetic. A .js ESM file in a package with no "type": "module" has
+    // no declared module type, so Node parses it as CommonJS, fails, and
+    // reparses it as ESM — an overhead paid on every import — and warns with
+    // MODULE_TYPELESS_PACKAGE_JSON outside node_modules.
+    expect(pkg.exports['.'].import).toBe('./dist/index.mjs');
+    expect(pkg.exports['./agent'].import).toBe('./dist/agent.esm.mjs');
+    // `module` is the pre-exports-map field bundlers still read; it must not be
+    // left pointing at the old filename.
+    expect((pkg as unknown as { module: string }).module).toBe(
+      './dist/index.mjs'
+    );
+  });
+
   it('ships dist, so the subpath resolves in the published tarball', () => {
     // `files` decides what npm packs. dist/**/* covers dist/agent.*.js and
     // dist/agent/index.d.ts alike.

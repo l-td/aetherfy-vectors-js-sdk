@@ -3,12 +3,12 @@
   "version": "1.1.0",
   "description": "JavaScript/TypeScript SDK for Aetherfy Vectors - Global vector database with automatic replication and low latency worldwide",
   "main": "./dist/index.cjs.js",
-  "module": "./dist/index.esm.js",
+  "module": "./dist/index.mjs",
   "browser": "./dist/browser.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.esm.js",
+      "import": "./dist/index.mjs",
       "require": "./dist/index.cjs.js",
       "browser": "./dist/browser.js",
       "types": "./dist/index.d.ts"

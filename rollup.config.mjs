@@ -18,7 +18,10 @@ export default [
         sourcemap: true,
       },
       {
-        file: 'dist/index.esm.js',
+        // .mjs, NOT .esm.js — see the agent entry below for the reasoning.
+        // Short version: this package has no "type": "module", so Node has
+        // to sniff a .js file's module type and reparse it as ESM.
+        file: 'dist/index.mjs',
         format: 'es',
         sourcemap: true,
       },
@@ -54,13 +57,19 @@ export default [
         sourcemap: true,
       },
       {
-        // .mjs, NOT .esm.js: this package has no "type": "module", so Node
-        // must reparse a .js file as ESM and prints a MODULE_TYPELESS_PACKAGE_JSON
-        // warning into the importing process's stdout. On an Aetherfy machine
-        // that stdout IS the run's logs, so the warning would land in every
-        // customer's log output. (dist/index.esm.js has the same shape and the
-        // same warning; renaming it would change a published entry point, so it
-        // is left alone.)
+        // .mjs, NOT .esm.js. This package has no "type": "module", so a .js
+        // file has no declared module type: Node tries to parse it as
+        // CommonJS, fails, and reparses it as ESM — which it calls out as a
+        // performance overhead — and prints MODULE_TYPELESS_PACKAGE_JSON.
+        //
+        // MEASURED, node 22.20.0, the same bytes in two places: the warning
+        // prints from a repo checkout and is SUPPRESSED under node_modules,
+        // which is where a normal `npm install` puts us. So this is not the
+        // customer-facing log noise it first looked like; it is the correct
+        // extension, one less reparse on every import, and a clean console
+        // for anyone consuming the package outside node_modules — a linked
+        // workspace, a vendored copy, a bundler's dev server.
+        // dist/index.mjs above carries the same rename for the same reason.
         file: 'dist/agent.esm.mjs',
         format: 'es',
         sourcemap: true,
