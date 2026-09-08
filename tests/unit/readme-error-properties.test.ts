@@ -91,7 +91,11 @@ const README_PATH = path.join(REPO_ROOT, 'README.md');
  * from it REFUSES (rule 3), and the "knows every error class the README
  * imports" test reds even for classes no claim has been made about yet.
  */
-const ERROR_SOURCES = ['src/exceptions.ts', 'src/memory/errors.ts'];
+const ERROR_SOURCES = [
+  'src/exceptions.ts',
+  'src/memory/errors.ts',
+  'src/agent/errors.ts',
+];
 
 /**
  * The documentation surface this guard reads is README.md alone, because that
@@ -102,8 +106,21 @@ const ERROR_SOURCES = ['src/exceptions.ts', 'src/memory/errors.ts'];
  */
 const CLAIM_SOURCE = 'README.md';
 
-/** The module the README imports our names from; see readmeOwnedNames. */
+/**
+ * The package the README imports our names from; see readmeOwnedNames.
+ *
+ * SUBPATHS COUNT. `aetherfy-vectors/agent` is a second entry point on this
+ * same package, and an exact-match test on the specifier made every claim in
+ * the agent helper's error section invisible — the section shipped, the census
+ * below did not move, and this guard read as covering a surface it could not
+ * see. That is the exact failure it exists to prevent, so the match is now the
+ * package or anything under it.
+ */
 const OUR_MODULE = 'aetherfy-vectors';
+
+function isOurModule(specifier: string): boolean {
+  return specifier === OUR_MODULE || specifier.startsWith(`${OUR_MODULE}/`);
+}
 
 /**
  * Where the ancestor walk stops. The native Error constructor sets these with
@@ -147,11 +164,23 @@ const BASE_PROPERTY_ALLOWLIST: Record<string, string> = {};
  */
 const EXPECTED_CLAIMS: string[] = [
   'CollectionNotFoundError.collectionName',
+  // The agent helper's two error sections. They were in the README from the
+  // release that added `aetherfy-vectors/agent` and were INVISIBLE here until
+  // the specifier match learned about subpaths — the eight lines below are what
+  // this guard was silently not checking.
+  'PayloadTooLarge.maxBytes',
+  'PayloadTooLarge.payloadBytes',
   'QuotaExceededError.current',
   'QuotaExceededError.limit',
   'QuotaExceededError.quotaType',
   'RateLimitExceededError.retryAfter',
+  'ResultTooLarge.maxBytes',
+  'ResultTooLarge.resultBytes',
+  'RunReadError.code',
   'SchemaValidationError.errors',
+  'SpawnError.code',
+  'TooManyRunsInFlight.inFlightCount',
+  'TooManyRunsInFlight.maxInFlightRuns',
   'ValidationError.message',
 ];
 
@@ -393,7 +422,7 @@ export function readmeOwnedNames(markdown: string): Set<string> {
     ts.forEachChild(src, node => {
       if (!ts.isImportDeclaration(node)) return;
       const spec = node.moduleSpecifier;
-      if (!ts.isStringLiteral(spec) || spec.text !== OUR_MODULE) return;
+      if (!ts.isStringLiteral(spec) || !isOurModule(spec.text)) return;
       const named = node.importClause?.namedBindings;
       if (!named || !ts.isNamedImports(named)) return;
       for (const el of named.elements) owned.add(el.name.text);

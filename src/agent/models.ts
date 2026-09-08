@@ -45,3 +45,43 @@ export interface Spawn {
   workspace: string | null;
   estimated_start?: string;
 }
+
+/**
+ * One run, read back from the control plane.
+ *
+ * THE RUN ROW IS THE RECORD. A run's answer is not delivered anywhere — it is
+ * stored on the run and read from it, so a parent hears from a child in another
+ * region with no side channel and no shared storage between them.
+ *
+ * Only the fields a caller of {@link result} or {@link wait} reads are named
+ * here. The response carries a deployment object with a good deal more on it
+ * (regions, versions, rollback and cancellation flags), all of which is
+ * deploy-shaped rather than run-shaped; it is kept verbatim in `raw` rather
+ * than re-declared field by field in a place that would rot the first time the
+ * platform adds one.
+ *
+ * `state` IS THE ONE TO READ AFTER A WAIT. A wait that times out returns the
+ * run exactly as it stands, which is not an error — `active` on a run means it
+ * is executing right now, and the terminal states are `completed` and `failed`.
+ * There is deliberately no `is_finished` here: the set of in-flight states
+ * belongs to the platform, and a second copy of it in this package would be a
+ * copy that could disagree.
+ *
+ * `result` is null both for a run that returned nothing and for one whose
+ * result was refused — `result_error` is what tells those apart, and
+ * `has_result` is the platform's own answer to "did this run answer at all". A
+ * refused result is not a result, so `has_result` is false whenever
+ * `result_error` is set.
+ */
+export interface Run {
+  id: string;
+  agent_id: string;
+  state: string;
+  result: unknown;
+  result_error: string | null;
+  has_result: boolean;
+  is_ephemeral: boolean;
+  error_message: string | null;
+  /** Everything the control plane sent, unmodified. */
+  raw: Record<string, unknown>;
+}

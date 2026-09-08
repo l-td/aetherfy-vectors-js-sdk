@@ -467,9 +467,14 @@ describe('README code samples', () => {
       // The subpath is a second entry point, checked against a second module.
       // (`typeNames` is package-wide, so this only catches a name that is
       // neither a runtime export nor a declared type anywhere — which is what
-      // an invented helper like `result` is.)
+      // an invented helper like `retry` is.)
+      //
+      // THIS NAME HAS TO STAY UNREAL. It was `result` until the run-reading
+      // half of the helper shipped and made that name true, at which point this
+      // control stopped controlling anything and said so by failing. Pick a
+      // replacement the helper has no reason to grow.
       [
-        `import { result } from 'aetherfy-vectors/agent';`,
+        `import { retry } from 'aetherfy-vectors/agent';`,
         'not exported by src/agent/index.ts',
       ],
       [

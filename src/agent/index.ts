@@ -1,5 +1,5 @@
 /**
- * Aetherfy Agent — the four things code running on an Aetherfy machine does.
+ * Aetherfy Agent — what code running on an Aetherfy machine does.
  *
  * This is a THIN wrapper over contracts the platform already publishes. It
  * invents no protocol: every call here has a hand-rolled equivalent in
@@ -7,44 +7,57 @@
  * that equivalent stops being copied into every task.
  *
  * ```javascript
- * const { payload, machine, fanOut, spawn } = require('aetherfy-vectors/agent');
+ * const {
+ *   payload, machine, fanOut, spawn, writeResult, result, wait,
+ * } = require('aetherfy-vectors/agent');
  *
  * const data = await payload();              // this run's input, {} when none
  * const shape = machine();                   // vcpus / memory_mb / region
  * const results = await fanOut(work, data.items ?? []);
- * await spawn('nightly-rollup', { date: '2026-09-07' });
+ * await writeResult({ rows: results.length }); // this run's answer
+ *
+ * const run = await spawn('nightly-rollup', { date: '2026-09-08' });
+ * const finished = await wait(run.spawn_id); // or result(...) for a plain read
+ * console.log(finished.result);
  * ```
+ *
+ * TWO HALVES, and they are the same contract read from opposite ends. A task
+ * reads its payload and writes its result; whoever started it spawns and then
+ * reads that result back. `payload`/`writeResult` are files on the machine and
+ * touch no network at all; `spawn`/`result`/`wait` are the control plane, and
+ * are the only calls here that do.
  *
  * It ships inside the `aetherfy-vectors` package as the `aetherfy-vectors/agent`
  * subpath, and the standard runtime image preinstalls that package — so on a
- * plain agent these four names import with nothing in your package.json. A
- * custom container installs it itself.
- *
- * Nothing here reaches the network except `spawn` and the fallback branch of
- * `payload`.
- *
- * There is deliberately no `result()` and no `wait()`. A run reports its
- * outcome through its exit code, and the platform's result path is not built
- * yet; adding a method that pretended otherwise would be inventing protocol.
+ * plain agent these names import with nothing in your package.json. A custom
+ * container installs it itself.
  *
  * @public
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 
 import {
   AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED,
   AgentError,
   AgentTransportError,
+  DEPLOYMENT_ACCESS_DENIED,
+  DEPLOYMENT_NOT_FOUND,
+  DEPLOYMENT_WAIT_TIMEOUT_INVALID,
   NotRunningOnAgent,
   PayloadTooLarge,
   PayloadUnavailable,
   RUN_PAYLOAD_TOO_LARGE,
+  ResultTooLarge,
+  RunAccessDenied,
+  RunNotFound,
+  RunReadError,
   SpawnError,
   TooManyRunsInFlight,
+  WaitTimeoutInvalid,
 } from './errors';
 import { requestJson, USER_AGENT_PREFIX } from './http';
-import { MachineShape, Spawn } from './models';
+import { MachineShape, Run, Spawn } from './models';
 import { SDK_VERSION } from '../version';
 
 export {
@@ -53,10 +66,15 @@ export {
   NotRunningOnAgent,
   PayloadTooLarge,
   PayloadUnavailable,
+  ResultTooLarge,
+  RunAccessDenied,
+  RunNotFound,
+  RunReadError,
   SpawnError,
   TooManyRunsInFlight,
+  WaitTimeoutInvalid,
 };
-export type { MachineShape, Spawn };
+export type { MachineShape, Run, Spawn };
 
 /**
  * The release this helper announces in its User-Agent. NOT a literal of its
@@ -88,6 +106,27 @@ function fanOutLine(
  * the right default for them.
  */
 const IO_BOUND_WIDTH_PER_VCPU = 8;
+
+/**
+ * How far past the server's own hold this helper lets a {@link wait} request
+ * run before it gives up on the socket. THE CLIENT'S BOUND MUST EXCEED THE
+ * SERVER'S, or a wait that the control plane is about to answer at its deadline
+ * is cut off here first and reported as a transport failure — the one outcome a
+ * caller cannot tell from a real network fault. The margin covers the round trip
+ * and the serialization on either side.
+ */
+const WAIT_TRANSPORT_MARGIN_SECONDS = 15;
+
+/**
+ * The bound the control plane enforces on `?timeout_seconds`. Checked here too,
+ * so a caller learns about a bad argument without paying a round trip to be
+ * told. Waiting longer than the maximum is another call, not a bigger number:
+ * the request is held open and anything longer is cut by the network in front
+ * of Aetherfy.
+ */
+export const WAIT_TIMEOUT_MIN_SECONDS = 1;
+export const WAIT_TIMEOUT_MAX_SECONDS = 60;
+export const WAIT_TIMEOUT_DEFAULT_SECONDS = 30;
 
 function userAgent(): string {
   return `${USER_AGENT_PREFIX}${AGENT_HELPER_VERSION}`;
@@ -420,6 +459,249 @@ export async function spawn(
     });
   }
   throw new SpawnError(message, { status, code, detail });
+}
+
+/**
+ * Return `value` to whoever started this run.
+ *
+ * The mirror of {@link payload}: Aetherfy puts the path of a file in
+ * `AETHERFY_SPAWN_RESULT_PATH` before the entrypoint starts, and stores what
+ * was written there once the process ends. Nothing crosses the network, and
+ * there is no call to make — a parent reads it back from the run itself with
+ * {@link result} or {@link wait}.
+ *
+ * RETURNING NOTHING IS THE NORMAL CASE, so most tasks never call this. A run
+ * that writes no file is recorded as returning nothing, which is not the same
+ * as failing to return something. Passing `null` or `undefined` records the
+ * same thing: the platform reads a literal `null` as "returned nothing", and an
+ * empty column already says that.
+ *
+ * The result is for answers and references, not data — it shares the payload's
+ * inline cap, one number bounding both directions. Anything larger belongs in a
+ * collection in your Aetherfy vector database, with its id in the result.
+ *
+ * THE LAST CALL WINS. The file is overwritten, so calling this twice returns
+ * the second value; there is no accumulation and no merge.
+ *
+ * Non-finite numbers become `null`, which is `JSON.stringify`'s own rule and
+ * the reason nothing here has to police them: what lands on disk is always
+ * valid JSON. The Python helper has to refuse them explicitly, because its
+ * `json` writes bare `NaN` tokens instead.
+ *
+ * @throws {ResultTooLarge} The encoded result crosses this machine's cap. The
+ *   platform would have dropped it and recorded `result_error` instead — this
+ *   refuses at the write so the caller can shrink it.
+ * @throws {NotRunningOnAgent} `AETHERFY_SPAWN_RESULT_PATH` is not set, so there
+ *   is nowhere to put an answer.
+ * @throws {TypeError} `value` cannot be serialized — a cycle, or a BigInt.
+ */
+export async function writeResult(value: unknown): Promise<void> {
+  // DELIBERATELY NOT THE DOCS' HAND-ROLLED VERSION, which no-ops when the
+  // variable is missing. That is the right shape inline in a customer's own
+  // script, where the author can see the fallback; it is the wrong shape for a
+  // library, which would be silently discarding the one value it was called to
+  // deliver. The variable is absent only on a machine that has no result path
+  // to offer — off Aetherfy entirely, or a task machine whose supervisor could
+  // not prepare the file — and in both cases a run that thinks it answered did
+  // not.
+  const path = requireEnv(
+    'AETHERFY_SPAWN_RESULT_PATH',
+    'the file this run returns its answer in'
+  );
+
+  // `undefined` at the top level makes JSON.stringify return undefined rather
+  // than a string. Recorded as `null`, which is what the platform reads as
+  // "returned nothing" — the same thing the Python helper writes for None.
+  const json = JSON.stringify(value) ?? 'null';
+  // ONE encode, measured and written. Encoding twice is how a size check ends
+  // up describing bytes other than the ones that land on disk, and the
+  // supervisor compares BYTE lengths (`len(raw) > cap`) over the file it reads
+  // back in binary.
+  const encoded = new TextEncoder().encode(json);
+
+  const maxBytes = inlineMaxBytes();
+  if (maxBytes !== null && encoded.length > maxBytes) {
+    throw new ResultTooLarge(
+      `This run's result is ${encoded.length} bytes and the inline cap is ` +
+        `${maxBytes}. The result is for answers and references, not data: ` +
+        'write the data to a collection and return its id.',
+      { resultBytes: encoded.length, maxBytes }
+    );
+  }
+
+  await writeFile(path, encoded);
+}
+
+/**
+ * Read one run back, with whatever it returned.
+ *
+ * Answers immediately with the run as it stands. A run that is still going has
+ * `state === 'active'` and no result yet; {@link wait} is the same read with
+ * the waiting done server-side, and is what to use when the answer is the
+ * point.
+ *
+ * `runId` is a run's id — `Spawn.spawn_id` from a {@link spawn}, or the id of
+ * this run itself in `AETHERFY_SPAWN_ID`.
+ *
+ * @throws {RunNotFound} 404, no run has that id.
+ * @throws {RunAccessDenied} 403, the run belongs to another account.
+ * @throws {RunReadError} Any other refusal — read `code`, not the prose.
+ * @throws {AgentTransportError} The request never reached the control plane.
+ */
+export async function result(runId: string): Promise<Run> {
+  return readRun(runUrl(runId));
+}
+
+/**
+ * Hold one request open until the run finishes, then return it.
+ *
+ * The read side of the result path, and the reason a parent does not poll:
+ * without it every caller writes the same loop with its own interval, and all
+ * of them pay for the privilege of not knowing yet.
+ *
+ * A TIMEOUT IS NOT AN ERROR. If the run has not finished in `timeoutSeconds`
+ * this returns it exactly as it stands — read `Run.state`, which is `active`
+ * while a run is executing and `completed` or `failed` when it is over, and
+ * call again. Waiting longer than the maximum is a second call, not a bigger
+ * number: the request is held open, and anything longer is cut by the network
+ * in front of Aetherfy.
+ *
+ * ONE CONNECTION FAILURE IS NOT RETRIED HERE, unlike every other call in this
+ * module. A retry would silently hold a second full timeout and hand back a run
+ * up to twice as late as the number the caller passed; the bound this
+ * function's argument promises is worth more than the blip it would paper over.
+ * Call again.
+ *
+ * @throws {AgentError} `timeoutSeconds` is outside the server's bound. The
+ *   argument is wrong, and no request is sent.
+ * @throws {WaitTimeoutInvalid} 422, the server rejected the timeout anyway —
+ *   its bound moved and this helper's copy is stale.
+ * @throws {RunNotFound} 404, no run has that id.
+ * @throws {RunAccessDenied} 403, the run belongs to another account.
+ * @throws {RunReadError} Any other refusal.
+ * @throws {AgentTransportError} The request never reached the control plane.
+ */
+export async function wait(
+  runId: string,
+  timeoutSeconds: number = WAIT_TIMEOUT_DEFAULT_SECONDS
+): Promise<Run> {
+  const seconds = Math.trunc(timeoutSeconds);
+  if (
+    !Number.isFinite(seconds) ||
+    seconds < WAIT_TIMEOUT_MIN_SECONDS ||
+    seconds > WAIT_TIMEOUT_MAX_SECONDS
+  ) {
+    throw new AgentError(
+      `timeoutSeconds must be between ${WAIT_TIMEOUT_MIN_SECONDS} and ` +
+        `${WAIT_TIMEOUT_MAX_SECONDS}, not ${timeoutSeconds}. Waiting longer ` +
+        'is another call to wait(), not a bigger number.'
+    );
+  }
+  return readRun(`${runUrl(runId)}/wait?timeout_seconds=${seconds}`, {
+    timeoutMs: (seconds + WAIT_TRANSPORT_MARGIN_SECONDS) * 1000,
+    retryConnectionErrors: false,
+  });
+}
+
+/**
+ * This machine's inline cap, or null when it cannot be read.
+ *
+ * NOT A REFUSAL WHEN ABSENT. The cap is the platform's to enforce and it does —
+ * an oversized result is dropped and recorded as `too_large` — so the check
+ * here is a courtesy that turns a silent drop into something the caller can act
+ * on. Declining to write because the courtesy is unavailable would lose a
+ * result the platform would have accepted, which is strictly worse than not
+ * checking.
+ */
+function inlineMaxBytes(): number | null {
+  const raw = process.env.AETHERFY_RUN_INLINE_MAX_BYTES;
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+/**
+ * The control plane's URL for one run.
+ *
+ * A run is a deployment row — the ephemeral kind — so it is read from
+ * `/deployments/{id}`, the same route and the same object a deploy is read
+ * from. That is the platform's shape, not a convenience: one row, one reader.
+ */
+function runUrl(runId: string): string {
+  const apiUrl = requireEnv('AETHERFY_API_URL', "the control plane's base URL");
+  if (!runId) {
+    throw new AgentError("runId must be a run's id, not an empty string.");
+  }
+  return `${apiUrl.replace(/\/+$/, '')}/deployments/${runId}`;
+}
+
+/**
+ * One GET, one Run — shared by {@link result} and {@link wait}.
+ *
+ * ONE implementation because the two routes return the SAME object and refuse
+ * in the SAME words; the control plane loads both through one function for
+ * exactly that reason. Two readers here is how one of them ends up mapping a
+ * 403 the other maps as a 404.
+ */
+async function readRun(
+  url: string,
+  options: { timeoutMs?: number; retryConnectionErrors?: boolean } = {}
+): Promise<Run> {
+  const apiKey = requireEnv('AETHERFY_API_KEY', 'the key a run is read with');
+  const { status, body } = await requestJson('GET', url, {
+    apiKey,
+    userAgent: userAgent(),
+    timeoutMs: options.timeoutMs,
+    retryConnectionErrors: options.retryConnectionErrors,
+  });
+
+  if (status === 200) {
+    const record = asRecord(body);
+    if (!record) {
+      throw new RunReadError(
+        'Reading the run answered 200 with a body that is not an object, so ' +
+          'there is no run to return.',
+        { status }
+      );
+    }
+    return {
+      id: stringOf(record.id),
+      agent_id: stringOf(record.agent_id),
+      state: stringOf(record.state),
+      result: record.result ?? null,
+      result_error:
+        typeof record.result_error === 'string' ? record.result_error : null,
+      has_result: record.has_result === true,
+      is_ephemeral: record.is_ephemeral === true,
+      error_message:
+        typeof record.error_message === 'string' ? record.error_message : null,
+      raw: record,
+    };
+  }
+
+  const detail = detailOf(body);
+  const message =
+    typeof detail.message === 'string'
+      ? detail.message
+      : `Reading the run failed with status ${status}.`;
+  const code = typeof detail.code === 'string' ? detail.code : undefined;
+
+  // THE CODE DECIDES, NOT THE STATUS ALONE — the same rule spawn() follows, for
+  // the same reason. 404 and 403 are categories the control plane reuses across
+  // every route; DEPLOYMENT_NOT_FOUND and DEPLOYMENT_ACCESS_DENIED are what it
+  // publishes and promises not to rename. An unrecognised pairing falls through
+  // to RunReadError, which reports exactly what arrived.
+  if (status === 404 && code === DEPLOYMENT_NOT_FOUND) {
+    throw new RunNotFound(message, detail);
+  }
+  if (status === 403 && code === DEPLOYMENT_ACCESS_DENIED) {
+    throw new RunAccessDenied(message, detail);
+  }
+  if (status === 422 && code === DEPLOYMENT_WAIT_TIMEOUT_INVALID) {
+    throw new WaitTimeoutInvalid(message, detail);
+  }
+  throw new RunReadError(message, { status, code, detail });
 }
 
 /**

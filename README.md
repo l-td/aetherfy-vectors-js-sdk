@@ -469,8 +469,8 @@ await client.createCollection('my-global-collection', {
 
 ## 🤖 Running as an Agent
 
-Code deployed to Aetherfy as an agent gets four helpers from the same package,
-on the `aetherfy-vectors/agent` subpath. Nothing to add to your
+Code deployed to Aetherfy as an agent gets a set of helpers from the same
+package, on the `aetherfy-vectors/agent` subpath. Nothing to add to your
 `package.json`: the standard runtime image preinstalls `aetherfy-vectors`, and
 a version you pin yourself wins over it. A custom container installs it like
 any other package.
@@ -538,11 +538,81 @@ try {
 }
 ```
 
-There is deliberately no `result()` and no `wait()`. A run reports its outcome
-through its exit code, and a helper that pretended otherwise would be inventing
-protocol the platform does not have.
+### Returning a result, and reading one back
 
-Full contract, including the environment variables behind all four calls:
+Output on Aetherfy mirrors input. A task writes its answer with `writeResult`;
+whoever started the run reads it back off the run itself, so a parent hears from
+a child in another region with no side channel between them.
+
+```typescript
+import { writeResult } from 'aetherfy-vectors/agent';
+
+// In the child task. The mirror of payload(): a file on the machine, nothing
+// over the network. Returning nothing is the normal case, so most tasks never
+// call this at all.
+await writeResult({ rows: 128, date: '2026-09-08' });
+```
+
+```typescript
+import { spawn, wait, result } from 'aetherfy-vectors/agent';
+
+// In the parent. wait() holds one request open instead of polling; a run that
+// has not finished in time comes back exactly as it stands, which is not an
+// error — read `state` and call again.
+const run = await spawn('nightly-rollup', { date: '2026-09-08' });
+const finished = await wait(run.spawn_id, 45);
+
+if (finished.state === 'completed') {
+  console.log(finished.result);
+}
+
+// result() is the same read without the waiting.
+const now = await result(run.spawn_id);
+console.log(now.state, now.has_result, now.result_error);
+```
+
+The result shares the payload's inline cap — one number bounding both
+directions — and it is for answers and references, not data. Anything larger
+belongs in a collection, with its id in the result:
+
+```typescript
+import { writeResult, ResultTooLarge } from 'aetherfy-vectors/agent';
+
+try {
+  await writeResult(everything);
+} catch (error) {
+  if (error instanceof ResultTooLarge) {
+    console.error(error.resultBytes, 'exceeds', error.maxBytes);
+    await writeResult({ collection: 'nightly-rollup', rows: everything.length });
+  } else {
+    throw error;
+  }
+}
+```
+
+Reading a run has the same shape as spawning it: the two refusals worth telling
+apart get their own types, and everything else carries the platform's stable
+error code.
+
+```typescript
+import { result, RunAccessDenied, RunNotFound, RunReadError } from 'aetherfy-vectors/agent';
+
+try {
+  await result(runId);
+} catch (error) {
+  if (error instanceof RunNotFound) {
+    console.error('no run has that id');
+  } else if (error instanceof RunAccessDenied) {
+    console.error('that run belongs to another account');
+  } else if (error instanceof RunReadError) {
+    console.error(error.code);
+  } else {
+    throw error;
+  }
+}
+```
+
+Full contract, including the environment variables behind every call:
 [docs.aetherfy.com/agents/task-contract](https://docs.aetherfy.com/agents/task-contract).
 
 ## 🧩 Payload Schemas

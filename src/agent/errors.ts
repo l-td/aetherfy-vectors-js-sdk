@@ -15,6 +15,13 @@
  * statuses: the pairing is what selects a type, so a 413 the platform grows for
  * some new reason arrives as a plain SpawnError reporting its own code rather
  * than wearing this one's.
+ *
+ * READING A RUN BACK has its own small family below, under `RunReadError`, and
+ * it follows exactly the same rule. It is a SEPARATE family from `SpawnError`
+ * rather than a widening of it, because the two calls fail at different things:
+ * a spawn is refused for what you asked to start, a read for what you asked to
+ * see. `ResultTooLarge` sits outside both — it is thrown before anything leaves
+ * the machine.
  */
 
 import { AetherfyVectorsError } from '../exceptions';
@@ -182,5 +189,140 @@ export class AgentTransportError extends AgentError {
     super(message);
     this.name = 'AgentTransportError';
     Object.setPrototypeOf(this, AgentTransportError.prototype);
+  }
+}
+
+/**
+ * The three control-plane error codes the run-reading calls give a type of
+ * their own. ONE definition each, for the same reason as the two above: the
+ * code both SELECTS the type and is STAMPED on it, and two literals could
+ * disagree.
+ *
+ * The first two are the deployment read's existing contract, and the /wait
+ * route answers with them identically by construction — one loader serves both
+ * routes upstream, so a caller need not know which one it called.
+ */
+export const DEPLOYMENT_NOT_FOUND = 'DEPLOYMENT_NOT_FOUND';
+export const DEPLOYMENT_ACCESS_DENIED = 'DEPLOYMENT_ACCESS_DENIED';
+export const DEPLOYMENT_WAIT_TIMEOUT_INVALID =
+  'DEPLOYMENT_WAIT_TIMEOUT_INVALID';
+
+/**
+ * `writeResult` was given more than this machine's inline cap.
+ *
+ * THE PLATFORM WOULD NOT HAVE FAILED THE RUN. A result over the cap is dropped
+ * and the run records `result_error: 'too_large'` beside an empty result — the
+ * exit code is still the run's outcome. This helper refuses at the write
+ * instead, because a value discarded silently is a value the caller never
+ * learns to shrink: whoever spawned the run finds out, and the code that could
+ * have written the data to a collection and returned its id does not.
+ *
+ * Mirrors {@link PayloadTooLarge}, which is the same cap in the other direction
+ * — one number bounds both. It is NOT a subclass of it, and not of
+ * {@link SpawnError} either: nothing here crossed the network, so there is no
+ * status and no platform code to carry.
+ *
+ * `maxBytes` is read from `AETHERFY_RUN_INLINE_MAX_BYTES`, which the platform
+ * injects on every task machine.
+ */
+export class ResultTooLarge extends AgentError {
+  public readonly resultBytes: number | null;
+  public readonly maxBytes: number | null;
+
+  constructor(
+    message: string,
+    options: { resultBytes?: number | null; maxBytes?: number | null } = {}
+  ) {
+    super(message);
+    this.name = 'ResultTooLarge';
+    this.resultBytes = options.resultBytes ?? null;
+    this.maxBytes = options.maxBytes ?? null;
+    Object.setPrototypeOf(this, ResultTooLarge.prototype);
+  }
+}
+
+/**
+ * The control plane refused to hand over a run.
+ *
+ * `code` is the platform's stable error code (`detail.code` in the
+ * control-plane envelope) and is the thing to branch on; the message is prose
+ * that may be reworded at any time.
+ *
+ * Same discipline as {@link SpawnError}: the STATUS AND THE CODE together
+ * select a subclass, and an unrecognised pairing arrives as this class
+ * reporting exactly what came back rather than wearing a type whose code the
+ * platform never sent.
+ */
+export class RunReadError extends AgentError {
+  public readonly status?: number;
+  public readonly code?: string;
+  public readonly detail: Record<string, unknown>;
+
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      code?: string;
+      detail?: Record<string, unknown>;
+    } = {}
+  ) {
+    super(message);
+    this.name = 'RunReadError';
+    this.status = options.status;
+    this.code = options.code;
+    this.detail = options.detail ?? {};
+    Object.setPrototypeOf(this, RunReadError.prototype);
+  }
+}
+
+/**
+ * `404 DEPLOYMENT_NOT_FOUND` — no run has that id.
+ *
+ * A spawn returns the child run's id in `Spawn.spawn_id`; anything else is a
+ * guess. Note that a run row is not immortal: an archived agent takes its runs
+ * with it.
+ */
+export class RunNotFound extends RunReadError {
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 404, code: DEPLOYMENT_NOT_FOUND, detail });
+    this.name = 'RunNotFound';
+    Object.setPrototypeOf(this, RunNotFound.prototype);
+  }
+}
+
+/**
+ * `403 DEPLOYMENT_ACCESS_DENIED` — the run belongs to another account.
+ *
+ * Distinct from {@link RunNotFound} because the platform distinguishes them,
+ * and the two are different problems: an id that does not exist is a bug in
+ * what you passed, an id you may not read is a bug in whose key you used.
+ */
+export class RunAccessDenied extends RunReadError {
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 403, code: DEPLOYMENT_ACCESS_DENIED, detail });
+    this.name = 'RunAccessDenied';
+    Object.setPrototypeOf(this, RunAccessDenied.prototype);
+  }
+}
+
+/**
+ * `422 DEPLOYMENT_WAIT_TIMEOUT_INVALID` — the server rejected the
+ * `timeout_seconds` it was sent.
+ *
+ * {@link wait} checks the same bound before it sends anything, and throws an
+ * `AgentError` when the CALLER is out of range — that is a bad argument, not a
+ * refusal, and it costs no round trip. This type is for the case that check did
+ * not catch: the server's bound moved. Kept as a named type so that day arrives
+ * as something to read rather than as a bare 422 the helper had no shape for.
+ */
+export class WaitTimeoutInvalid extends RunReadError {
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, {
+      status: 422,
+      code: DEPLOYMENT_WAIT_TIMEOUT_INVALID,
+      detail,
+    });
+    this.name = 'WaitTimeoutInvalid';
+    Object.setPrototypeOf(this, WaitTimeoutInvalid.prototype);
   }
 }

@@ -158,8 +158,13 @@ module.exports = [
         Response: 'readonly',
         // Beside Response and Headers, and for the same reason: the agent
         // helper's transport is the runtime's own fetch, so its tests replace
-        // it and name its type.
+        // it and name its type. AbortSignal is how the helper's own deadline
+        // is observable at all — the signal carries no milliseconds, so the
+        // wait tests spy on the factory; TextEncoder is what the result cap is
+        // measured in.
         fetch: 'readonly',
+        AbortSignal: 'readonly',
+        TextEncoder: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         window: 'readonly',
