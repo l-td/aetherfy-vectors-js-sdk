@@ -152,11 +152,13 @@ function requireEnv(
  * sets it would go looking for a bug in their own code.
  */
 const NO_RESULT_PATH_REMEDY =
-  "Aetherfy offers it to a `type: job` machine before each run's entrypoint " +
-  'starts, and only when that machine also carries an inline result cap ' +
-  '(AETHERFY_RUN_INLINE_MAX_BYTES) — without the cap the platform cannot ' +
-  'accept a result and does not offer the path. A `service` agent never gets ' +
-  'one: a result belongs to a run.';
+  'writeResult() is a TASK-ONLY call: a result belongs to a run, and a ' +
+  '`service` agent has no runs, so a service machine is never given a result ' +
+  'path and this call can never succeed there. Return your answer over HTTP ' +
+  "instead. On a `type: job` machine Aetherfy sets the path before each run's " +
+  'entrypoint starts, but only when that machine also carries an inline result ' +
+  'cap (AETHERFY_RUN_INLINE_MAX_BYTES) — without the cap the platform cannot ' +
+  'accept a result and does not offer the path.';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

@@ -100,9 +100,26 @@ describe('writeResult()', () => {
 
     expect(message).not.toContain('the platform sets');
     expect(message).toContain('AETHERFY_RUN_INLINE_MAX_BYTES');
-    expect(message).toContain('service');
     // ...and it says WRITE, not read, because that is what this call does.
     expect(message).toContain('writes its answer to');
+  });
+
+  it('says this is a task-only call', async () => {
+    // THE SERVICE CASE IS NOT A MISCONFIGURATION, it is the wrong call. A
+    // service machine has no runs, so it is never given a result path and this
+    // can never succeed there — no cap, no redeploy and no support ticket will
+    // change that. Saying only "the path is missing" would leave a service
+    // author hunting for the setting that turns it on.
+    delete process.env.AETHERFY_SPAWN_RESULT_PATH;
+
+    const error = await writeResult({ rows: 1 }).catch(e => e as Error);
+    const message = (error as Error).message;
+
+    expect(message).toContain('TASK-ONLY');
+    expect(message).toContain('service');
+    expect(message).toContain('never');
+    // And it names the way out, rather than only the wall.
+    expect(message).toContain('HTTP');
   });
 
   it('keeps the default sentence for every other variable', async () => {
