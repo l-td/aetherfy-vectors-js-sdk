@@ -122,6 +122,26 @@ describe('payload()', () => {
     expect(init.headers['User-Agent']).toMatch(/^aetherfy-agent-js\//);
   });
 
+  it('encodes the spawn id in the fallback URL', async () => {
+    // Same rule as the run-reading calls: an id that carries a slash must not
+    // silently become a request to another route.
+    process.env.AETHERFY_API_URL = 'https://agents.aetherfy.com/api/v1';
+    process.env.AETHERFY_SPAWN_ID = '../agents/other';
+    process.env.AETHERFY_API_KEY = 'afy_test_key';
+
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { payload: {} }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await payload();
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://agents.aetherfy.com/api/v1/deployments/' +
+        '..%2Fagents%2Fother/payload'
+    );
+  });
+
   it('falls back to HTTP when the file is missing', async () => {
     // The variable is set but the machine never wrote the file — the exact
     // case the fallback exists for.

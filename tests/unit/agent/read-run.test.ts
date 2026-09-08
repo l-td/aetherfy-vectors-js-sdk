@@ -12,7 +12,13 @@
  * No network is touched — `fetch` is replaced.
  */
 
-import { result, wait } from '../../../src/agent';
+import {
+  result,
+  wait,
+  WAIT_TIMEOUT_DEFAULT_SECONDS,
+  WAIT_TIMEOUT_MAX_SECONDS,
+  WAIT_TIMEOUT_MIN_SECONDS,
+} from '../../../src/agent';
 import {
   AgentError,
   AgentTransportError,
@@ -412,5 +418,48 @@ describe('off a machine', () => {
     await expect(result('')).rejects.toBeInstanceOf(AgentError);
     await expect(wait('')).rejects.toBeInstanceOf(AgentError);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('the public surface', () => {
+  it('publishes the wait bound, as the Python helper does', () => {
+    // ONE API IN TWO LANGUAGES. A task ported between them must not find the
+    // bound readable in one and missing from the other's declared surface.
+    expect(WAIT_TIMEOUT_MIN_SECONDS).toBe(1);
+    expect(WAIT_TIMEOUT_MAX_SECONDS).toBe(60);
+    expect(WAIT_TIMEOUT_DEFAULT_SECONDS).toBe(30);
+  });
+
+  it('applies the default it publishes', async () => {
+    // Two numbers that could disagree: the constant a caller reads and the
+    // default wait() actually sends.
+    await wait(RUN_ID);
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `?timeout_seconds=${WAIT_TIMEOUT_DEFAULT_SECONDS}`
+    );
+  });
+});
+
+describe('the run id in the path', () => {
+  it('cannot walk out of its route', async () => {
+    // UNESCAPED, `../agents/x` normalises to a DIFFERENT route before the
+    // request leaves, and its answer is parsed as though it were a run: `id`
+    // becomes the agent's, `state` becomes the string "undefined". A wrong
+    // object read as the right one, silently. Encoded, the platform 404s.
+    await result('../agents/other');
+
+    const url = fetchMock.mock.calls[0][0];
+    expect(url).toBe(
+      'https://agents.aetherfy.com/api/v1/deployments/..%2Fagents%2Fother'
+    );
+    expect(url).not.toContain('/agents/');
+  });
+
+  it('is encoded on the wait route too', async () => {
+    await wait('../agents/other', 5);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://agents.aetherfy.com/api/v1/deployments/..%2Fagents%2Fother' +
+        '/wait?timeout_seconds=5'
+    );
   });
 });

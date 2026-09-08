@@ -49,7 +49,11 @@
     byte lengths. When `AETHERFY_SPAWN_RESULT_PATH` is absent there is nowhere
     to put an answer, and that throws `NotRunningOnAgent` rather than
     no-opping: a library that silently discards the one value it was called to
-    deliver is worse than one that says so.
+    deliver is worse than one that says so. That one error explains the two
+    ways a machine can lack the path — no inline cap, or a `service` agent,
+    which has no runs to answer from — instead of the module's usual "the
+    platform sets this before your entrypoint starts", which is true of every
+    other variable it reads and not of this one.
   - `result(runId)` reads one run back — `state`, `result`, `result_error`,
     `has_result`, and the rest of the object verbatim in `Run.raw`.
   - `wait(runId, timeoutSeconds = 30)` is the same read with the waiting done
@@ -62,6 +66,10 @@
     passed — and its socket deadline is deliberately longer than the hold it
     asked for, so a wait the control plane is about to answer is not cut off
     here first.
+  - `WAIT_TIMEOUT_MIN_SECONDS`, `WAIT_TIMEOUT_MAX_SECONDS` and
+    `WAIT_TIMEOUT_DEFAULT_SECONDS` are exported, and are public in the Python
+    helper too — a caller sizing its own loop around `wait()` reads the bound
+    rather than copying the numbers out of an error message.
 
   Reading a run maps its refusals the way `spawn()` does, on the status AND the
   code together: `404 DEPLOYMENT_NOT_FOUND` is `RunNotFound`,
@@ -70,6 +78,13 @@
   else — including those statuses carrying another code — is `RunReadError`
   reporting what actually arrived. The plain read and the waiting read refuse
   identically, because upstream they are one loader behind two routes.
+
+  Every id this module puts in a URL path is percent-encoded. Left raw, an
+  id carrying a slash or a `..` normalises into a request to a DIFFERENT
+  route before it leaves the process, and the answer is then parsed as
+  though it were the object that was asked for — a wrong object read as the
+  right one, silently. Encoded, the platform answers 404. This covers the
+  payload fallback's spawn id as well as the two run reads.
 
   Each of these was already a documented platform contract that every task
   hand-rolled; none of them is a new protocol. The module adds NO dependency:

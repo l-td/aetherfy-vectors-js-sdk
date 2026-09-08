@@ -18,7 +18,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { writeResult } from '../../../src/agent';
+import { machine, writeResult } from '../../../src/agent';
 import { NotRunningOnAgent, ResultTooLarge } from '../../../src/agent/errors';
 
 const CAP = 64;
@@ -84,6 +84,42 @@ describe('writeResult()', () => {
       /AETHERFY_SPAWN_RESULT_PATH/
     );
     expect(existsSync(resultPath)).toBe(false);
+  });
+
+  it('does not claim the platform always sets the result path', async () => {
+    // THE DEFAULT SENTENCE IS FALSE FOR THIS ONE VARIABLE, and this is the only
+    // variable in the module for which it is. image_generator.py offers the
+    // result path only inside `if _RESULT_MAX_BYTES > 0`; a task machine with
+    // no cap, and every service machine, reaches this error on a platform that
+    // deliberately did not set it. Telling that customer "the platform sets it
+    // before your entrypoint starts" sends them to debug their own code.
+    delete process.env.AETHERFY_SPAWN_RESULT_PATH;
+
+    const error = await writeResult({ rows: 1 }).catch(e => e as Error);
+    const message = (error as Error).message;
+
+    expect(message).not.toContain('the platform sets');
+    expect(message).toContain('AETHERFY_RUN_INLINE_MAX_BYTES');
+    expect(message).toContain('service');
+    // ...and it says WRITE, not read, because that is what this call does.
+    expect(message).toContain('writes its answer to');
+  });
+
+  it('keeps the default sentence for every other variable', async () => {
+    // A negative control on the override: widening it to every call site would
+    // make the assertion above unremarkable and would drop a true sentence from
+    // the variables Aetherfy really does always inject.
+    delete process.env.AETHERFY_VCPUS;
+
+    let message = '';
+    try {
+      machine();
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain(
+      'the platform sets AETHERFY_VCPUS before your entrypoint starts'
+    );
   });
 });
 

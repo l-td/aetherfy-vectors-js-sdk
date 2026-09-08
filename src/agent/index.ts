@@ -132,11 +132,31 @@ function userAgent(): string {
   return `${USER_AGENT_PREFIX}${AGENT_HELPER_VERSION}`;
 }
 
-function requireEnv(variable: string, purpose: string): string {
+function requireEnv(
+  variable: string,
+  purpose: string,
+  remedy?: string
+): string {
   const value = process.env[variable];
-  if (!value) throw new NotRunningOnAgent(variable, purpose);
+  if (!value) throw new NotRunningOnAgent(variable, purpose, remedy);
   return value;
 }
+
+/**
+ * What to say when the RESULT PATH is missing, instead of the default "the
+ * platform sets this before your entrypoint starts" — which is not true of
+ * this one variable. The task supervisor offers the path only when the machine
+ * also carries an inline cap (image_generator.py: `if _RESULT_MAX_BYTES > 0`,
+ * else it logs that this run cannot return a result), and a `service` machine
+ * has no runs to return anything from. A customer told the platform always
+ * sets it would go looking for a bug in their own code.
+ */
+const NO_RESULT_PATH_REMEDY =
+  "Aetherfy offers it to a `type: job` machine before each run's entrypoint " +
+  'starts, and only when that machine also carries an inline result cap ' +
+  '(AETHERFY_RUN_INLINE_MAX_BYTES) — without the cap the platform cannot ' +
+  'accept a result and does not offer the path. A `service` agent never gets ' +
+  'one: a result belongs to a run.';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -237,7 +257,14 @@ export async function payload(): Promise<Record<string, unknown>> {
     );
   }
 
-  const url = `${apiUrl.replace(/\/+$/, '')}/deployments/${spawnId}/payload`;
+  // ENCODED, like every id this module puts in a path. Left raw, an id
+  // holding a slash or a `..` silently becomes a request to a DIFFERENT
+  // route — fetch normalises the path before it leaves — and the answer is
+  // then parsed as though it were this one. A 404 is the honest outcome; a
+  // wrong object read as the right one is not.
+  const url = `${apiUrl.replace(/\/+$/, '')}/deployments/${encodeURIComponent(
+    spawnId
+  )}/payload`;
   const { status, body } = await requestJson('GET', url, {
     apiKey,
     userAgent: userAgent(),
@@ -506,7 +533,8 @@ export async function writeResult(value: unknown): Promise<void> {
   // not.
   const path = requireEnv(
     'AETHERFY_SPAWN_RESULT_PATH',
-    'the file this run returns its answer in'
+    'the path this run writes its answer to',
+    NO_RESULT_PATH_REMEDY
   );
 
   // `undefined` at the top level makes JSON.stringify return undefined rather
@@ -633,7 +661,7 @@ function runUrl(runId: string): string {
   if (!runId) {
     throw new AgentError("runId must be a run's id, not an empty string.");
   }
-  return `${apiUrl.replace(/\/+$/, '')}/deployments/${runId}`;
+  return `${apiUrl.replace(/\/+$/, '')}/deployments/${encodeURIComponent(runId)}`;
 }
 
 /**
