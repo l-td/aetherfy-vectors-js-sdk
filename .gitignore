@@ -72,3 +72,7 @@ aetherfy-js-sdk-guide.md
 yarn.lock
 # pnpm
 pnpm-lock.yaml
+
+# Local scratch notes — never part of a release
+situation.txt
+tmp.txt
