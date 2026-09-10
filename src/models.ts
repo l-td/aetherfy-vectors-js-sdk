@@ -93,7 +93,7 @@ export interface Collection {
   /** Collection status */
   status?: string;
   /**
-   * §66 per-collection placement regions. Populated on create (the resolved
+   * Per-collection placement regions. Populated on create (the resolved
    * list the server echoes) and on getCollection. Undefined when the server
    * didn't report it (older backend / non-regional response).
    */
@@ -113,9 +113,8 @@ export interface Collection {
  *
  * The fields mirror `GET /api/v1/analytics/usage` verbatim — no derived
  * values, no unit conversion, no renaming. The shape is pinned live by the
- * e2e SDK guard (aetherfy-e2e-tests tests/sdk/js_usage_stats.test.js), which
- * calls the real endpoint and type-checks every field below. See
- * aetherfy-dashboard docs/TELEMETRY.md for the endpoint's contract history.
+ * e2e SDK guard, which calls the real endpoint and type-checks every field
+ * below.
  *
  * This interface previously declared nine camelCase fields
  * (currentCollections, maxCollections, currentPoints, maxPoints,
@@ -315,7 +314,6 @@ export interface ClientConfig {
    * URL always wins (a warning is logged if both are set). Load-bearing only
    * for standalone vectordb usage, local development, and debugging. Distinct
    * from a collection's placement `regions` (createCollection(regions=...)).
-   * See REVIEW_FAQ §67 (apiRegion routing rationale) and §66 (placement).
    */
   apiRegion?: 'us-east-1' | 'eu-central-1' | 'ap-southeast-1';
 }

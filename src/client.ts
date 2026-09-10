@@ -145,8 +145,7 @@ export class AetherfyVectorsClient {
    * is the API/connection endpoint pin (which regional backend to talk
    * to), a standalone/local-dev/debug override — in integrated agents
    * the injected `AETHERFY_VECTORS_URL` wins. Distinct from a
-   * collection's placement `regions`. See REVIEW_FAQ §67 (apiRegion
-   * routing rationale) and §66 (per-collection placement).
+   * collection's placement `regions`.
    *
    * @param config - Configuration options
    */
@@ -233,8 +232,7 @@ export class AetherfyVectorsClient {
    * backend to connect to) — a standalone/local-dev/debug override, NOT
    * collection placement. In integrated agents the injected
    * `AETHERFY_VECTORS_URL` wins. Distinct from a collection's placement
-   * `regions`. See REVIEW_FAQ §67 (apiRegion routing rationale) and §66
-   * (per-collection placement).
+   * `regions`.
    *
    * Resolution order (same as Python):
    *   1. Explicit `config.endpoint`.
@@ -368,8 +366,7 @@ export class AetherfyVectorsClient {
   }
 
   /**
-   * Build the canonical vectordb URL path for a collection. After the
-   * A/B nested-routes refactor (PR 1 of vectordb), workspaced operations
+   * Build the canonical URL path for a collection. Workspaced operations
    * use the nested URL form `/workspaces/{ws}/collections/{name}` instead
    * of the old slash-in-name encoding. Workspaceless calls continue to
    * use the flat form.
@@ -412,13 +409,13 @@ export class AetherfyVectorsClient {
    * @param collectionName - Collection name (must be unique)
    * @param vectorsConfig - Vector configuration or legacy config object
    * @param description - Optional collection description (max 500 characters)
-   * @param regions - Optional explicit placement regions (§66 per-collection
-   *   scoping). Omit to default to your full scope — the server resolves it
+   * @param regions - Optional explicit placement regions for this collection.
+   *   Omit to default to your full scope — the server resolves it
    *   and the returned Collection echoes the explicit list. Pass a subset of
    *   your scope to pin the collection to those regions; an empty array is
    *   rejected by the server (422). Subset/empty validation is server-side.
-   *   Distinct from the constructor's `apiRegion` (which endpoint to connect
-   *   to — §67) — see REVIEW_FAQ §66.
+   *   Distinct from the constructor's `apiRegion`, which selects the endpoint
+   *   to connect to rather than where the collection lives.
    * @returns Promise resolving to the created Collection, including its
    *   resolved `regions` list.
    *
