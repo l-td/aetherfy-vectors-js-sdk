@@ -186,8 +186,12 @@ export class HttpClient {
         throw error;
       }
 
-      // Check for network errors with error codes (e.g., ECONNRESET, ETIMEDOUT, etc.)
-      // This needs to be checked before isAxiosError since mocks may use plain objects
+      // Transport failures carry a Node error code — ECONNRESET, ETIMEDOUT,
+      // ENOTFOUND — and do NOT always arrive wrapped as an AxiosError: a socket
+      // torn down before a response exists never reaches axios's error path.
+      // So `code` is examined first. Reversing this order sends a real network
+      // failure down the unknown-error branch, which reports it without the one
+      // field that says what actually went wrong.
       if (error && typeof error === 'object' && 'code' in error) {
         const errorObj = error as { code: string; message?: string };
         const message = errorObj.message || `Network error: ${errorObj.code}`;
@@ -201,7 +205,9 @@ export class HttpClient {
       }
 
       if (!isAxiosError(error)) {
-        // For non-axios errors (like nock mock errors), format as network errors
+        // Not an AxiosError and not one of ours, so no response was ever
+        // received. Whatever it is belongs in the network class rather than
+        // the API class, which is what the caller branches on.
         if (error instanceof Error) {
           const message = error.message.includes('Network error')
             ? error.message
