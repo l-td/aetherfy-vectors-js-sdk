@@ -103,11 +103,6 @@ export class HttpClient {
 
         config.httpAgent = this.httpAgent;
         config.httpsAgent = this.httpsAgent;
-      } else {
-        // Explicitly set agents to undefined for test environments
-        // This allows HTTP mocking libraries like nock to intercept requests
-        config.httpAgent = undefined;
-        config.httpsAgent = undefined;
       }
     }
 
