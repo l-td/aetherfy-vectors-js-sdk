@@ -406,9 +406,10 @@ export async function fanOut<T, R>(
  * allowed.
  *
  * ACCEPTANCE IS NOT EXECUTION. The returned {@link Spawn} says the run was
- * recorded and its deploy queued. Aetherfy never queues a run behind another,
- * so a spawn aimed at an agent already running fails as busy rather than
- * waiting — check the run's status.
+ * recorded and its deploy queued. Aetherfy never queues a run behind another:
+ * a spawn aimed at a child whose machines are all busy gets a machine of its
+ * own and runs at once, and a spawn over the account's runs-in-flight limit is
+ * refused ({@link TooManyRunsInFlight}). Wait for the run and read its state.
  *
  * Keep the payload small: it is for parameters and references, not data. Pass
  * anything large by reference to a collection.
