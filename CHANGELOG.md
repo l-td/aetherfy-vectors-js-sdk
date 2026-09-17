@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`TooManyRunsInFlight` is thrown on `429 AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED`.**
+  The platform renamed the code (it was `AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED`)
+  because the account's runs-in-flight limit answers a manual and a scheduled
+  run too. The exported constant is renamed with it; there is no alias.
+- **`spawn(child)` accepts a child of either type.** A service child's run is a
+  request to its own `POST /aetherfy/run`; the parent is recorded on the run,
+  never on the child.
+
 ## [1.1.0] - 2026-09-07
 
 ### Added

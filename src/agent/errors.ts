@@ -10,7 +10,7 @@
  * Only three spawn outcomes are worth telling apart, and they are the three the
  * control plane distinguishes: the payload was too big
  * (413 RUN_PAYLOAD_TOO_LARGE), too many runs are already in flight
- * (429 AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED), and everything else.
+ * (429 AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED), and everything else.
  * "Everything else" is any other status AND any other code on those two
  * statuses: the pairing is what selects a type, so a 413 the platform grows for
  * some new reason arrives as a plain SpawnError reporting its own code rather
@@ -35,8 +35,8 @@ import { AetherfyVectorsError } from '../exceptions';
  * a code the platform never sent.
  */
 export const RUN_PAYLOAD_TOO_LARGE = 'RUN_PAYLOAD_TOO_LARGE';
-export const AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED =
-  'AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED';
+export const AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED =
+  'AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED';
 
 export class AgentError extends AetherfyVectorsError {
   constructor(message: string) {
@@ -147,7 +147,7 @@ export class PayloadTooLarge extends SpawnError {
 }
 
 /**
- * `429 AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED` — the account's runs-in-flight
+ * `429 AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED` — the account's runs-in-flight
  * cap is full.
  *
  * Retryable, unlike the other two: wait for runs to finish and spawn again.
@@ -179,7 +179,7 @@ export class TooManyRunsInFlight extends SpawnError {
   ) {
     super(message, {
       status: 429,
-      code: AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED,
+      code: AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED,
       detail: options.detail,
     });
     this.name = 'TooManyRunsInFlight';

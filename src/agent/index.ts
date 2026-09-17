@@ -38,7 +38,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 
 import {
-  AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED,
+  AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED,
   AgentError,
   AgentTransportError,
   DEPLOYMENT_ACCESS_DENIED,
@@ -398,18 +398,21 @@ export async function fanOut<T, R>(
 }
 
 /**
- * Ask the control plane to run another task agent, and return once recorded.
+ * Ask the control plane to run another agent, and return once recorded.
  *
- * `child` is the id or name of a `type: job` agent you own; the parent is this
- * machine's own agent. The child runs in this agent's region, and the two must
+ * `child` is the id or name of an agent you own, of either type: a task's run
+ * forks its command, a service's run is a request to its own
+ * `POST /aetherfy/run`. The parent is this machine's own agent, recorded on the
+ * run and never on the child. The child runs in this agent's region, and the two must
  * be connected by `spawn.workers` in `aetherfy.yaml` for the call to be
  * allowed.
  *
  * ACCEPTANCE IS NOT EXECUTION. The returned {@link Spawn} says the run was
  * recorded and its deploy queued. Aetherfy never queues a run behind another:
- * a spawn aimed at a child whose machines are all busy gets a machine of its
- * own and runs at once, and a spawn over the account's runs-in-flight limit is
- * refused ({@link TooManyRunsInFlight}). Wait for the run and read its state.
+ * a spawn aimed at a task whose machines are all busy gets a machine of its
+ * own and runs at once, and a task spawn over the account's runs-in-flight
+ * limit is refused ({@link TooManyRunsInFlight}) — the same limit, and the same
+ * code, a manual or scheduled run meets. Wait for the run and read its state.
  *
  * Keep the payload small: it is for parameters and references, not data. Pass
  * anything large by reference to a collection.
@@ -480,7 +483,7 @@ export async function spawn(
       detail,
     });
   }
-  if (status === 429 && code === AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED) {
+  if (status === 429 && code === AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED) {
     throw new TooManyRunsInFlight(message, {
       inFlightCount: numberOf(detail, 'in_flight_count'),
       limit: stringOrNull(detail, 'limit'),

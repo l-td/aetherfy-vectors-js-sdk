@@ -142,7 +142,7 @@ describe('spawn()', () => {
     fetchMock.mockResolvedValue(
       reply(429, {
         detail: {
-          code: 'AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED',
+          code: 'AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED',
           message:
             'Too many runs in flight on this account (25/25); wait for some to finish. The limit is set by your plan.',
           limit: 'max_in_flight_runs',
@@ -157,7 +157,7 @@ describe('spawn()', () => {
     expect(error.inFlightCount).toBe(25);
     expect(error.limit).toBe('max_in_flight_runs');
     expect(error.maxInFlightRuns).toBe(25);
-    expect(error.code).toBe('AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED');
+    expect(error.code).toBe('AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED');
   });
 
   it('survives an uncapped plan on 429', async () => {
@@ -166,7 +166,7 @@ describe('spawn()', () => {
     fetchMock.mockResolvedValue(
       reply(429, {
         detail: {
-          code: 'AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED',
+          code: 'AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED',
           message: 'Too many runs in flight on this account.',
           limit: 'max_in_flight_runs',
           in_flight_count: 400,
@@ -186,7 +186,7 @@ describe('spawn()', () => {
     fetchMock.mockResolvedValue(
       reply(429, {
         detail: {
-          code: 'AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED',
+          code: 'AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED',
           message: 'Some other cap.',
           limit: 'max_agents',
           in_flight_count: 3,
@@ -256,7 +256,7 @@ describe('spawn()', () => {
     fetchMock.mockResolvedValue(
       reply(429, {
         detail: {
-          code: 'AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED',
+          code: 'AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED',
           message: 'busy',
         },
       })
@@ -284,7 +284,7 @@ describe('spawn()', () => {
   });
 
   it.each([
-    [400, 'AGENT_CHILD_NOT_JOB_TYPE'],
+    [400, 'AGENT_SPAWN_DEPTH_INVALID'],
     [403, 'AGENT_NOT_SPAWN_ENABLED'],
     [403, 'AGENT_WORKER_NOT_ALLOWED'],
     [409, 'AGENT_PARENT_NOT_SPAWNABLE'],
