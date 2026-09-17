@@ -12,6 +12,13 @@
   request to its own `POST /aetherfy/run`; the parent is recorded on the run,
   never on the child.
 
+### Release needed
+- **The published 1.1.0 does not recognise `AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED`.**
+  It still matches the old code, so against the current platform a full
+  runs-in-flight limit reaches 1.1.0 callers as a plain `SpawnError` instead of
+  `TooManyRunsInFlight`, the one spawn refusal worth retrying. Publish this
+  version before anyone relies on that retry.
+
 ## [1.1.0] - 2026-09-07
 
 ### Added
