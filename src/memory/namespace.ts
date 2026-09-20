@@ -2,16 +2,17 @@
  * Namespace — a named, scoped memory bucket backed by one collection.
  *
  * The generic primitive for any agent shape. Extends `Scope` (the shared
- * read / delete / schema / analytics / metadata surface) and adds its own
- * generic-memory write API (`add` / `addMany`).
+ * read / delete / metadata surface), owns the collection-level schema
+ * surface, and adds its own generic-memory write API (`add` / `addMany`).
  *
  * All collection-lifecycle operations (create, list, exists, delete) live
  * on MemoryClient — a Namespace instance always points at an existing scope.
  */
 
+import { AnalysisResult, Schema } from '../models';
 import { EmbeddingNotSupportedError } from './errors';
 import { generateId } from './models';
-import { Scope } from './scope';
+import { NamespaceSetSchemaOptions, Scope } from './scope';
 
 /** Parameters for adding a memory to a Namespace. */
 export interface NamespaceAddOptions {
@@ -98,5 +99,49 @@ export class Namespace extends Scope {
 
     await this.client.upsert(this.collection, points);
     return points.map(p => p.id);
+  }
+
+  // -------------------------------------------------------------------
+  // Schema
+  //
+  // A payload schema belongs to a COLLECTION, and a Namespace is the only
+  // scope that owns one outright. These used to live on `Scope`, which gave
+  // a Thread the same six methods; now that every thread shares one
+  // collection, `(await memory.thread('a')).setSchema(...)` would have
+  // imposed a schema on every other thread in the workspace. They are
+  // declared here rather than left on the base and documented away.
+  // -------------------------------------------------------------------
+
+  async getSchema(): Promise<Schema | null> {
+    return this.client.getSchema(this.collection);
+  }
+
+  /** Returns the new schema ETag. */
+  async setSchema(
+    schema: Schema,
+    options: NamespaceSetSchemaOptions = {}
+  ): Promise<string> {
+    return this.client.setSchema(
+      this.collection,
+      schema,
+      options.enforcement ?? 'strict',
+      options.description
+    );
+  }
+
+  async deleteSchema(): Promise<boolean> {
+    return this.client.deleteSchema(this.collection);
+  }
+
+  async analyzeSchema(sampleSize: number = 1000): Promise<AnalysisResult> {
+    return this.client.analyzeSchema(this.collection, sampleSize);
+  }
+
+  async refreshSchema(): Promise<void> {
+    return this.client.refreshSchema(this.collection);
+  }
+
+  clearSchemaCache(): void {
+    this.client.clearSchemaCache(this.collection);
   }
 }

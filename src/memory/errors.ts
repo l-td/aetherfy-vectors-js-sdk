@@ -60,6 +60,33 @@ export class ThreadAlreadyExistsError extends AetherfyMemoryError {
   }
 }
 
+/**
+ * Thrown when the threads collection already exists at another dimension.
+ *
+ * Every thread shares ONE collection, so they share one vector size and one
+ * distance metric — fixed when that collection is first created. Asking for
+ * a different size later cannot be honoured, and letting it through would
+ * surface three layers down as a bare dimension error on the first `add`.
+ * Thrown at create time instead, naming the dimension that is actually
+ * there.
+ */
+export class ThreadVectorSizeMismatchError extends AetherfyMemoryError {
+  constructor(
+    public readonly existing: number,
+    public readonly requested: number
+  ) {
+    super(
+      `The threads collection already exists with vector size ${existing}, ` +
+        `but this MemoryClient is configured for ${requested}. Every thread ` +
+        `shares one collection and therefore one dimension. Construct ` +
+        `new MemoryClient({ threadVectorSize: ${existing} }) to use it, or ` +
+        `delete every thread to re-create the collection at another size.`
+    );
+    this.name = 'ThreadVectorSizeMismatchError';
+    Object.setPrototypeOf(this, ThreadVectorSizeMismatchError.prototype);
+  }
+}
+
 export class InvalidNameError extends AetherfyMemoryError {
   constructor(message: string) {
     super(message);

@@ -4,6 +4,7 @@
  * vectors-client method with the right arguments.
  */
 
+import { THREAD_ID_KEY, THREADS_COLLECTION } from '../../src/memory/models';
 import { Namespace } from '../../src/memory/namespace';
 import { Thread } from '../../src/memory/thread';
 import type { AetherfyVectorsClient } from '../../src/client';
@@ -40,8 +41,16 @@ function makeThread() {
     setPayload: jest.fn().mockResolvedValue({ status: 'ok' }),
     deletePayload: jest.fn().mockResolvedValue({ status: 'ok' }),
     scrollIter: jest.fn(),
+    // A Thread shares its collection with every other thread, so a
+    // metadata write first proves the point belongs to THIS thread. Give
+    // the double a payload that says so.
+    retrieve: jest
+      .fn()
+      .mockResolvedValue([
+        { id: P1, payload: { [THREAD_ID_KEY]: 'conv-1', role: 'user' } },
+      ]),
   } as unknown as AetherfyVectorsClient;
-  const th = new Thread('conv-1', 'user_X___thread__conv-1', client);
+  const th = new Thread('conv-1', THREADS_COLLECTION, client);
   return {
     th,
     client: client as unknown as {

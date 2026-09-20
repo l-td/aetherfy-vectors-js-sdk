@@ -9,8 +9,8 @@
  * - Namespace/thread lifecycle (create, list, exists, get, delete)
  * - Required-scope rule (no root-level add/search)
  * - Required-create rule (add/search before create → error)
- * - Thread-prefix isolation via the name regex
- * - Collection naming convention (__thread__<id> for threads)
+ * - Reserved-name isolation via the name regex (`__threads__`)
+ * - Threads as payload rows in one shared `__threads__` collection
  * - Forward-compat error when vector is omitted
  * - Operations parity (search/retrieve/delete/count/schema/analytics)
  * - Thread.history() ordering
@@ -26,8 +26,12 @@ import {
   InvalidNameError,
   NamespaceAlreadyExistsError,
   NamespaceNotFoundError,
+  THREAD_ID_KEY,
+  THREAD_MARKER_KEY,
+  THREADS_COLLECTION,
   ThreadAlreadyExistsError,
   ThreadNotFoundError,
+  ThreadVectorSizeMismatchError,
 } from '../../src/memory';
 import { AetherfyVectorsClient } from '../../src/client';
 import {
@@ -76,13 +80,22 @@ function buildMockClient(): MockedClient {
     deleteCollection: jest.fn().mockResolvedValue(true),
     getCollections: jest.fn().mockResolvedValue([]),
     collectionExists: jest.fn().mockResolvedValue(false),
-    getCollection: jest.fn(),
+    getCollection: jest
+      .fn()
+      .mockResolvedValue(fakeCollection(THREADS_COLLECTION)),
+    createFieldIndex: jest.fn().mockResolvedValue(true),
+    deleteFieldIndex: jest.fn().mockResolvedValue(true),
+    scrollIter: jest.fn(),
     upsert: jest.fn().mockResolvedValue(true),
     delete: jest.fn().mockResolvedValue(true),
     retrieve: jest.fn().mockResolvedValue([]),
     search: jest.fn().mockResolvedValue([]),
     scroll: jest.fn().mockResolvedValue({ points: [], nextPageOffset: null }),
-    count: jest.fn().mockResolvedValue(0),
+    // A thread now exists when its MARKER point does, and existence is a
+    // filtered count. Default it to 1 so that `collectionExists = true`
+    // still reads as "this thread is there" the way it did when a thread
+    // WAS a collection; tests that want an absent thread say so.
+    count: jest.fn().mockResolvedValue(1),
     getSchema: jest.fn().mockResolvedValue(null),
     setSchema: jest.fn().mockResolvedValue('etag-1'),
     deleteSchema: jest.fn().mockResolvedValue(true),
@@ -157,17 +170,24 @@ describe('name validation', () => {
     expect(mock.createCollection).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects thread prefix via the name regex (unreachable reserved path)', async () => {
+  it('rejects the shared threads collection name via the name regex', async () => {
     const m = newMemory(buildMockClient());
-    await expect(m.createNamespace('__thread__foo')).rejects.toThrow(
+    await expect(m.createNamespace(THREADS_COLLECTION)).rejects.toThrow(
       InvalidNameError
     );
-    await expect(m.namespace('__thread__foo')).rejects.toThrow(
+    await expect(m.namespace(THREADS_COLLECTION)).rejects.toThrow(
       InvalidNameError
     );
-    await expect(m.deleteNamespace('__thread__foo')).rejects.toThrow(
+    await expect(m.deleteNamespace(THREADS_COLLECTION)).rejects.toThrow(
       InvalidNameError
     );
+  });
+
+  it('the threads collection name is legal server-side', () => {
+    // vectordb's scoping layer accepts [a-zA-Z0-9_-]{1,100} and nothing
+    // else (no dots), so a name the memory layer picks has to clear THAT
+    // rule, not just the SDK's looser one.
+    expect(THREADS_COLLECTION).toMatch(/^[a-zA-Z0-9_-]{1,100}$/);
   });
 
   it('rejects non-string names with InvalidNameError', async () => {
@@ -241,13 +261,12 @@ describe('Namespace lifecycle', () => {
     expect(ns.name).toBe('customer-42');
   });
 
-  it('listNamespaces excludes threads', async () => {
+  it('listNamespaces excludes the shared threads collection', async () => {
     const mock = buildMockClient();
     mock.getCollections.mockResolvedValue([
       fakeCollection('customer-42'),
       fakeCollection('scrape-log'),
-      fakeCollection('__thread__conv-99'),
-      fakeCollection('__thread__conv-100'),
+      fakeCollection(THREADS_COLLECTION),
     ]);
     const m = newMemory(mock);
     await expect(m.listNamespaces()).resolves.toEqual([
@@ -309,12 +328,69 @@ describe('Namespace lifecycle', () => {
 // ---------------------------------------------------------------------------
 
 describe('Thread lifecycle', () => {
-  it('createThread uses the reserved collection prefix', async () => {
+  it('createThread does not create a collection per thread', async () => {
+    // The whole point of the model: the FIRST thread creates the one
+    // shared collection, and no thread after it creates anything.
     const mock = buildMockClient();
     mock.collectionExists.mockResolvedValue(false);
     const m = newMemory(mock);
     await m.createThread('conv-99');
-    expect(mock.createCollection.mock.calls[0][0]).toBe('__thread__conv-99');
+    expect(mock.createCollection.mock.calls[0][0]).toBe(THREADS_COLLECTION);
+
+    mock.collectionExists.mockResolvedValue(true);
+    mock.count.mockResolvedValue(0);
+    mock.createCollection.mockClear();
+    await m.createThread('conv-100');
+    expect(mock.createCollection).not.toHaveBeenCalled();
+  });
+
+  it('createThread writes one marker point with a unit vector', async () => {
+    const mock = buildMockClient();
+    mock.collectionExists.mockResolvedValue(true);
+    mock.count.mockResolvedValue(0);
+    const m = newMemory(mock);
+    await m.createThread('conv-99');
+    const [coll, points] = mock.upsert.mock.calls[0];
+    expect(coll).toBe(THREADS_COLLECTION);
+    expect(points).toHaveLength(1);
+    expect(points[0].payload).toEqual({
+      [THREAD_ID_KEY]: 'conv-99',
+      [THREAD_MARKER_KEY]: true,
+    });
+    // A zero vector has no defined normalisation under cosine; the marker
+    // carries a real unit vector instead.
+    const vector = points[0].vector as number[];
+    expect(vector).toHaveLength(DEFAULT_VECTOR_SIZE);
+    expect(vector.reduce((a, b) => a + b * b, 0)).toBeCloseTo(1);
+  });
+
+  it('createThread indexes both filtered keys', async () => {
+    // An unindexed payload filter is scanned, not looked up, and every
+    // read on this collection carries one.
+    const mock = buildMockClient();
+    mock.collectionExists.mockResolvedValue(false);
+    const m = newMemory(mock);
+    await m.createThread('conv-99');
+    expect(mock.createFieldIndex.mock.calls).toEqual([
+      [THREADS_COLLECTION, THREAD_ID_KEY, 'keyword'],
+      [THREADS_COLLECTION, THREAD_MARKER_KEY, 'bool'],
+    ]);
+  });
+
+  it('createThread refuses a collection at another dimension', async () => {
+    // Never let this surface as a bare dimension error from three layers
+    // down on the first add: name the dimension that is there.
+    const mock = buildMockClient();
+    mock.collectionExists.mockResolvedValue(true);
+    mock.getCollection.mockResolvedValue({
+      name: THREADS_COLLECTION,
+      config: { size: 1536, distance: DistanceMetric.COSINE },
+    } as Collection);
+    const m = newMemory(mock);
+    await expect(m.createThread('conv-99')).rejects.toThrow(
+      ThreadVectorSizeMismatchError
+    );
+    await expect(m.createThread('conv-99')).rejects.toThrow('1536');
   });
 
   it('createThread throws when already exists', async () => {
@@ -342,18 +418,20 @@ describe('Thread lifecycle', () => {
     expect(t.id).toBe('conv-99');
   });
 
-  it('getThread strips the internal prefix from the returned name', async () => {
+  it('getThread names the thread and counts its own messages', async () => {
     const mock = buildMockClient();
     mock.collectionExists.mockResolvedValue(true);
     mock.getCollection.mockResolvedValue(
-      fakeCollection('__thread__conv-99', { points_count: 42 })
+      // the whole collection, every thread
+      fakeCollection(THREADS_COLLECTION, { points_count: 5000 })
     );
+    mock.count.mockResolvedValue(42);
     const m = newMemory(mock);
     const returned = await m.getThread('conv-99');
     expect(returned.name).toBe('conv-99');
+    // This thread's messages, not the shared collection's point count.
     expect(returned.points_count).toBe(42);
     expect(returned).not.toHaveProperty('pointsCount');
-    expect(mock.getCollection).toHaveBeenCalledWith('__thread__conv-99');
   });
 
   it('getThread throws when missing', async () => {
@@ -363,24 +441,45 @@ describe('Thread lifecycle', () => {
     await expect(m.getThread('nope')).rejects.toThrow(ThreadNotFoundError);
   });
 
-  it('listThreads strips the prefix', async () => {
-    const mock = buildMockClient();
-    mock.getCollections.mockResolvedValue([
-      fakeCollection('customer-42'),
-      fakeCollection('__thread__conv-99'),
-      fakeCollection('__thread__conv-100'),
-    ]);
-    const m = newMemory(mock);
-    await expect(m.listThreads()).resolves.toEqual(['conv-99', 'conv-100']);
-  });
-
-  it('deleteThread drops the prefixed collection', async () => {
+  it('listThreads reads marker payloads, not the collection list', async () => {
     const mock = buildMockClient();
     mock.collectionExists.mockResolvedValue(true);
-    mock.deleteCollection.mockResolvedValue(true);
+    mock.scrollIter.mockImplementation(async function* () {
+      yield {
+        id: '00000000-0000-4000-8000-0000000000a1',
+        payload: { [THREAD_ID_KEY]: 'conv-99', [THREAD_MARKER_KEY]: true },
+      };
+      yield {
+        id: '00000000-0000-4000-8000-0000000000a2',
+        payload: { [THREAD_ID_KEY]: 'conv-100', [THREAD_MARKER_KEY]: true },
+      };
+    });
+    const m = newMemory(mock);
+    await expect(m.listThreads()).resolves.toEqual(['conv-99', 'conv-100']);
+    // Bounded by the number of THREADS, not the number of messages: the
+    // scroll is filtered to marker points.
+    expect(mock.scrollIter.mock.calls[0]?.[1]?.scrollFilter).toEqual({
+      must: [{ key: THREAD_MARKER_KEY, match: { value: true } }],
+    });
+  });
+
+  it('listThreads is empty before any thread exists', async () => {
+    const mock = buildMockClient();
+    mock.collectionExists.mockResolvedValue(false);
+    const m = newMemory(mock);
+    await expect(m.listThreads()).resolves.toEqual([]);
+    expect(mock.scrollIter).not.toHaveBeenCalled();
+  });
+
+  it('deleteThread deletes only its own rows', async () => {
+    const mock = buildMockClient();
+    mock.collectionExists.mockResolvedValue(true);
     const m = newMemory(mock);
     await m.deleteThread('conv-99');
-    expect(mock.deleteCollection).toHaveBeenCalledWith('__thread__conv-99');
+    expect(mock.deleteCollection).not.toHaveBeenCalled();
+    expect(mock.delete).toHaveBeenCalledWith(THREADS_COLLECTION, {
+      must: [{ key: THREAD_ID_KEY, match: { value: 'conv-99' } }],
+    });
   });
 
   it('deleteThread is idempotent when missing', async () => {
@@ -389,14 +488,40 @@ describe('Thread lifecycle', () => {
     const m = newMemory(mock);
     await expect(m.deleteThread('missing')).resolves.toBe(false);
     expect(mock.deleteCollection).not.toHaveBeenCalled();
+    expect(mock.delete).not.toHaveBeenCalled();
   });
 
-  it('threadExists checks the prefixed collection', async () => {
+  it('threadExists counts the marker point', async () => {
     const mock = buildMockClient();
     mock.collectionExists.mockResolvedValue(true);
     const m = newMemory(mock);
     await expect(m.threadExists('conv-99')).resolves.toBe(true);
-    expect(mock.collectionExists).toHaveBeenCalledWith('__thread__conv-99');
+    expect(mock.count).toHaveBeenCalledWith(THREADS_COLLECTION, {
+      countFilter: {
+        must: [
+          { key: THREAD_ID_KEY, match: { value: 'conv-99' } },
+          { key: THREAD_MARKER_KEY, match: { value: true } },
+        ],
+      },
+      exact: true,
+    });
+  });
+
+  it('an empty thread still exists', async () => {
+    // The marker is what makes this true: with rows keyed by payload
+    // alone a thread with no messages would be indistinguishable from one
+    // that was never created.
+    const mock = buildMockClient();
+    mock.collectionExists.mockResolvedValue(true);
+    mock.count.mockResolvedValue(0);
+    const m = newMemory(mock);
+    await m.createThread('empty');
+    // The marker landed, so the next existence check finds one row.
+    mock.count.mockResolvedValue(1);
+    await expect(m.threadExists('empty')).resolves.toBe(true);
+    await expect(m.createThread('empty')).rejects.toThrow(
+      ThreadAlreadyExistsError
+    );
   });
 });
 
@@ -755,13 +880,15 @@ describe('Thread operations', () => {
     });
 
     const [coll, points] = mock.upsert.mock.calls[0];
-    expect(coll).toBe('__thread__conv-99');
+    expect(coll).toBe(THREADS_COLLECTION);
     expect(points[0].id).toBe(pid);
     expect(points[0].vector).toEqual([0.1, 0.2]);
+    // Every message carries the thread clause's key.
     expect(points[0].payload).toEqual({
       role: 'user',
       content: 'hi',
       ts: 1000,
+      [THREAD_ID_KEY]: 'conv-99',
     });
   });
 
@@ -824,14 +951,16 @@ describe('Thread operations', () => {
     expect(ids).toEqual([ids[0], '33333333-3333-4333-8333-333333333333']);
     expect(mock.upsert).toHaveBeenCalledTimes(1);
     const [coll, points] = mock.upsert.mock.calls[0];
-    expect(coll).toBe('__thread__conv-99');
+    expect(coll).toBe(THREADS_COLLECTION);
     expect(points).toHaveLength(2);
     expect(points[0].payload).toEqual({
       role: 'user',
       content: 'hi',
       ts: 1000,
+      [THREAD_ID_KEY]: 'conv-99',
     });
     expect(points[1].payload).toEqual({
+      [THREAD_ID_KEY]: 'conv-99',
       role: 'assistant',
       content: 'hello',
       ts: 1001,
@@ -1040,11 +1169,16 @@ describe('Thread operations', () => {
     await expect(t.history({ limit: 0 })).rejects.toThrow();
   });
 
-  it('clear drops the prefixed collection', async () => {
+  it('clear deletes by filter rather than dropping the collection', async () => {
+    // The most dangerous method in the model change: the collection now
+    // holds every OTHER thread too, so a drop here would destroy them.
     const mock = buildMockClient();
     const t = await openThread(mock);
     await t.clear();
-    expect(mock.deleteCollection).toHaveBeenCalledWith('__thread__conv-99');
+    expect(mock.deleteCollection).not.toHaveBeenCalled();
+    expect(mock.delete).toHaveBeenCalledWith(THREADS_COLLECTION, {
+      must: [{ key: THREAD_ID_KEY, match: { value: 'conv-99' } }],
+    });
   });
 });
 

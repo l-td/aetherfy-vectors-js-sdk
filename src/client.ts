@@ -1082,6 +1082,93 @@ export class AetherfyVectorsClient {
     }
   }
 
+  // -------------------------------------------------------------------
+  // Payload field indexes
+  //
+  // An unindexed payload filter is SCANNED, not looked up. A tenant key
+  // you filter on for every read (e.g. a per-conversation id) wants an
+  // index the moment the collection holds more than one tenant's rows.
+  // -------------------------------------------------------------------
+
+  /**
+   * Create a payload index on one field.
+   *
+   * PUT /collections/{name}/index with `{ field_name, field_schema }`.
+   * The call is idempotent server-side: re-creating an existing index
+   * with the same schema succeeds.
+   *
+   * @param collectionName - Collection to index.
+   * @param fieldName - Payload key to index; a dotted path addresses a
+   *   nested key (`'metadata.tag'`).
+   * @param fieldSchema - Index type. A string for the simple types
+   *   (`'keyword'`, `'integer'`, `'float'`, `'bool'`, `'geo'`,
+   *   `'datetime'`, `'uuid'`, `'text'`), or an object for the
+   *   parameterised forms. Forwarded verbatim.
+   */
+  async createFieldIndex(
+    collectionName: string,
+    fieldName: string,
+    fieldSchema: string | Record<string, unknown> = 'keyword'
+  ): Promise<boolean> {
+    this.validateCollectionName(collectionName);
+    if (!fieldName || typeof fieldName !== 'string') {
+      throw new ValidationError('fieldName must be a non-empty string');
+    }
+    const scopedName = this.scopeCollection(collectionName);
+
+    try {
+      await this.httpClient.put(
+        this.apiUrl(this.buildCollectionPath(collectionName, '/index')),
+        { field_name: fieldName, field_schema: fieldSchema }
+      );
+      return true;
+    } catch (error: unknown) {
+      this.evictCachesIfNotFound(scopedName, error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Drop the payload index on one field.
+   *
+   * DELETE /collections/{name}/index/{fieldName}. Returns false when the
+   * collection (or the index) is already gone, mirroring the idempotent
+   * shape of the other drop operations.
+   */
+  async deleteFieldIndex(
+    collectionName: string,
+    fieldName: string
+  ): Promise<boolean> {
+    this.validateCollectionName(collectionName);
+    if (!fieldName || typeof fieldName !== 'string') {
+      throw new ValidationError('fieldName must be a non-empty string');
+    }
+    const scopedName = this.scopeCollection(collectionName);
+
+    try {
+      await this.httpClient.delete(
+        this.apiUrl(
+          this.buildCollectionPath(
+            collectionName,
+            `/index/${encodeURIComponent(fieldName)}`
+          )
+        )
+      );
+      return true;
+    } catch (error: unknown) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'status' in error &&
+        error.status === 404
+      ) {
+        this.evictCachesIfNotFound(scopedName, error);
+        return false;
+      }
+      throw this.handleError(error);
+    }
+  }
+
   /**
    * Additive merge into existing `payload.metadata`.
    *

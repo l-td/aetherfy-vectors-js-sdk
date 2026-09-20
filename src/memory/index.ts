@@ -47,7 +47,12 @@ export type {
 export { Thread } from './thread';
 export type { ThreadAddOptions, ThreadHistoryOptions } from './thread';
 
-export { DEFAULT_VECTOR_SIZE } from './models';
+export {
+  DEFAULT_VECTOR_SIZE,
+  THREAD_ID_KEY,
+  THREAD_MARKER_KEY,
+  THREADS_COLLECTION,
+} from './models';
 export type { Message } from './models';
 
 export {
@@ -58,4 +63,5 @@ export {
   NamespaceNotFoundError,
   ThreadAlreadyExistsError,
   ThreadNotFoundError,
+  ThreadVectorSizeMismatchError,
 } from './errors';

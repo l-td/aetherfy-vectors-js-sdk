@@ -42,7 +42,7 @@ vectors — Aetherfy stores and searches them, it does not generate them.
 ```typescript
 import { MemoryClient } from 'aetherfy-vectors';
 
-const memory = new MemoryClient();  // reads AETHERFY_API_KEY; workspace auto-detected
+const memory = new MemoryClient(); // reads AETHERFY_API_KEY; workspace auto-detected
 
 // --- A namespace: any named scope ---------------------------------------
 await memory.createNamespace('customer-42');
@@ -61,18 +61,33 @@ const hits = await customer.search(
 await memory.createThread('conv-99');
 const thread = await memory.thread('conv-99');
 
-await thread.add({ role: 'user',      content: 'hi',    vector: await embed('hi') });
-await thread.add({ role: 'assistant', content: 'hello', vector: await embed('hello') });
-const recent = await thread.history({ limit: 20 });   // in message order
+await thread.add({ role: 'user', content: 'hi', vector: await embed('hi') });
+await thread.add({
+  role: 'assistant',
+  content: 'hello',
+  vector: await embed('hello'),
+});
+const recent = await thread.history({ limit: 20 }); // in message order
 
-// Deleting a scope is atomic — it drops the whole backing collection.
+// Clearing a scope is atomic. After it, the scope no longer exists.
 await thread.clear();
 ```
 
 Scopes must be created before you write to them, so a typo throws instead of
-silently creating a second store. Vector size defaults to 384; pass your model's
-dimension to `createNamespace` / `createThread` if it differs (1536 for OpenAI
-small, 3072 for large, 1024 for Cohere v3).
+silently creating a second store.
+
+A **namespace** is one collection, and takes its own `vectorSize` (default 384;
+pass 1536 for OpenAI small, 3072 for large, 1024 for Cohere v3).
+
+**Threads do not work that way.** Every thread in a workspace lives in one
+shared collection with the thread id as a payload key, so a conversation costs
+no collection slot and a plan's collection limit does not cap how many
+conversations you can have. One collection means one dimension for all of them,
+so `createThread` takes no options: they come from the client.
+
+```typescript
+const memory = new MemoryClient({ threadVectorSize: 1536 }); // OpenAI small
+```
 
 Deployed on Aetherfy, `new MemoryClient()` takes no arguments at all: the control
 plane injects `AETHERFY_API_KEY` and the workspace at deploy time.
@@ -516,7 +531,12 @@ concurrent-run cap get their own types; everything else carries the platform's
 stable error code, which is the thing to branch on:
 
 ```typescript
-import { spawn, PayloadTooLarge, SpawnError, TooManyRunsInFlight } from 'aetherfy-vectors/agent';
+import {
+  spawn,
+  PayloadTooLarge,
+  SpawnError,
+  TooManyRunsInFlight,
+} from 'aetherfy-vectors/agent';
 
 try {
   await spawn('nightly-rollup', { date: '2026-09-07' });
@@ -529,7 +549,12 @@ try {
     // The one refusal here worth retrying: runs are finishing all the time.
     // The cap is the ACCOUNT's and is set by your plan; `limit` names which
     // plan limit was hit, and `maxInFlightRuns` is null on an uncapped plan.
-    console.error('waiting on', error.inFlightCount, 'of', error.maxInFlightRuns);
+    console.error(
+      'waiting on',
+      error.inFlightCount,
+      'of',
+      error.maxInFlightRuns
+    );
   } else if (error instanceof SpawnError) {
     console.error(error.code);
   } else {
@@ -583,7 +608,10 @@ try {
 } catch (error) {
   if (error instanceof ResultTooLarge) {
     console.error(error.resultBytes, 'exceeds', error.maxBytes);
-    await writeResult({ collection: 'nightly-rollup', rows: everything.length });
+    await writeResult({
+      collection: 'nightly-rollup',
+      rows: everything.length,
+    });
   } else {
     throw error;
   }
@@ -595,7 +623,12 @@ apart get their own types, and everything else carries the platform's stable
 error code.
 
 ```typescript
-import { result, RunAccessDenied, RunNotFound, RunReadError } from 'aetherfy-vectors/agent';
+import {
+  result,
+  RunAccessDenied,
+  RunNotFound,
+  RunReadError,
+} from 'aetherfy-vectors/agent';
 
 try {
   await result(runId);
@@ -677,6 +710,14 @@ const collections = await client.getCollections();
 
 // Check if collection exists
 const exists = await client.collectionExists('my-collection');
+
+// Payload indexes. A filter on an UNINDEXED key is scanned, not looked up —
+// index any key you filter on for every read (a tenant id, a status, a
+// timestamp you range over). fieldSchema: 'keyword' | 'integer' | 'float' |
+// 'bool' | 'geo' | 'datetime' | 'uuid' | 'text', or a parameterised object.
+await client.createFieldIndex('my-collection', 'tenantId', 'keyword');
+// Idempotent: false when the index (or the collection) is already gone.
+await client.deleteFieldIndex('my-collection', 'tenantId');
 
 // Get collection info
 const info = await client.getCollection('my-collection');
@@ -815,7 +856,9 @@ usage.tier; // string                    — the plan's tier name
 usage.active_regions; // string[]        — union of your collections' regions
 usage.usage_percentage; // number        — storage %, 0 when there is no limit
 
-console.log(`Collections: ${usage.collections_count}/${usage.collections_limit}`);
+console.log(
+  `Collections: ${usage.collections_count}/${usage.collections_limit}`
+);
 console.log(`Storage: ${usage.storage_bytes_used} bytes`);
 console.log(`Tier: ${usage.tier}`);
 
@@ -978,27 +1021,29 @@ client.destroy();
 
 ### AetherfyVectorsClient
 
-| Method                                                   | Description                                                                        | Returns                          |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------- |
-| `createCollection(name, config, description?, regions?)` | Create a new collection (returns the created Collection, incl. resolved `regions`) | `Promise<Collection>`            |
-| `deleteCollection(name)`                                 | Delete a collection                                                                | `Promise<boolean>`               |
-| `getCollections()`                                       | List all collections                                                               | `Promise<Collection[]>`          |
-| `collectionExists(name)`                                 | Check if collection exists                                                         | `Promise<boolean>`               |
-| `getCollection(name)`                                    | Get collection info                                                                | `Promise<Collection>`            |
-| `upsert(collection, points)`                             | Insert/update vectors                                                              | `Promise<boolean>`               |
-| `delete(collection, selector)`                           | Delete vectors                                                                     | `Promise<boolean>`               |
-| `retrieve(collection, ids, options)`                     | Get vectors by ID                                                                  | `Promise<Point[]>`               |
-| `search(collection, vector, options)`                    | Similarity search                                                                  | `Promise<SearchResult[]>`        |
-| `count(collection, options)`                             | Count vectors                                                                      | `Promise<number>`                |
-| `getSchema(collection)`                                  | Get payload schema                                                                 | `Promise<Schema \| null>`        |
-| `setSchema(collection, schema, mode?, desc?)`            | Define/update schema                                                               | `Promise<string>` (ETag)         |
-| `deleteSchema(collection)`                               | Remove schema                                                                      | `Promise<boolean>`               |
-| `analyzeSchema(collection, sampleSize?)`                 | Infer schema from data                                                             | `Promise<AnalysisResult>`        |
-| `refreshSchema(collection)`                              | Force schema cache refresh                                                         | `Promise<void>`                  |
-| `clearSchemaCache(collection?)`                          | Clear schema cache                                                                 | `void`                           |
-| `getUsageStats()`                                        | Account usage                                                                      | `Promise<UsageStats>`            |
-| `testConnection()`                                       | Test API connection                                                                | `Promise<boolean>`               |
-| `destroy()`                                              | Close HTTP connections                                                             | `void`                           |
+| Method                                                   | Description                                                                        | Returns                   |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------- |
+| `createCollection(name, config, description?, regions?)` | Create a new collection (returns the created Collection, incl. resolved `regions`) | `Promise<Collection>`     |
+| `deleteCollection(name)`                                 | Delete a collection                                                                | `Promise<boolean>`        |
+| `getCollections()`                                       | List all collections                                                               | `Promise<Collection[]>`   |
+| `collectionExists(name)`                                 | Check if collection exists                                                         | `Promise<boolean>`        |
+| `getCollection(name)`                                    | Get collection info                                                                | `Promise<Collection>`     |
+| `createFieldIndex(collection, field, schema?)`           | Create a payload index on one field (default schema `'keyword'`)                   | `Promise<boolean>`        |
+| `deleteFieldIndex(collection, field)`                    | Drop a payload index; false when already gone                                      | `Promise<boolean>`        |
+| `upsert(collection, points)`                             | Insert/update vectors                                                              | `Promise<boolean>`        |
+| `delete(collection, selector)`                           | Delete vectors                                                                     | `Promise<boolean>`        |
+| `retrieve(collection, ids, options)`                     | Get vectors by ID                                                                  | `Promise<Point[]>`        |
+| `search(collection, vector, options)`                    | Similarity search                                                                  | `Promise<SearchResult[]>` |
+| `count(collection, options)`                             | Count vectors                                                                      | `Promise<number>`         |
+| `getSchema(collection)`                                  | Get payload schema                                                                 | `Promise<Schema \| null>` |
+| `setSchema(collection, schema, mode?, desc?)`            | Define/update schema                                                               | `Promise<string>` (ETag)  |
+| `deleteSchema(collection)`                               | Remove schema                                                                      | `Promise<boolean>`        |
+| `analyzeSchema(collection, sampleSize?)`                 | Infer schema from data                                                             | `Promise<AnalysisResult>` |
+| `refreshSchema(collection)`                              | Force schema cache refresh                                                         | `Promise<void>`           |
+| `clearSchemaCache(collection?)`                          | Clear schema cache                                                                 | `void`                    |
+| `getUsageStats()`                                        | Account usage                                                                      | `Promise<UsageStats>`     |
+| `testConnection()`                                       | Test API connection                                                                | `Promise<boolean>`        |
+| `destroy()`                                              | Close HTTP connections                                                             | `void`                    |
 
 ### Distance Metrics
 

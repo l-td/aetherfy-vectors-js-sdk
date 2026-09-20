@@ -2,8 +2,9 @@
  * Scope — the shared base for Namespace and Thread.
  *
  * Holds every operation that behaves identically for both scope shapes:
- * read (search / retrieve / count / iter), delete / clear, schema management,
- * analytics, and the payload-metadata helpers. The two *write* APIs differ by
+ * read (search / retrieve / count / iter), delete / clear, and the
+ * payload-metadata helpers. Schema management is NOT here: a schema belongs
+ * to a collection, and a Thread no longer has one to itself (see Namespace). The two *write* APIs differ by
  * shape — a Namespace stores a generic memory (`{ text?, metadata? }`), a
  * Thread stores a conversation message (`{ role, content, ts, metadata? }`) —
  * so `add` (and the batch writers) live on the subclasses, not here. That is
@@ -20,11 +21,9 @@ import {
   PointNotFoundError,
 } from '../exceptions';
 import {
-  AnalysisResult,
   EnforcementMode,
   Filter,
   Point,
-  Schema,
   ScrollPoint,
   SearchResult,
 } from '../models';
@@ -96,6 +95,44 @@ export class Scope {
     new Set<string>();
 
   // -------------------------------------------------------------------
+  // Scoping hooks
+  //
+  // A Namespace IS its collection, so all four hooks are identities. A
+  // Thread shares one collection with every other thread in the workspace
+  // and overrides them to carry its own clause. They exist so that every
+  // read and write below goes through ONE place that can narrow it — a
+  // scope clause bolted onto each call site individually is a scope clause
+  // that gets forgotten at the next call site added.
+  // -------------------------------------------------------------------
+
+  /** Narrow a caller's filter to this scope. Identity for a Namespace. */
+  protected combineFilter(filter?: Filter): Filter | undefined {
+    return filter;
+  }
+
+  /** Refuse point ids that do not belong to this scope. No-op here. */
+  protected async assertOwns(_ids: Array<string | number>): Promise<void> {
+    return undefined;
+  }
+
+  /** Narrow an id list to the ids this scope owns. Identity here. */
+  protected async ownedIds(
+    ids: Array<string | number>
+  ): Promise<Array<string | number>> {
+    return ids;
+  }
+
+  /** True when this scope needs payloads to identify its own points. */
+  protected readsPayloadToScope(): boolean {
+    return false;
+  }
+
+  /** Drop points belonging to another scope. Identity for a Namespace. */
+  protected retainOwned(points: Point[], _withPayload: boolean): Point[] {
+    return points;
+  }
+
+  // -------------------------------------------------------------------
   // Payload metadata
   // -------------------------------------------------------------------
 
@@ -124,6 +161,7 @@ export class Scope {
     id: string | number,
     metadata: Record<string, unknown>
   ): Promise<unknown> {
+    await this.assertOwns([id]);
     return this.client.setPayload(this.collection, { metadata }, [id]);
   }
 
@@ -161,6 +199,7 @@ export class Scope {
         )}`
       );
     }
+    await this.assertOwns([id]);
     try {
       return await this.client.setPayload(this.collection, partial, [id], {
         key: 'metadata',
@@ -196,6 +235,7 @@ export class Scope {
         )}`
       );
     }
+    await this.assertOwns([id]);
     const dotted = keys.map(k => `metadata.${k}`);
     try {
       return await this.client.deletePayload(this.collection, dotted, [id]);
@@ -245,7 +285,7 @@ export class Scope {
     return this.client.search(this.collection, vector, {
       limit: options.limit,
       offset: options.offset,
-      queryFilter: options.filter,
+      queryFilter: this.combineFilter(options.filter),
       withPayload: options.withPayload,
       withVectors: options.withVectors,
       scoreThreshold: options.scoreThreshold,
@@ -253,21 +293,33 @@ export class Scope {
     });
   }
 
+  /**
+   * Fetch specific points by ID.
+   *
+   * Ids that exist in the underlying collection but belong to another
+   * scope are not returned: a Thread's point ids are unique within the
+   * shared threads collection, not within the thread.
+   */
   async retrieve(
     ids: Array<string | number>,
     options: NamespaceRetrieveOptions = {}
   ): Promise<Point[]> {
-    return this.client.retrieve(this.collection, ids, {
-      withPayload: options.withPayload,
+    const withPayload = options.withPayload ?? true;
+    const points = await this.client.retrieve(this.collection, ids, {
+      // A Thread has to read payloads to tell its own points from a
+      // sibling's. The caller's withPayload choice is still honoured:
+      // retainOwned strips what the caller did not ask for.
+      withPayload: this.readsPayloadToScope() ? true : options.withPayload,
       withVectors: options.withVectors,
     });
+    return this.retainOwned(points, withPayload);
   }
 
   async count(
     options: { filter?: Filter; exact?: boolean } = {}
   ): Promise<number> {
     return this.client.count(this.collection, {
-      countFilter: options.filter,
+      countFilter: this.combineFilter(options.filter),
       exact: options.exact,
     });
   }
@@ -291,7 +343,7 @@ export class Scope {
     );
     yield* this.client.scrollIter(this.collection, {
       batchSize: options.batchSize,
-      scrollFilter: options.filter,
+      scrollFilter: this.combineFilter(options.filter),
       withPayload: options.withPayload,
       withVectors: options.withVectors,
     });
@@ -301,9 +353,28 @@ export class Scope {
   // Delete
   // -------------------------------------------------------------------
 
-  /** Delete points — by ID list or by filter — without dropping the scope. */
+  /**
+   * Delete points — by ID list or by filter — without dropping the scope.
+   *
+   * An id list is narrowed to the ids this scope owns before the request is
+   * sent, so a Thread cannot delete a sibling thread's point by naming its
+   * id.
+   */
   async delete(selector: Array<string | number> | Filter): Promise<boolean> {
-    return this.client.delete(this.collection, selector);
+    if (Array.isArray(selector)) {
+      const owned = await this.ownedIds(selector);
+      if (owned.length === 0) {
+        // Nothing in this scope to delete. Deleting is idempotent, so a
+        // no-op is the honest answer; sending the request anyway would
+        // delete another scope's points by id.
+        return true;
+      }
+      return this.client.delete(this.collection, owned);
+    }
+    return this.client.delete(
+      this.collection,
+      this.combineFilter(selector) as Filter
+    );
   }
 
   /**
@@ -312,42 +383,5 @@ export class Scope {
    */
   async clear(): Promise<boolean> {
     return this.client.deleteCollection(this.collection);
-  }
-
-  // -------------------------------------------------------------------
-  // Schema
-  // -------------------------------------------------------------------
-
-  async getSchema(): Promise<Schema | null> {
-    return this.client.getSchema(this.collection);
-  }
-
-  /** Returns the new schema ETag. */
-  async setSchema(
-    schema: Schema,
-    options: NamespaceSetSchemaOptions = {}
-  ): Promise<string> {
-    return this.client.setSchema(
-      this.collection,
-      schema,
-      options.enforcement ?? 'strict',
-      options.description
-    );
-  }
-
-  async deleteSchema(): Promise<boolean> {
-    return this.client.deleteSchema(this.collection);
-  }
-
-  async analyzeSchema(sampleSize: number = 1000): Promise<AnalysisResult> {
-    return this.client.analyzeSchema(this.collection, sampleSize);
-  }
-
-  async refreshSchema(): Promise<void> {
-    return this.client.refreshSchema(this.collection);
-  }
-
-  clearSchemaCache(): void {
-    this.client.clearSchemaCache(this.collection);
   }
 }

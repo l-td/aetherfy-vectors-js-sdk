@@ -12,12 +12,33 @@
  * requires `role`/`content`; a memory uses `text`), so a Thread is not
  * add-substitutable for a Namespace. Both share the read/scope surface via
  * `Scope`.
+ *
+ * EVERY THREAD IN A WORKSPACE SHARES ONE COLLECTION (`__threads__`), and a
+ * thread is a FILTER over it: `thread_id` is stamped on every point and
+ * every read and write this class issues carries the matching clause. The
+ * clause is assembled here, never from a caller-supplied string, because
+ * the proxy forwards filters verbatim and a misspelled key fails OPEN — a
+ * successful response with every thread's points in it. A caller's own
+ * filter is COMBINED with the thread clause, never substituted for it.
+ *
+ * One MARKER point per thread (written by `createThread`) is what makes an
+ * empty thread exist. It is not a message and must never read as one, so
+ * `history`, `iterHistory`, `search`, `count`, `iter` and the filtered
+ * `delete` all exclude it explicitly.
  */
 
 import { AetherfyVectorsClient } from '../client';
+import { PointNotFoundError } from '../exceptions';
+import { Filter, Point, ScrollPoint } from '../models';
 import { assertAllowedOptionKeys } from '../utils/options';
 import { EmbeddingNotSupportedError } from './errors';
-import { generateId, Message, messageFromPoint } from './models';
+import {
+  generateId,
+  Message,
+  messageFromPoint,
+  THREAD_ID_KEY,
+  THREAD_MARKER_KEY,
+} from './models';
 import { Scope } from './scope';
 
 export interface ThreadAddOptions {
@@ -49,7 +70,7 @@ export class Thread extends Scope {
    * @internal
    */
   protected static override readonly RESERVED_KEYS: ReadonlySet<string> =
-    new Set(['role', 'content', 'ts']);
+    new Set(['role', 'content', 'ts', THREAD_ID_KEY, THREAD_MARKER_KEY]);
 
   /**
    * Internal — callers use MemoryClient.thread(id) to construct.
@@ -66,6 +87,123 @@ export class Thread extends Scope {
   /** The thread id (same as `name`; provided for parity with Python SDK). */
   get id(): string {
     return this.name;
+  }
+
+  // -------------------------------------------------------------------
+  // Scoping — the thread clause
+  // -------------------------------------------------------------------
+
+  /** The one condition that scopes an operation to this thread. */
+  private threadClause(): Record<string, unknown> {
+    return { key: THREAD_ID_KEY, match: { value: this.name } };
+  }
+
+  /** Matches the thread's marker point and nothing else. */
+  private static markerClause(): Record<string, unknown> {
+    return { key: THREAD_MARKER_KEY, match: { value: true } };
+  }
+
+  /**
+   * Combine a caller filter with the thread clause. Never replaces it.
+   *
+   * The thread clause always lands in `must` and the marker exclusion
+   * always lands in `mustNot`; a caller's clauses are APPENDED to those
+   * arrays. Since Aetherfy composes the three clause arrays as a
+   * conjunction (everything in `must` holds AND at least one `should`
+   * holds AND nothing in `mustNot` holds), no caller clause — `should`
+   * included — can widen the result past this thread.
+   *
+   * Clause names outside must / mustNot / should are left for
+   * `serializeFilter` downstream to reject, so a caller typo at the clause
+   * level still fails loudly rather than being merged in as an unknown
+   * key.
+   */
+  protected override combineFilter(filter?: Filter): Filter {
+    const caller = (filter ?? {}) as Record<string, unknown>;
+    const combined: Record<string, unknown> = {
+      must: [this.threadClause(), ...((caller.must as unknown[]) ?? [])],
+      mustNot: [
+        Thread.markerClause(),
+        ...((caller.mustNot as unknown[]) ?? []),
+      ],
+    };
+    for (const key of Object.keys(caller)) {
+      if (key !== 'must' && key !== 'mustNot') {
+        combined[key] = caller[key];
+      }
+    }
+    return combined as Filter;
+  }
+
+  /** Every row of this thread, marker included. Used by `clear`. */
+  private ownFilter(): Filter {
+    return { must: [this.threadClause()] } as unknown as Filter;
+  }
+
+  protected override readsPayloadToScope(): boolean {
+    // A thread's point ids are unique within the shared collection, not
+    // within the thread, so identifying our own points means reading
+    // `thread_id` off the payload.
+    return true;
+  }
+
+  /**
+   * True iff `point` is a thread's marker rather than a message.
+   *
+   * The filter already excludes markers server-side. This is the second,
+   * independent guard, and it earns its place because the FIRST one fails
+   * open: the proxy forwards a filter verbatim and never validates it, so
+   * a mistyped clause returns a successful response with unfiltered
+   * results. A marker reading as a message would put an empty `role` and
+   * an empty `content` into a caller's conversation.
+   */
+  private static isMarker(point: {
+    payload?: Record<string, unknown>;
+  }): boolean {
+    return point.payload?.[THREAD_MARKER_KEY] === true;
+  }
+
+  /** True iff `point` is one of THIS thread's messages. */
+  private owns(point: { payload?: Record<string, unknown> }): boolean {
+    return (
+      point.payload?.[THREAD_ID_KEY] === this.name && !Thread.isMarker(point)
+    );
+  }
+
+  protected override retainOwned(
+    points: Point[],
+    withPayload: boolean
+  ): Point[] {
+    const kept = points.filter(p => this.owns(p));
+    if (withPayload) return kept;
+    // The payload was fetched only to scope the read; the caller asked not
+    // to see it.
+    return kept.map(p => {
+      const { payload: _payload, ...rest } = p;
+      return rest as Point;
+    });
+  }
+
+  protected override async ownedIds(
+    ids: Array<string | number>
+  ): Promise<Array<string | number>> {
+    if (ids.length === 0) return [];
+    const points = await this.client.retrieve(this.collection, ids, {
+      withPayload: true,
+      withVectors: false,
+    });
+    return points.filter(p => this.owns(p)).map(p => p.id);
+  }
+
+  protected override async assertOwns(
+    ids: Array<string | number>
+  ): Promise<void> {
+    const owned = new Set(await this.ownedIds(ids));
+    for (const id of ids) {
+      if (!owned.has(id)) {
+        throw new PointNotFoundError(String(id), this.collection);
+      }
+    }
   }
 
   // -------------------------------------------------------------------
@@ -93,6 +231,11 @@ export class Thread extends Scope {
       ts: timestamp,
     };
     if (metadata) payload.metadata = metadata;
+    // The thread clause's key is stamped LAST so nothing a caller supplied
+    // can displace it — `metadata` is nested a level down and cannot reach
+    // this key, but stamping last is what makes that structural rather
+    // than incidental.
+    payload[THREAD_ID_KEY] = this.name;
 
     await this.client.upsert(this.collection, [
       { id: pointId, vector, payload },
@@ -138,6 +281,7 @@ export class Thread extends Scope {
       const timestamp = ts ?? Date.now() / 1000;
       const payload: Record<string, unknown> = { role, content, ts: timestamp };
       if (metadata) payload.metadata = metadata;
+      payload[THREAD_ID_KEY] = this.name;
       return { id: pointId, vector, payload };
     });
 
@@ -168,16 +312,27 @@ export class Thread extends Scope {
     }
 
     // Bounded cap — pull min(limit * 20, 5000) points max.
+    //
+    // The cap SURVIVES the move to a shared collection. It was never doing
+    // the filter's job: even when a thread had a collection to itself this
+    // scroll was already thread-scoped, and the cap was what bounded the
+    // client-side sort of an arbitrarily long thread. The filter narrows
+    // the same scroll to the same rows it used to see, so removing the cap
+    // now would make history({ limit: 50 }) pull an unbounded thread into
+    // memory. It still truncates silently past 5000 messages — that is
+    // iterHistory's job, which is why that method exists.
     const cap = Math.min(Math.max(limit * 20, 100), 5000);
 
     const result = await this.client.scroll(this.collection, {
       limit: cap,
       withPayload: true,
       withVectors: false,
+      scrollFilter: this.combineFilter(),
     });
 
     const messages: Message[] = [];
     for (const point of result.points) {
+      if (Thread.isMarker(point as ScrollPoint)) continue;
       const msg = messageFromPoint(point);
       if (msg) messages.push(msg);
     }
@@ -217,6 +372,7 @@ export class Thread extends Scope {
       withPayload: true,
       withVectors: false,
     })) {
+      if (Thread.isMarker(point)) continue;
       const msg = messageFromPoint(point);
       if (msg) messages.push(msg);
     }
@@ -226,5 +382,23 @@ export class Thread extends Scope {
     for (const msg of messages) {
       yield msg;
     }
+  }
+
+  // -------------------------------------------------------------------
+  // Delete
+  // -------------------------------------------------------------------
+
+  /**
+   * Atomically drop this thread, leaving every sibling thread intact.
+   *
+   * Keeps the meaning it has always had — after `clear()` the thread no
+   * longer exists and `memory.createThread(id)` re-creates it — but it can
+   * no longer be a collection drop: the collection now holds every OTHER
+   * thread in the workspace too. It is a delete-by-filter on this thread's
+   * rows, marker included (dropping the marker is what makes the thread
+   * stop existing).
+   */
+  override async clear(): Promise<boolean> {
+    return this.client.delete(this.collection, this.ownFilter());
   }
 }

@@ -2,17 +2,75 @@
 
 ## [Unreleased]
 
+### Removed
+
+- **`Thread` has no payload-schema methods.** `getSchema`, `setSchema`,
+  `deleteSchema`, `analyzeSchema`, `refreshSchema` and `clearSchemaCache` moved
+  from the shared `Scope` base to `Namespace`. A schema belongs to a
+  collection, and a thread no longer has one to itself, so
+  `thread.setSchema(...)` would have imposed a schema on every other thread in
+  the workspace. Removed rather than left lying;
+  `MemoryClient.clearSchemaCache()` is unchanged.
+
 ### Changed
 
-- **`TooManyRunsInFlight` is thrown on `429 AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED`.**
-  The platform renamed the code (it was `AGENT_SPAWN_CONCURRENCY_LIMIT_EXCEEDED`)
-  because the account's runs-in-flight limit answers a manual and a scheduled
-  run too. The exported constant is renamed with it; there is no alias.
-- **`spawn(child)` accepts a child of either type.** A service child's run is a
-  request to its own `POST /aetherfy/run`; the parent is recorded on the run,
-  never on the child.
+- **BREAKING: a thread is a payload scope, not a collection.** Every thread in a
+  workspace now lives in ONE collection (`__threads__`) with `thread_id` as a
+  payload key, and every per-thread operation is a filtered operation over it.
+  The old model gave each thread its own collection, so threads counted against
+  `plans.max_collections` — a Free account (limit 3) got THREE CONVERSATIONS,
+  EVER, and the fourth `createThread` threw `COLLECTION_LIMIT_EXCEEDED` and
+  fired the "you hit your plan limit" email. Creating a thread now consumes no
+  collection slot.
+
+  - `createThread(threadId)` no longer accepts a `CreateScopeOptions` argument.
+    One collection has one vector size and one distance metric; they come from
+    `new MemoryClient({ threadVectorSize: 384, threadDistance: DistanceMetric.COSINE })`
+    and are fixed when the threads collection is first created.
+    `createNamespace` keeps its options — a namespace is still one collection.
+  - Creating a thread writes one MARKER point, which is what makes an EMPTY
+    thread exist: `threadExists`, `listThreads` and `ThreadAlreadyExistsError`
+    keep the behaviour they had. The marker is never a message — `history`,
+    `iterHistory`, `search`, `count`, `iter` and a filtered `delete` all exclude
+    it.
+  - `Thread.clear()` is a delete-by-filter on that thread's rows, not a
+    collection drop. It keeps its old meaning (the thread stops existing) and
+    leaves every sibling thread intact. `Namespace.clear()` still drops its
+    collection.
+  - A `filter` you pass to a `Thread`'s `search` / `count` / `iter` / `delete`
+    is COMBINED with the thread's own clause, never substituted for it, so it
+    can narrow a thread's results but cannot reach another thread's messages.
+  - `retrieve`, `delete` by id list, and the three metadata writers refuse ids
+    belonging to another thread: a thread's point ids are unique within the
+    shared collection, not within the thread.
+  - `getThread(id)` reports the shared collection's config with `name` set to
+    the thread id and `points_count` set to that thread's own message count.
+  - `Thread`'s reserved metadata keys gain `thread_id` and `thread_marker`.
+  - New `ThreadVectorSizeMismatchError` when the threads collection already
+    exists at another dimension — it names the dimension that is there instead
+    of surfacing later as a bare dimension error on the first write.
+  - `THREADS_COLLECTION`, `THREAD_ID_KEY` and `THREAD_MARKER_KEY` are exported
+    from the memory entry point.
+
+### Added
+
+- **`createFieldIndex` / `deleteFieldIndex` on `AetherfyVectorsClient`.**
+  `PUT /collections/{name}/index` and
+  `DELETE /collections/{name}/index/{fieldName}` have been on the backend (and
+  replicated) all along, but no SDK exposed them. A filter on an unindexed
+  payload key is scanned, not looked up, so any key you filter on for every
+  read wants one. `fieldSchema` defaults to `'keyword'` and is forwarded
+  verbatim.
 
 ### Release needed
+
+- **The pending release is no longer a patch.** The changes above remove
+  `createThread`'s options argument and the `Thread` schema methods, and change
+  where a thread's data lives. Under semver that is a MAJOR bump: publish this
+  as **2.0.0**, not 1.1.1 or 1.2.0. Threads written by 1.1.0 live in per-thread
+  collections that 2.0.0 does not read; there is no migration and no shim,
+  which is fine while the SDK has no users but must be stated in the release
+  notes.
 - **The published 1.1.0 does not recognise `AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED`.**
   It still matches the old code, so against the current platform a full
   runs-in-flight limit reaches 1.1.0 callers as a plain `SpawnError` instead of
