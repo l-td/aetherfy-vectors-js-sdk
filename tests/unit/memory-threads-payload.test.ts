@@ -25,7 +25,9 @@ import {
   THREADS_COLLECTION,
   ThreadAlreadyExistsError,
   ThreadNotFoundError,
+  ThreadVectorSizeMismatchError,
 } from '../../src/memory';
+import { DistanceMetric } from '../../src/models';
 import { FakeVectorsClient, unitVector } from './fake-vectors-store';
 
 const DIM = 4;
@@ -59,6 +61,19 @@ async function msgs(thread: Thread, n: number, prefix = 'm') {
 // ---------------------------------------------------------------------------
 // The defect this change removes
 // ---------------------------------------------------------------------------
+
+describe('the cross-repo pin', () => {
+  it('the threads collection name is the pinned literal', () => {
+    // The e2e suite hard-codes "__threads__" on purpose: a cross-repo
+    // literal should be a literal there, so a rename is caught rather than
+    // followed. This is the other half of that pin. Without it a rename goes
+    // green here and reds in a repo that cannot explain why — so the gate
+    // lives where the rename would happen.
+    expect(THREADS_COLLECTION).toBe('__threads__');
+    expect(THREAD_ID_KEY).toBe('thread_id');
+    expect(THREAD_MARKER_KEY).toBe('thread_marker');
+  });
+});
 
 describe('threads do not consume collections', () => {
   it('supports more threads than the plan allows collections', async () => {
@@ -231,6 +246,89 @@ describe('isolation between threads', () => {
     const [bId] = await msgs(b, 1, 'b');
     await a.delete([bId!]);
     await expect(b.count()).resolves.toBe(1);
+  });
+
+  it('delete by id scopes server-side in one request', async () => {
+    // The thread clause travels WITH the ids, so the engine enforces the
+    // boundary. A client-side check first would be a second round trip and
+    // a rule the next caller could step around.
+    const { store, memory } = build();
+    const a = await memory.createThread('a');
+    const [keep, drop] = await msgs(a, 2, 'a');
+
+    const sent: unknown[] = [];
+    const realDelete = store.delete.bind(store);
+    store.delete = async (name, sel) => {
+      sent.push(sel);
+      return realDelete(name, sel);
+    };
+    await a.delete([drop!]);
+
+    expect(sent).toHaveLength(1);
+    const selector = sent[0] as { must: unknown[]; mustNot: unknown[] };
+    expect(selector.must[0]).toEqual({
+      key: THREAD_ID_KEY,
+      match: { value: 'a' },
+    });
+    expect(selector.must[1]).toEqual({ has_id: [drop] });
+    const left: unknown[] = [];
+    for await (const p of a.iter()) left.push(p.id);
+    expect(left).toEqual([keep]);
+  });
+
+  it('delete with an empty id list sends no request', async () => {
+    // A behaviour change, pinned because it is one. It used to send a
+    // delete carrying an empty points list. It now returns true without a
+    // request, and for a Thread that is a SAFETY property rather than a
+    // saved round trip: an id list becomes a `has_id` clause, and a request
+    // carrying an empty `has_id` is one engine-side semantic away from
+    // matching the whole thread.
+    const { store, memory } = build();
+    const a = await memory.createThread('a');
+    await msgs(a, 3, 'a');
+
+    const sent: unknown[] = [];
+    const realDelete = store.delete.bind(store);
+    store.delete = async (name, sel) => {
+      sent.push(sel);
+      return realDelete(name, sel);
+    };
+
+    await expect(a.delete([])).resolves.toBe(true);
+    expect(sent).toEqual([]);
+    await expect(a.count()).resolves.toBe(3);
+  });
+
+  it('namespace delete with an empty id list sends no request', async () => {
+    const { store, memory } = build();
+    const ns = await memory.createNamespace('kb', { vectorSize: DIM });
+    await ns.add({ text: 'x', vector: v() });
+
+    const sent: unknown[] = [];
+    const realDelete = store.delete.bind(store);
+    store.delete = async (name, sel) => {
+      sent.push(sel);
+      return realDelete(name, sel);
+    };
+
+    await expect(ns.delete([])).resolves.toBe(true);
+    expect(sent).toEqual([]);
+    await expect(ns.count()).resolves.toBe(1);
+  });
+
+  it('metadata writes still throw rather than silently no-op', async () => {
+    // Why the metadata writers keep their read. The payload endpoints
+    // accept a filter, so these could scope themselves the way delete()
+    // does. They do not, because a filter that matches nothing is a
+    // SUCCESS, and these are documented to throw PointNotFoundError when
+    // the point is not there. Scoping them by filter would turn a write to
+    // a missing id into a silent no-op reported as success. delete() has no
+    // such contract to lose.
+    const { memory } = build();
+    const a = await memory.createThread('a');
+    await expect(
+      a.mergeMetadata('00000000-0000-4000-8000-0000000000aa', { x: 1 })
+    ).rejects.toThrow(PointNotFoundError);
   });
 
   it('metadata writes will not reach into a sibling thread', async () => {
@@ -520,6 +618,35 @@ describe('getThread, namespaces and the schema surface', () => {
       [THREADS_COLLECTION, THREAD_ID_KEY, 'keyword'],
       [THREADS_COLLECTION, THREAD_MARKER_KEY, 'bool'],
     ]);
+  });
+
+  it('an unreadable dimension is not treated as a mismatch', async () => {
+    // 0/undefined means UNKNOWN, not "a zero-dimension collection": it is
+    // what a response carrying no vectors config leaves behind. Comparing it
+    // would report a mismatch that is really "we could not read it". The skip
+    // is explicit in the code for exactly this reason; this pins that it
+    // stays a skip and not a silently-passing check.
+    const { store, memory } = build();
+    await memory.createThread('first');
+
+    store.getCollection = async (name: string) =>
+      ({ name, config: { size: 0, distance: DistanceMetric.COSINE } }) as never;
+    // No ThreadVectorSizeMismatchError: there is nothing to compare against.
+    await memory.createThread('second');
+    expect((await memory.listThreads()).sort()).toEqual(['first', 'second']);
+  });
+
+  it('a readable mismatch still throws', async () => {
+    const { store, memory } = build();
+    await memory.createThread('first');
+    store.getCollection = async (name: string) =>
+      ({
+        name,
+        config: { size: 1536, distance: DistanceMetric.COSINE },
+      }) as never;
+    await expect(memory.createThread('second')).rejects.toThrow(
+      ThreadVectorSizeMismatchError
+    );
   });
 
   it('the client default dimension is still 384', async () => {

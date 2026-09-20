@@ -122,6 +122,20 @@ export class Scope {
     return ids;
   }
 
+  /**
+   * How this scope addresses a list of its own point ids on the wire.
+   *
+   * A Namespace owns its whole collection, so a bare id list is already
+   * exact. A Thread shares its collection, so it returns a FILTER that
+   * pins the ids AND the thread — the engine enforces the scope, rather
+   * than the SDK checking it first and trusting itself afterwards.
+   */
+  protected pointSelector(
+    ids: Array<string | number>
+  ): Array<string | number> | Filter {
+    return ids;
+  }
+
   /** True when this scope needs payloads to identify its own points. */
   protected readsPayloadToScope(): boolean {
     return false;
@@ -161,6 +175,7 @@ export class Scope {
     id: string | number,
     metadata: Record<string, unknown>
   ): Promise<unknown> {
+    // Read-then-check, NOT a scoped filter — see assertOwns.
     await this.assertOwns([id]);
     return this.client.setPayload(this.collection, { metadata }, [id]);
   }
@@ -362,14 +377,18 @@ export class Scope {
    */
   async delete(selector: Array<string | number> | Filter): Promise<boolean> {
     if (Array.isArray(selector)) {
-      const owned = await this.ownedIds(selector);
-      if (owned.length === 0) {
-        // Nothing in this scope to delete. Deleting is idempotent, so a
-        // no-op is the honest answer; sending the request anyway would
-        // delete another scope's points by id.
+      if (selector.length === 0) {
+        // An empty id list is a no-op, and NOT a request. This is a
+        // safety property, not a micro-optimisation: a Thread turns an id
+        // list into a `has_id` filter, and a request carrying an empty
+        // `has_id` is one engine-side semantic away from matching the
+        // whole thread. Never send it.
         return true;
       }
-      return this.client.delete(this.collection, owned);
+      return this.client.delete(
+        this.collection,
+        this.pointSelector(selector) as Array<string | number> | Filter
+      );
     }
     return this.client.delete(
       this.collection,

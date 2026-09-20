@@ -258,7 +258,16 @@ export class MemoryClient {
     if (await this._client.collectionExists(THREADS_COLLECTION)) {
       const existing = await this._client.getCollection(THREADS_COLLECTION);
       const size = existing.config?.size;
-      if (size && size !== this.threadVectorSize) {
+      if (!size) {
+        // A missing/zero size means UNKNOWN here, never a zero-dimension
+        // collection: it is what a response carrying no vectors config
+        // leaves behind. There is nothing to compare against, so the check
+        // is skipped — explicitly, because a silent skip of a mismatch
+        // check reads as a passing check. A genuinely wrong dimension then
+        // surfaces on the first write, from the client's own guard.
+        return;
+      }
+      if (size !== this.threadVectorSize) {
         throw new ThreadVectorSizeMismatchError(size, this.threadVectorSize);
       }
       return;

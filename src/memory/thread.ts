@@ -184,6 +184,29 @@ export class Thread extends Scope {
     });
   }
 
+  /**
+   * Address these ids AND this thread, in one request.
+   *
+   * `has_id` is a first-class Qdrant condition — it is in the pinned
+   * client's generated schema (@qdrant/js-client-rest 1.15.0, the version
+   * the fleet runs) alongside FieldCondition in the Condition union. That
+   * matters because the proxy forwards a filter verbatim and an
+   * unrecognised key would quietly do nothing: here, silently dropping the
+   * `has_id` clause would widen a single-point delete to the whole thread.
+   * It is not an unverified guess.
+   *
+   * Scoping this way rather than checking ids client-side first means the
+   * ENGINE enforces the boundary, so a later caller who reaches past the
+   * SDK cannot bypass it, and the round trip that the check used to cost
+   * is gone.
+   */
+  protected override pointSelector(ids: Array<string | number>): Filter {
+    return {
+      must: [this.threadClause(), { has_id: [...ids] }],
+      mustNot: [Thread.markerClause()],
+    } as unknown as Filter;
+  }
+
   protected override async ownedIds(
     ids: Array<string | number>
   ): Promise<Array<string | number>> {
@@ -195,6 +218,19 @@ export class Thread extends Scope {
     return points.filter(p => this.owns(p)).map(p => p.id);
   }
 
+  /**
+   * Refuse a point id belonging to another thread.
+   *
+   * This one DOES cost a read, and deliberately. The payload endpoints
+   * accept a filter, so the metadata writers could scope themselves the
+   * way `delete` now does — but a filter that matches nothing is a
+   * SUCCESS, and `mergeMetadata` / `deleteMetadataKeys` are documented to
+   * throw PointNotFoundError when the point is not there. Scoping them by
+   * filter would turn a write to a foreign or missing id into a silent
+   * no-op reported as success. The round trip buys the error. `delete`
+   * has no such contract to lose: deleting an id that is not there was
+   * always a no-op that returns true.
+   */
   protected override async assertOwns(
     ids: Array<string | number>
   ): Promise<void> {

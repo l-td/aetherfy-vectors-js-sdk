@@ -45,7 +45,15 @@
     can narrow a thread's results but cannot reach another thread's messages.
   - `retrieve`, `delete` by id list, and the three metadata writers refuse ids
     belonging to another thread: a thread's point ids are unique within the
-    shared collection, not within the thread.
+    shared collection, not within the thread. `delete` enforces this
+    SERVER-side, addressing `{thread_id AND has_id}` in one request; the
+    metadata writers read first, because a filter that matches nothing is a
+    success and they are documented to throw `PointNotFoundError`.
+    `retrieve` cannot be filtered at all — Qdrant's point-request takes ids
+    only — so it filters what came back.
+  - `delete([])` returns true without a request where it used to send one.
+    For a thread that is a safety property: an id list becomes a `has_id`
+    clause, and an empty one must never reach the engine.
   - `getThread(id)` reports the shared collection's config with `name` set to
     the thread id and `points_count` set to that thread's own message count.
   - `Thread`'s reserved metadata keys gain `thread_id` and `thread_marker`.

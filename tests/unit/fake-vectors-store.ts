@@ -50,7 +50,17 @@ function lookup(payload: Record<string, unknown>, key: string): unknown {
   return cur;
 }
 
-function matchCondition(payload: Record<string, unknown>, cond: Cond): boolean {
+function matchCondition(
+  payload: Record<string, unknown>,
+  cond: Cond,
+  pointId?: string | number
+): boolean {
+  if ('has_id' in cond) {
+    // A first-class Qdrant condition (HasIdCondition in the pinned 1.15.0
+    // schema), so the double supports it rather than treating it as an
+    // unknown shape.
+    return (cond.has_id as Array<string | number>).includes(pointId!);
+  }
   if (!('key' in cond)) {
     throw new Error(`unsupported filter condition: ${JSON.stringify(cond)}`);
   }
@@ -82,7 +92,8 @@ function matchCondition(payload: Record<string, unknown>, cond: Cond): boolean {
 export function matches(
   payload: Record<string, unknown>,
   filter?: Filter,
-  failOpenOnMustNot = false
+  failOpenOnMustNot = false,
+  pointId?: string | number
 ): boolean {
   if (!filter) return true;
   const f = filter as unknown as Record<string, Cond[]>;
@@ -92,15 +103,20 @@ export function matches(
   if (unknown.length > 0) {
     throw new Error(`unknown filter clause(s): ${unknown.sort().join(', ')}`);
   }
-  if (!(f.must ?? []).every(c => matchCondition(payload, c))) return false;
+  if (!(f.must ?? []).every(c => matchCondition(payload, c, pointId))) {
+    return false;
+  }
   if (
     !failOpenOnMustNot &&
-    (f.mustNot ?? []).some(c => matchCondition(payload, c))
+    (f.mustNot ?? []).some(c => matchCondition(payload, c, pointId))
   ) {
     return false;
   }
   const should = f.should ?? [];
-  if (should.length > 0 && !should.some(c => matchCondition(payload, c))) {
+  if (
+    should.length > 0 &&
+    !should.some(c => matchCondition(payload, c, pointId))
+  ) {
     return false;
   }
   return true;
@@ -213,7 +229,7 @@ export class FakeVectorsClient {
       return true;
     }
     for (const [id, p] of [...store.entries()]) {
-      if (matches(p.payload, selector)) store.delete(id);
+      if (matches(p.payload, selector, false, id)) store.delete(id);
     }
     return true;
   }
@@ -231,7 +247,7 @@ export class FakeVectorsClient {
 
   private selected(name: string, filter?: Filter): Stored[] {
     return [...this.points(name).values()].filter(p =>
-      matches(p.payload, filter, this.failOpenOnMustNot)
+      matches(p.payload, filter, this.failOpenOnMustNot, p.id)
     );
   }
 
