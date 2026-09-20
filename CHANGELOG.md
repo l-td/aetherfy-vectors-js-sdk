@@ -28,6 +28,9 @@
     `new MemoryClient({ threadVectorSize: 384, threadDistance: DistanceMetric.COSINE })`
     and are fixed when the threads collection is first created.
     `createNamespace` keeps its options — a namespace is still one collection.
+  - `listThreads` is de-duplicated: creating a thread is a check-then-write,
+    so two callers racing the exists-check can both write a marker. Nothing
+    else notices, but the listing would have named the thread twice.
   - Creating a thread writes one MARKER point, which is what makes an EMPTY
     thread exist: `threadExists`, `listThreads` and `ThreadAlreadyExistsError`
     keep the behaviour they had. The marker is never a message — `history`,

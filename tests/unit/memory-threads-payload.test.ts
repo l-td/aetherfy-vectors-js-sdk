@@ -109,6 +109,45 @@ describe('an empty thread', () => {
     await expect(memory.deleteThread('never')).resolves.toBe(false);
   });
 
+  it('a second marker does not list the thread twice', async () => {
+    // Creating a thread is a check-then-write, so it can lose a race: two
+    // callers that both pass the exists-check before either marker lands both
+    // write one. Every other read tolerates that — threadExists counts, count
+    // and history exclude markers, deleteThread removes every row with the id
+    // — but listThreads reads the id off each marker, so without
+    // de-duplication it reported the thread twice. Replays the losing
+    // caller's write directly, since the race itself is not reproducible
+    // in-process.
+    const { store, memory } = build();
+    await memory.createThread('a');
+    await store.upsert(THREADS_COLLECTION, [
+      {
+        id: '00000000-0000-4000-8000-0000000000ff',
+        vector: v(),
+        payload: { [THREAD_ID_KEY]: 'a', [THREAD_MARKER_KEY]: true },
+      },
+    ]);
+
+    await expect(memory.listThreads()).resolves.toEqual(['a']);
+    // ...and nothing else was disturbed.
+    await expect(memory.threadExists('a')).resolves.toBe(true);
+    await expect((await memory.thread('a')).count()).resolves.toBe(0);
+    await expect(memory.deleteThread('a')).resolves.toBe(true);
+    await expect(memory.listThreads()).resolves.toEqual([]);
+  });
+
+  it('listThreads keeps first-seen order', async () => {
+    const { memory } = build();
+    for (const name of ['zeta', 'alpha', 'mid']) {
+      await memory.createThread(name);
+    }
+    await expect(memory.listThreads()).resolves.toEqual([
+      'zeta',
+      'alpha',
+      'mid',
+    ]);
+  });
+
   it('the marker carries a unit vector, not a zero vector', async () => {
     const { store, memory } = build();
     await memory.createThread('conv-1');

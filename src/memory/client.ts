@@ -376,6 +376,14 @@ export class MemoryClient {
    * A scroll over the MARKER points, so the work is bounded by the number of
    * threads rather than the number of messages, and an empty thread is listed
    * like any other.
+   *
+   * DE-DUPLICATED, because a thread can end up with two markers. Creating one
+   * is a check-then-write, so two callers that both pass the check before
+   * either marker lands both write one. Nothing else notices — `threadExists`
+   * is a count > 0, `count` and `history` exclude markers, and `deleteThread`
+   * removes every row with the id — but this method read the id off each
+   * marker and would have listed the thread twice. A `Map`/`Set` round-trip
+   * keeps first-seen order.
    */
   async listThreads(): Promise<string[]> {
     if (!(await this._client.collectionExists(THREADS_COLLECTION))) {
@@ -392,7 +400,7 @@ export class MemoryClient {
       const id = point.payload?.[THREAD_ID_KEY];
       if (typeof id === 'string') ids.push(id);
     }
-    return ids;
+    return [...new Set(ids)];
   }
 
   /**
