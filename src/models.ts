@@ -63,11 +63,21 @@ export interface SearchResult {
  * Collection information.
  *
  * SNAKE_CASE ON PURPOSE, for the same reason `UsageStats` is: `getCollection()`
- * returns `response.data.result` VERBATIM and there is no inbound transform in
- * this SDK. The camelCase vocabulary is OUTBOUND only (`serializeFilter`, and
- * the explicit per-call-site option mapping); the single inbound rename
- * anywhere is `scroll()`'s hand-written `next_page_offset` -> `nextPageOffset`.
- * So the honest type for a raw body is the body's own spelling.
+ * returns `response.data.result` VERBATIM.
+ *
+ * THIS SDK HAS TWO RESPONSE PATTERNS, and which one a method uses decides
+ * whether its type may be camelCase:
+ *   - EXPLICIT MAPPING — `analyzeSchema()` (`sample_size` -> `sampleSize` and
+ *     its siblings), `getSchema()` (`enforcement_mode` -> `enforcementMode`),
+ *     `scroll()` (`next_page_offset` -> `nextPageOffset`). These read the wire
+ *     and build the object, so a camelCase field is real at runtime.
+ *   - VERBATIM PASSTHROUGH — this method, `getUsageStats()`, `search()`. The
+ *     declared type is an assertion over raw JSON with NO runtime existence,
+ *     so it must mirror the body's own spelling or it describes nothing.
+ * An earlier version of this comment claimed there was no inbound transform
+ * anywhere and that `scroll()` was the only rename; both were false (corrected
+ * 2026-09-21). The camelCase vocabulary is otherwise OUTBOUND only
+ * (`serializeFilter`, and the explicit per-call-site option mapping).
  *
  * `points_count` was declared `pointsCount` until 2026-09-02 and was therefore
  * `undefined` on every call — the identical defect `UsageStats` carried, one
@@ -103,13 +113,11 @@ export interface Collection {
 /**
  * Usage statistics for the account.
  *
- * SNAKE_CASE ON PURPOSE, and the one place in this file where that is true.
- * `getUsageStats()` returns the HTTP response body untouched — there is no
- * inbound transform layer in this SDK. The camelCase vocabulary is OUTBOUND
- * only (`serializeFilter`, and the explicit per-call-site option mapping);
- * the single inbound rename anywhere is `scroll()`'s hand-written
- * `next_page_offset` -> `nextPageOffset`. So the honest type for a raw body
- * is the body's own spelling.
+ * SNAKE_CASE ON PURPOSE: `getUsageStats()` returns the HTTP response body
+ * untouched, so the declared type is an assertion over raw JSON with no
+ * runtime existence — it must mirror the body's own spelling or it describes
+ * nothing. See `Collection` above for the two response patterns this SDK uses
+ * and why only the verbatim-passthrough ones are constrained this way.
  *
  * The fields mirror `GET /api/v1/analytics/usage` verbatim — no derived
  * values, no unit conversion, no renaming. The shape is pinned live by the
