@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Agent errors are now `instanceof AetherfyVectorsError` from the root.**
+  `AgentError` and every error under it extend `AetherfyVectorsError` in the
+  types, but the root and `aetherfy-vectors/agent` were built as two separate
+  bundles, each with its own copy of the base class, so
+  `err instanceof AetherfyVectorsError` was `false` for every agent error and a
+  catch-all on the base class silently skipped them. Both entry points now
+  share one copy.
+- **The package can no longer yield duplicate classes when loaded as both
+  CommonJS and ESM.** An application whose own code `import`s this package
+  while a dependency `require`s it used to get two copies of every class (the
+  "dual package hazard"), and `instanceof` failed across them. The ESM entry
+  points are now thin wrappers over the CommonJS build, so `import` and
+  `require` return the same objects. Nothing you import changes: same entry
+  points, same names, same default export.
+- **TypeScript on `node16` / `nodenext` resolves the default import.** In an
+  ES module, `import AetherfyVectorsClient from 'aetherfy-vectors'` was typed
+  as the whole module rather than the client class ("Cannot use namespace as a
+  type", "This expression is not constructable"), although it ran correctly.
+  The package now ships ES-module declarations for both entry points and names
+  them in `exports`, so the types match what the import returns.
+
 ### Removed
 
 - **`Thread` has no payload-schema methods.** `getSchema`, `setSchema`,

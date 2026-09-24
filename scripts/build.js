@@ -129,6 +129,9 @@ function validateBuild() {
     'dist/agent.cjs.js',
     'dist/agent.esm.mjs',
     'dist/agent/index.d.ts',
+    // The ES-module declaration twins, generated beside the wrappers.
+    'dist/index.d.mts',
+    'dist/agent.d.mts',
   ];
 
   const missingFiles = requiredFiles.filter(file => !fs.existsSync(file));

@@ -21,7 +21,10 @@ const pkg = JSON.parse(
 ) as {
   version: string;
   dependencies: Record<string, string>;
-  exports: Record<string, Record<string, string>>;
+  exports: Record<
+    string,
+    Record<string, string | { types: string; default: string }>
+  >;
   files: string[];
 };
 
@@ -83,11 +86,29 @@ describe('packaging', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('exports the ./agent subpath with all three entries', () => {
+  it('exports the ./agent subpath with both formats, each with its types', () => {
+    // Each side names its own declarations: an ES-module twin (.d.mts) for
+    // `import`, the tsc-emitted .d.ts for `require`. Without the twin,
+    // TypeScript under node16/nodenext typed the ESM entry through the .d.ts —
+    // a CommonJS declaration in this package — and got the default import
+    // wrong. tests/package/single-identity.test.ts (g) compiles both sides.
     expect(pkg.exports['./agent']).toEqual({
-      types: './dist/agent/index.d.ts',
-      import: './dist/agent.esm.mjs',
-      require: './dist/agent.cjs.js',
+      import: {
+        types: './dist/agent.d.mts',
+        default: './dist/agent.esm.mjs',
+      },
+      require: {
+        types: './dist/agent/index.d.ts',
+        default: './dist/agent.cjs.js',
+      },
+    });
+  });
+
+  it('exports the root with both formats, each with its types', () => {
+    expect(pkg.exports['.']).toEqual({
+      import: { types: './dist/index.d.mts', default: './dist/index.mjs' },
+      require: { types: './dist/index.d.ts', default: './dist/index.cjs.js' },
+      browser: './dist/browser.js',
     });
   });
 
@@ -96,8 +117,12 @@ describe('packaging', () => {
     // no declared module type, so Node parses it as CommonJS, fails, and
     // reparses it as ESM — an overhead paid on every import — and warns with
     // MODULE_TYPELESS_PACKAGE_JSON outside node_modules.
-    expect(pkg.exports['.'].import).toBe('./dist/index.mjs');
-    expect(pkg.exports['./agent'].import).toBe('./dist/agent.esm.mjs');
+    const importOf = (entry: string): string => {
+      const target = pkg.exports[entry].import;
+      return typeof target === 'string' ? target : target.default;
+    };
+    expect(importOf('.')).toBe('./dist/index.mjs');
+    expect(importOf('./agent')).toBe('./dist/agent.esm.mjs');
     // `module` is the pre-exports-map field bundlers still read; it must not be
     // left pointing at the old filename.
     expect((pkg as unknown as { module: string }).module).toBe(

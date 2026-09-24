@@ -22,7 +22,29 @@ jobs:
       - name: Run full deployment check
         run: npm run deploy-check
 
-      - name: Publish to npm
-        run: npm publish
+      # PACK ONCE, TEST THAT FILE, PUBLISH THAT FILE. `npm publish` from the
+      # folder runs prepublishOnly, which cleans and rebuilds, so the bytes it
+      # uploaded were a second build that nothing had tested. Publishing a
+      # tarball runs no lifecycle script and no build: what the package test
+      # installed is exactly what npm receives. The test and the publish log
+      # the same sha1 (npm reports it as `shasum`).
+      - name: Pack the release tarball
+        id: pack
+        run: |
+          mkdir -p release
+          file=$(npm pack --json --pack-destination release | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(0, 'utf8'))[0].filename)")
+          # "./" IS LOAD-BEARING: npm reads a bare "release/<file>.tgz" as a
+          # GitHub shorthand (user/repo) and tries to git-clone it.
+          echo "tarball=./release/$file" >> "$GITHUB_OUTPUT"
+          sha1sum "./release/$file"
+
+      - name: Test the tarball that will be published
+        run: npm run test:package
         env:
+          AETHERFY_PACKAGE_TARBALL: ${{ steps.pack.outputs.tarball }}
+
+      - name: Publish that tarball
+        run: npm publish "$TARBALL"
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

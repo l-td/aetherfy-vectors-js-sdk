@@ -79,9 +79,20 @@ import * as ts from 'typescript';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
+/** A conditional exports target: a path, or conditions nesting more targets. */
+type ExportTarget = string | { [condition: string]: ExportTarget };
+
 interface PackageManifest {
   name: string;
-  exports: Record<string, { types?: string }>;
+  exports: Record<string, ExportTarget>;
+}
+
+/** Every path under a `types` condition, at any depth of nesting. */
+function typesTargets(target: ExportTarget, underTypes = false): string[] {
+  if (typeof target === 'string') return underTypes ? [target] : [];
+  return Object.entries(target).flatMap(([condition, nested]) =>
+    typesTargets(nested, underTypes || condition === 'types')
+  );
 }
 
 interface EntryPoint {
@@ -120,30 +131,39 @@ const OUT_DIR = path.resolve(CONFIG.options.outDir ?? 'dist');
 
 /**
  * Map each "exports" entry to the source file its declarations come from.
- * The `types` condition names a .d.ts under outDir; tsc writes it from the .ts
- * at the same relative path under rootDir, so the mapping is the compiler's
- * own, read from the same tsconfig — not a convention this test assumes.
+ * Its `types` conditions (nested under `import` / `require`) name a .d.ts under
+ * outDir, which tsc writes from the .ts at the same relative path under
+ * rootDir, so the mapping is the compiler's own, read from the same tsconfig —
+ * not a convention this test assumes. The `.d.mts` twin on the `import` side is
+ * GENERATED from the built bundle and re-exports that same .d.ts, so it maps to
+ * no source of its own and is not what this reads. Exactly one .d.ts per entry:
+ * two would leave the source ambiguous, none would leave it unknown.
  */
 function entryPoints(): EntryPoint[] {
   return Object.entries(MANIFEST.exports).map(([subpath, conditions]) => {
-    if (!conditions.types) {
+    const declarations = [
+      ...new Set(typesTargets(conditions).filter(t => t.endsWith('.d.ts'))),
+    ];
+    if (declarations.length !== 1) {
       throw new Error(
-        `package.json exports['${subpath}'] declares no "types" condition, ` +
-          'so this test cannot tell which source file it publishes.'
+        `package.json exports['${subpath}'] names ${declarations.length} .d.ts ` +
+          `files under "types" (${declarations.join(', ') || 'none'}); this ` +
+          'test needs exactly one to tell which source file it publishes.'
       );
     }
-    const declaration = path.resolve(REPO_ROOT, conditions.types);
+    const [types] = declarations;
+    const declaration = path.resolve(REPO_ROOT, types);
     const relative = path.relative(OUT_DIR, declaration);
-    if (relative.startsWith('..') || !relative.endsWith('.d.ts')) {
+    if (relative.startsWith('..')) {
       throw new Error(
-        `package.json exports['${subpath}'].types (${conditions.types}) is ` +
-          `not a .d.ts under the tsconfig outDir (${OUT_DIR}).`
+        `package.json exports['${subpath}'] types (${types}) is not under ` +
+          `the tsconfig outDir (${OUT_DIR}).`
       );
     }
     const source = path.join(SOURCE_ROOT, relative.replace(/\.d\.ts$/, '.ts'));
     if (!fs.existsSync(source)) {
       throw new Error(
-        `package.json exports['${subpath}'] publishes ${conditions.types}, ` +
+        `package.json exports['${subpath}'] publishes ${types}, ` +
           `but its source ${source} does not exist.`
       );
     }

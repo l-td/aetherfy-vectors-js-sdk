@@ -85,6 +85,16 @@ jobs:
           test -f dist/agent.cjs.js
           test -f dist/agent.esm.mjs
           test -f dist/agent/index.d.ts
+          test -f dist/index.d.mts
+          test -f dist/agent.d.mts
+
+      # AFTER the build, by construction: it packs and installs what the build
+      # just wrote. Run before it, it would test whatever dist/ was already
+      # there. It is the only check that sees the package a customer gets —
+      # a chunk left out of "files", an exports path to nothing, a class that
+      # exists twice across the CommonJS and ESM entry points.
+      - name: Test the packed tarball
+        run: npm run test:package
 
   security:
     runs-on: ubuntu-latest
