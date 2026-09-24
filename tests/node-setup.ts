@@ -23,13 +23,16 @@ afterEach(() => {
   nock.cleanAll();
 });
 
-// Restore HTTP connections after all tests
-afterAll(async () => {
+// Turn interception off when this file is done — in the TEST ENVIRONMENT's
+// teardown (tests/node-environment.ts), NOT an afterAll. A file that fails to
+// load runs no tests and so no afterAll, and its nock instance used to stay
+// hooked into the worker's shared http module, refusing every later file's
+// mocked requests ("Disallowed net connect"). Teardown runs for every file.
+(
+  globalThis as { __restoreNetworkInterception?: () => void }
+).__restoreNetworkInterception = () => {
   nock.restore();
   nock.enableNetConnect();
-
-  // Give time for any pending async operations to complete
-  await new Promise(resolve => setTimeout(resolve, 100));
-});
+};
 
 export {};

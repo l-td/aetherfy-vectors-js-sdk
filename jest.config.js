@@ -22,7 +22,8 @@ module.exports = {
   projects: [
     {
       displayName: 'node',
-      testEnvironment: 'node',
+      // node + a teardown that always removes nock; see the file.
+      testEnvironment: '<rootDir>/tests/node-environment.ts',
       testMatch: ['<rootDir>/tests/unit/**/*.test.ts'],
       setupFilesAfterEnv: [
         '<rootDir>/tests/setup.ts',
