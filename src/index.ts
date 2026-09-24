@@ -48,6 +48,8 @@ export {
   SearchOptions,
   RetrieveOptions,
   CountOptions,
+  ScrollOptions,
+  ScrollResult,
   ScrollIterOptions,
   ScrollPoint,
   ClientConfig,
@@ -56,8 +58,6 @@ export {
   UsageStats,
 
   // Utility interfaces
-  ApiResponse,
-  PaginationInfo,
   BatchResult,
 
   // Schema types
@@ -168,6 +168,7 @@ export {
   NamespaceNotFoundError,
   ThreadAlreadyExistsError,
   ThreadNotFoundError,
+  ThreadVectorSizeMismatchError,
 } from './memory';
 export type {
   Message,

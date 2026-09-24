@@ -11,6 +11,12 @@
   `thread.setSchema(...)` would have imposed a schema on every other thread in
   the workspace. Removed rather than left lying;
   `MemoryClient.clearSchemaCache()` is unchanged.
+- **`ApiResponse` and `PaginationInfo` are no longer exported** (the interfaces
+  are gone). Both were exported from the package root and PRODUCED BY NOTHING:
+  no method returns either, no type refers to either, and `PaginationInfo`'s
+  `hasMore` promised a field nothing ever set. `scroll()` pages with
+  `ScrollResult.nextPageOffset`. Removed outright — there are no users to
+  deprecate for.
 
 ### Changed
 
@@ -65,6 +71,16 @@
 
 ### Added
 
+- **The package root exports everything the SDK hands you.**
+  `ThreadVectorSizeMismatchError` was thrown by the memory client and exported
+  from the memory module but not from `aetherfy-vectors`, so `err instanceof
+  ThreadVectorSizeMismatchError` was impossible for a root importer.
+  `ScrollOptions` and `ScrollResult` — the parameter and return types of
+  `client.scroll()` — were the only method option/result types the root did not
+  export. All three are exported now, and `tests/unit/public-surface.test.ts`
+  makes the class structural: for every entry point in package.json `exports`,
+  every error class its code throws and every package type in a public
+  signature must be importable from it.
 - **`createFieldIndex` / `deleteFieldIndex` on `AetherfyVectorsClient`.**
   `PUT /collections/{name}/index` and
   `DELETE /collections/{name}/index/{fieldName}` have been on the backend (and

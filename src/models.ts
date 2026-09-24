@@ -327,34 +327,6 @@ export interface ClientConfig {
 }
 
 /**
- * Response wrapper for API calls
- */
-export interface ApiResponse<T> {
-  /** Response data */
-  data: T;
-  /** Response status */
-  status: 'success' | 'error';
-  /** Optional message */
-  message?: string;
-  /** Request ID for tracking */
-  requestId?: string;
-}
-
-/**
- * Pagination information
- */
-export interface PaginationInfo {
-  /** Current page/offset */
-  offset: number;
-  /** Page size/limit */
-  limit: number;
-  /** Total number of items (if known) */
-  total?: number;
-  /** Whether there are more items */
-  hasMore?: boolean;
-}
-
-/**
  * Supported data types for schema validation
  */
 export type DataType =
