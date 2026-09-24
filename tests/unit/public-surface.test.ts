@@ -22,6 +22,11 @@
  *       must be exported from that entry point. Built-ins (`Error`,
  *       `TypeError`, `RangeError`) are declared by the platform, not by this
  *       package, and are importable by definition.
+ *       The walk follows STATIC `import` / `export ... from` declarations
+ *       only. That is enforced, not assumed: a reached file containing a
+ *       dynamic `import(...)`, a `require(...)` call or an
+ *       `import x = require(...)` fails the test, because the code it loads
+ *       would otherwise go unchecked without anything saying so.
  *   (b) PUBLIC SIGNATURE TYPES ARE IMPORTABLE. For every public member
  *       (constructor, method, accessor, property; static or instance, own or
  *       inherited from a class in this package) of every exported class, and
@@ -32,24 +37,27 @@
  *       that entry point. It does not descend into the MEMBERS of those types;
  *       a type that is importable is the unit here.
  *
- *   (d) EVERY ERROR IN AN EXPORTED HIERARCHY IS IMPORTABLE. (a) sees only
- *       `throw new X(...)`; an error built by a FACTORY and thrown by value
- *       (`throw createErrorFromResponse(...)`) is decided at runtime, and
- *       every class that factory builds — ConflictError, CollectionInUseError,
- *       RateLimitExceededError, ... — was exported only because someone
- *       remembered to. So: an entry point's BASE error classes are the error
- *       classes it exports whose nearest ancestor declared in this package it
- *       does NOT export (for the root: AetherfyVectorsError, and auth.ts's
- *       AuthenticationError, which extends Error directly; for the agent
- *       subpath: AgentError). Every class declared in a file the entry point
- *       reaches that descends from one of its bases, found through the
- *       checker's base types, must be exported from it.
- *       ANCHORED ON EXPORTS, not on files, because files are not partitioned
- *       by entry point: the agent subpath reaches exceptions.ts (AgentError
- *       extends AetherfyVectorsError), and a file-anchored rule would demand
- *       every vector error be exported from `aetherfy-vectors/agent`. The cost
- *       of that anchor: a BASE dropped from the exports takes its subtree out
- *       of (d). Today every base is thrown directly, so (a) reds on that.
+ *   (d) EVERY ERROR IN AN ENTRY POINT'S OWN HIERARCHY IS IMPORTABLE. (a)
+ *       sees only `throw new X(...)`; an error built by a FACTORY and thrown
+ *       by value (`throw createErrorFromResponse(...)`) is decided at runtime,
+ *       and every class that factory builds — ConflictError,
+ *       CollectionInUseError, RateLimitExceededError, ... — was exported only
+ *       because someone remembered to.
+ *       ANCHORED ON SOURCE, not on exports. Each entry point OWNS the source
+ *       directory its entry file sits in, minus any deeper directory another
+ *       entry point owns: the root owns src/ minus src/agent/, the agent
+ *       subpath owns src/agent/. Its BASE error classes are the error classes
+ *       defined in its own files whose parent is defined outside them (the
+ *       root: AetherfyVectorsError and auth.ts's AuthenticationError, both
+ *       extending Error; the agent subpath: AgentError, whose parent lives in
+ *       the root's exceptions.ts). Every base, and every class defined in the
+ *       entry point's own files that descends from one, found through the
+ *       checker's base types, must be exported from it. Nothing here reads
+ *       the exports to decide what is checked, so dropping a BASE from the
+ *       exports reds as well; an earlier version anchored on the exports and
+ *       could not see that. Ownership is by directory, not by reachability,
+ *       because reachability does not partition: the agent subpath reaches
+ *       exceptions.ts, and must not be asked to export every vector error.
  *
  * DELIBERATELY NOT ASSERTED — do not "extend" this into it:
  *   (c) NO EXPORTED ORPHANS. Whether an exported type is USED by anything is a
@@ -60,7 +68,7 @@
  *       reds on unreferenced exports would red on legitimate ones.
  *
  * ANTI-NO-OP: every entry point must have reached more files than itself,
- * found package-declared throw sites, walked public members, found at least
+ * found package-declared throw sites, walked public members, and own at least
  * one base error class and at least one class descending from it. A test that
  * walked nothing looks exactly like a test that verified everything.
  */
@@ -152,6 +160,12 @@ const ENTRY_POINTS = entryPoints();
 let program: ts.Program;
 let checker: ts.TypeChecker;
 
+// THE BUDGET IS MEASURED, not guessed. Building this program took 6.2 s and
+// 6.9 s with this file run alone (one outlier at 19.7 s), and 12.3 s and
+// 19.7 s inside the full parallel suite, on a Windows dev box (2026-09-24).
+// The worst of those is under a third of 120 s, so the budget was left
+// alone. If a CI runner gets near it, re-measure before raising it: a timeout
+// is how a slow runner turns into a red for the wrong reason.
 beforeAll(() => {
   program = ts.createProgram({
     rootNames: CONFIG.fileNames,
@@ -202,9 +216,36 @@ function exportedSymbols(entry: EntryPoint): Set<ts.Symbol> {
 }
 
 /**
+ * Refuse a file that loads code the static walk below cannot follow. Parsed,
+ * so a `require()` in a comment or a string is not a hit.
+ */
+function assertStaticImportsOnly(sf: ts.SourceFile): void {
+  const visit = (node: ts.Node): void => {
+    const dynamic =
+      (ts.isCallExpression(node) &&
+        (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          (ts.isIdentifier(node.expression) &&
+            node.expression.text === 'require'))) ||
+      (ts.isImportEqualsDeclaration(node) &&
+        ts.isExternalModuleReference(node.moduleReference));
+    if (dynamic) {
+      throw new Error(
+        `${where(node)} loads a module dynamically (import() / require()). ` +
+          'The reachability walk follows static import/export declarations ' +
+          'only and cannot follow this one, so whatever it loads would go ' +
+          'unchecked. Make it a static import, or teach the walk this edge.'
+      );
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+}
+
+/**
  * Every package source file the entry point's RUNTIME import graph reaches.
  * `import type` / `export type ... from` edges are not followed: nothing
- * reached only through them executes, so nothing in it can throw.
+ * reached only through them executes, so nothing in it can throw. Every
+ * reached file is checked for dynamic loads first (see above).
  */
 function reachableFiles(entry: EntryPoint): ts.SourceFile[] {
   const seen = new Set<ts.SourceFile>();
@@ -213,6 +254,7 @@ function reachableFiles(entry: EntryPoint): ts.SourceFile[] {
     const sf = queue.pop() as ts.SourceFile;
     if (seen.has(sf)) continue;
     seen.add(sf);
+    assertStaticImportsOnly(sf);
     for (const statement of sf.statements) {
       let specifier: ts.Expression | undefined;
       if (ts.isImportDeclaration(statement)) {
@@ -308,41 +350,69 @@ function isPackageErrorClass(symbol: ts.Symbol): boolean {
   );
 }
 
-/** See (d): exported error classes whose package parent is not exported. */
-function baseErrorClasses(exported: Set<ts.Symbol>): Set<ts.Symbol> {
-  return new Set(
-    [...exported].filter(symbol => {
-      if (!isPackageErrorClass(symbol)) return false;
-      const parent = ancestorsOf(symbol).find(isPackageSymbol);
-      return !parent || !exported.has(parent);
-    })
-  );
+/**
+ * The entry point that owns a source file: the one whose entry file's
+ * directory is the DEEPEST directory containing it. So src/agent/** belongs to
+ * the agent subpath and everything else under src/ to the root, and a new
+ * subpath in package.json "exports" takes its own directory automatically.
+ */
+function ownerOf(sf: ts.SourceFile): EntryPoint | undefined {
+  const file = path.resolve(sf.fileName);
+  let owner: EntryPoint | undefined;
+  for (const entry of ENTRY_POINTS) {
+    const dir = path.dirname(entry.source);
+    const relative = path.relative(dir, file);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) continue;
+    if (!owner || dir.length > path.dirname(owner.source).length) {
+      owner = entry;
+    }
+  }
+  return owner;
 }
 
 interface HierarchyMember {
   symbol: ts.Symbol;
+  /** The base this class is, or descends from. */
   base: ts.Symbol;
   at: string;
 }
 
-/** Every class declared in `files` that descends from one of `bases`. */
-function hierarchyMembers(
-  files: ts.SourceFile[],
-  bases: Set<ts.Symbol>
-): HierarchyMember[] {
-  const out: HierarchyMember[] = [];
-  for (const sf of files) {
+/**
+ * See (d): every error class defined in the entry point's OWN files that is
+ * one of its bases (its parent is defined outside those files) or descends
+ * from one. Decided from the source alone; the exports are never consulted.
+ */
+function ownHierarchy(entry: EntryPoint): {
+  bases: ts.Symbol[];
+  members: HierarchyMember[];
+} {
+  const declared: { symbol: ts.Symbol; at: string }[] = [];
+  for (const sf of program.getSourceFiles()) {
+    if (!isPackageFile(sf) || ownerOf(sf) !== entry) continue;
     for (const statement of sf.statements) {
       if (!ts.isClassDeclaration(statement) || !statement.name) continue;
       const symbol = checker.getSymbolAtLocation(statement.name);
       if (!symbol) {
         throw new Error(`Cannot resolve the class at ${where(statement)}.`);
       }
-      const base = ancestorsOf(symbol).find(a => bases.has(a));
-      if (base) out.push({ symbol, base, at: where(statement) });
+      if (isPackageErrorClass(symbol)) {
+        declared.push({ symbol, at: where(statement) });
+      }
     }
   }
-  return out;
+  const own = new Set(declared.map(d => d.symbol));
+  const bases = declared
+    .map(d => d.symbol)
+    .filter(symbol => {
+      const parent = baseClassOf(symbol);
+      return !parent || !own.has(parent);
+    });
+  const members: HierarchyMember[] = [];
+  for (const { symbol, at } of declared) {
+    const base = [symbol, ...ancestorsOf(symbol)].find(a => bases.includes(a));
+    if (base) members.push({ symbol, base, at });
+  }
+  return { bases, members };
 }
 
 /** A place a type appears in the public surface, phrased for a message. */
@@ -528,13 +598,13 @@ describe.each(ENTRY_POINTS)(
       const { own } = throwSites(files);
       const { members } = publicSurface(exportedSymbols(entry));
 
-      const bases = baseErrorClasses(exportedSymbols(entry));
+      const hierarchy = ownHierarchy(entry);
 
       expect(files.length).toBeGreaterThan(1);
       expect(own.length).toBeGreaterThan(0);
       expect(members).toBeGreaterThan(0);
-      expect(bases.size).toBeGreaterThan(0);
-      expect(hierarchyMembers(files, bases).length).toBeGreaterThan(0);
+      expect(hierarchy.bases.length).toBeGreaterThan(0);
+      expect(hierarchy.members.length).toBeGreaterThan(hierarchy.bases.length);
     });
 
     it('every error class it throws is exported from it', () => {
@@ -551,20 +621,19 @@ describe.each(ENTRY_POINTS)(
       expect([...new Set(failures)]).toEqual([]);
     });
 
-    it('every error descending from its base errors is exported from it', () => {
+    it('every error class in its own hierarchy is exported from it', () => {
       const exported = exportedSymbols(entry);
-      const members = hierarchyMembers(
-        reachableFiles(entry),
-        baseErrorClasses(exported)
-      );
+      const { members } = ownHierarchy(entry);
 
       const failures = members
         .filter(member => !exported.has(member.symbol))
         .map(
           member =>
-            `${member.symbol.getName()} (${member.at}) extends ` +
-            `${member.base.getName()} but is not exported from ` +
-            `'${entry.specifier}'`
+            `${member.symbol.getName()} (${member.at}) ` +
+            (member.base === member.symbol
+              ? 'is a base error of this entry point'
+              : `extends ${member.base.getName()}`) +
+            ` but is not exported from '${entry.specifier}'`
         );
       expect(failures).toEqual([]);
     });

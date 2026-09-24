@@ -87,7 +87,16 @@
   export. All three are exported now, and `tests/unit/public-surface.test.ts`
   makes the class structural: for every entry point in package.json `exports`,
   every error class its code throws and every package type in a public
-  signature must be importable from it.
+  signature must be importable from it, and so must every error class in the
+  entry point's own hierarchy. That last check is anchored on SOURCE, not on
+  the exports: each entry point owns its source directory (the root owns
+  `src/` minus `src/agent/`), its base errors are the error classes defined
+  there whose parent is defined elsewhere, and every base and every
+  descendant defined there must be exported. It therefore catches the classes
+  only `createErrorFromResponse` builds, and a base dropped from the exports.
+  The import walk behind the first check follows static imports only and
+  fails on a dynamic `import()` / `require()` rather than silently skipping
+  what it loads.
 - **`createFieldIndex` / `deleteFieldIndex` on `AetherfyVectorsClient`.**
   `PUT /collections/{name}/index` and
   `DELETE /collections/{name}/index/{fieldName}` have been on the backend (and
