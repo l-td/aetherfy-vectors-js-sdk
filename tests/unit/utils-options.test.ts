@@ -64,8 +64,10 @@ describe('assertAllowedOptionKeys', () => {
       captured = e as Error;
     }
     expect(captured).not.toBeNull();
-    expect(captured!.message).toMatch(/limit/);
-    expect(captured!.message).not.toMatch(/batchSize/);
+    // Only `limit` is reported as unknown; batchSize appears solely in the
+    // list of accepted options.
+    expect(captured!.message).toMatch(/unknown option\(s\): limit\. /);
+    expect(captured!.message).not.toMatch(/unknown option\(s\):[^.]*batchSize/);
   });
 
   it('guidance line is appended when provided', () => {
@@ -79,7 +81,7 @@ describe('assertAllowedOptionKeys', () => {
     ).toThrow(/limit and offset are owned by the iterator/);
   });
 
-  it('no guidance → message ends after the option list (no trailing space)', () => {
+  it('no guidance → message ends after the accepted list (no trailing space)', () => {
     let captured: Error | null = null;
     try {
       assertAllowedOptionKeys({ limit: 100 }, ALLOWED, 'm');
@@ -87,6 +89,9 @@ describe('assertAllowedOptionKeys', () => {
       captured = e as Error;
     }
     expect(captured).not.toBeNull();
-    expect(captured!.message).toBe('m: unknown option(s): limit.');
+    expect(captured).toBeInstanceOf(TypeError);
+    expect(captured!.message).toBe(
+      'm: unknown option(s): limit. Accepted: batchSize, filter, withPayload, withVectors.'
+    );
   });
 });

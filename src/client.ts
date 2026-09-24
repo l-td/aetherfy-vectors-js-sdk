@@ -36,10 +36,55 @@ import {
   isRetryableError,
 } from './exceptions';
 import { retryWithBackoff, validatePointId } from './utils';
-import { assertAllowedOptionKeys } from './utils/options';
+import { assertAllowedOptionKeys, optionKeys } from './utils/options';
 import { serializeFilter } from './utils/filter';
 import { chunkPointsByBytes, MAX_REQUEST_BYTES } from './utils/chunking';
 import { validateVectors } from './schema';
+
+// The accepted keys of every public options object on this client, derived
+// from its type by optionKeys(): a key added to or removed from the type
+// without the same change here does not compile. See src/utils/options.ts.
+const CLIENT_CONFIG_KEYS = optionKeys<ClientConfig>({
+  apiKey: true,
+  endpoint: true,
+  timeout: true,
+  enableConnectionPooling: true,
+  workspace: true,
+  apiRegion: true,
+});
+const SET_PAYLOAD_OPTION_KEYS = optionKeys<
+  NonNullable<Parameters<AetherfyVectorsClient['setPayload']>[3]>
+>({ key: true });
+const RETRIEVE_OPTION_KEYS = optionKeys<RetrieveOptions>({
+  withPayload: true,
+  withVectors: true,
+});
+const SEARCH_OPTION_KEYS = optionKeys<SearchOptions>({
+  limit: true,
+  offset: true,
+  queryFilter: true,
+  withPayload: true,
+  withVectors: true,
+  scoreThreshold: true,
+  searchParams: true,
+});
+const SCROLL_OPTION_KEYS = optionKeys<ScrollOptions>({
+  limit: true,
+  offset: true,
+  scrollFilter: true,
+  withPayload: true,
+  withVectors: true,
+});
+const SCROLL_ITER_OPTION_KEYS = optionKeys<ScrollIterOptions>({
+  batchSize: true,
+  scrollFilter: true,
+  withPayload: true,
+  withVectors: true,
+});
+const COUNT_OPTION_KEYS = optionKeys<CountOptions>({
+  countFilter: true,
+  exact: true,
+});
 
 /**
  * Aetherfy Vectors JavaScript SDK
@@ -150,6 +195,12 @@ export class AetherfyVectorsClient {
    * @param config - Configuration options
    */
   constructor(config: ClientConfig = {}) {
+    assertAllowedOptionKeys(
+      config,
+      CLIENT_CONFIG_KEYS,
+      'AetherfyVectorsClient constructor'
+    );
+
     // Initialize authentication
     const apiKey = APIKeyManager.resolveApiKey(config.apiKey);
     this.authManager = new APIKeyManager(apiKey);
@@ -225,7 +276,7 @@ export class AetherfyVectorsClient {
   /**
    * Async factory — the canonical way to construct a client with
    * apiRegion= or any other future async configuration. Mirrors Python's
-   * `AetherfyVectorsClient(api_key=..., region='eu-central-1')` contract:
+   * `AetherfyVectorsClient(api_key=..., api_region='eu-central-1')` contract:
    * when you have a client, it's fully ready.
    *
    * `apiRegion` is the API/connection endpoint pin (which regional
@@ -254,6 +305,14 @@ export class AetherfyVectorsClient {
   static async create(
     config: ClientConfig = {}
   ): Promise<AetherfyVectorsClient> {
+    // Before discovery: an unknown key must not cost a network round trip,
+    // and must fail under this method's name, not the constructor's.
+    assertAllowedOptionKeys(
+      config,
+      CLIENT_CONFIG_KEYS,
+      'AetherfyVectorsClient.create'
+    );
+
     // Validate eagerly — same semantics as Python's __init__.
     if (
       config.apiRegion !== undefined &&
@@ -1000,6 +1059,7 @@ export class AetherfyVectorsClient {
     points: Array<string | number>,
     options: { key?: string } = {}
   ): Promise<unknown> {
+    assertAllowedOptionKeys(options, SET_PAYLOAD_OPTION_KEYS, 'setPayload');
     this.validateCollectionName(collectionName);
     points.forEach(validatePointId);
     const scopedName = this.scopeCollection(collectionName);
@@ -1252,6 +1312,7 @@ export class AetherfyVectorsClient {
     ids: (string | number)[],
     options: RetrieveOptions = {}
   ): Promise<Point[]> {
+    assertAllowedOptionKeys(options, RETRIEVE_OPTION_KEYS, 'retrieve');
     this.validateCollectionName(collectionName);
     ids.forEach(validatePointId);
 
@@ -1324,23 +1385,12 @@ export class AetherfyVectorsClient {
     queryVector: number[],
     options: SearchOptions = {}
   ): Promise<SearchResult[]> {
-    // Runtime kwarg allowlist — same contract as scrollIter. TypeScript's
-    // excess-property check only fires on fresh object literals, so a
-    // pre-built options variable, an `as any` cast, or any untyped JS caller
-    // could pass `{ hnswEf: 256 }` and have it silently dropped from the
-    // body. Silent drop is exactly how the missing search-params passthrough
-    // stayed invisible on the Python side; fail loudly instead.
+    // `{ hnswEf: 256 }` would otherwise be dropped from the body silently,
+    // which is how the missing search-params passthrough stayed invisible on
+    // the Python side.
     assertAllowedOptionKeys(
-      options as Record<string, unknown>,
-      [
-        'limit',
-        'offset',
-        'queryFilter',
-        'withPayload',
-        'withVectors',
-        'scoreThreshold',
-        'searchParams',
-      ],
+      options,
+      SEARCH_OPTION_KEYS,
       'search',
       'Engine-level search tuning goes in searchParams, e.g. { searchParams: { hnsw_ef: 256 } }.'
     );
@@ -1394,6 +1444,7 @@ export class AetherfyVectorsClient {
     collectionName: string,
     options: ScrollOptions = {}
   ): Promise<ScrollResult> {
+    assertAllowedOptionKeys(options, SCROLL_OPTION_KEYS, 'scroll');
     this.validateCollectionName(collectionName);
 
     const scopedName = this.scopeCollection(collectionName);
@@ -1444,8 +1495,8 @@ export class AetherfyVectorsClient {
    * by default.
    *
    * `limit` and `offset` are not exposed — they're owned by the iterator.
-   * Callers control page size via `batchSize`. TypeScript's options type
-   * enforces the kwarg allowlist at compile time.
+   * Callers control page size via `batchSize`. An unknown option throws a
+   * TypeError, as on every other method here.
    *
    * @param collectionName - Collection to iterate.
    * @param options - Iteration options. `batchSize` defaults to 256
@@ -1460,21 +1511,29 @@ export class AetherfyVectorsClient {
    * }
    * ```
    */
-  async *scrollIter(
+  scrollIter(
     collectionName: string,
     options: ScrollIterOptions = {}
   ): AsyncGenerator<ScrollPoint, void, undefined> {
-    // Runtime kwarg allowlist — mirrors Python's no-**kwargs contract so
-    // `as any` casts and untyped JS callers can't silently ignore unknown
-    // options (e.g. `{ batchSize: 256, limit: 100 }` would otherwise page
-    // at 256 with `limit` dropped).
+    // Checked HERE, at the call, not inside the generator: a generator's body
+    // does not run until the first next(), so a guard in it would let
+    // `const it = client.scrollIter(c, { limit: 100 })` succeed. Python binds
+    // a generator's keyword arguments at the call, too.
+    // `{ batchSize: 256, limit: 100 }` would otherwise page at 256 with
+    // `limit` dropped.
     assertAllowedOptionKeys(
-      options as Record<string, unknown>,
-      ['batchSize', 'scrollFilter', 'withPayload', 'withVectors'],
+      options,
+      SCROLL_ITER_OPTION_KEYS,
       'scrollIter',
       'Pass batchSize to control page size; limit and offset are owned by the iterator.'
     );
+    return this.scrollIterPages(collectionName, options);
+  }
 
+  private async *scrollIterPages(
+    collectionName: string,
+    options: ScrollIterOptions
+  ): AsyncGenerator<ScrollPoint, void, undefined> {
     const {
       batchSize = 256,
       scrollFilter,
@@ -1515,6 +1574,7 @@ export class AetherfyVectorsClient {
     collectionName: string,
     options: CountOptions = {}
   ): Promise<number> {
+    assertAllowedOptionKeys(options, COUNT_OPTION_KEYS, 'count');
     this.validateCollectionName(collectionName);
 
     const scopedName = this.scopeCollection(collectionName);

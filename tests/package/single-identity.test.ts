@@ -45,11 +45,8 @@
  *       "typesVersions"; without that mapping `aetherfy-vectors/agent` had no
  *       declarations at all under node10.
  *
- * WHICH TARBALL. With AETHERFY_PACKAGE_TARBALL set, this tests THAT file — the
- * release packs once, tests the tarball, and publishes the same file, so the
- * bytes a customer installs are the bytes tested. Unset, it packs dist/ itself
- * (local runs, and the CI matrix). Either way it prints the tarball's sha1,
- * which is the `shasum` npm reports for a publish of it.
+ * WHICH TARBALL: see installed-package.ts. With AETHERFY_PACKAGE_TARBALL set,
+ * the release's own tarball; unset, dist/ packed here.
  *
  * ANTI-NO-OP: every file the exports map points at must be IN the tarball (read
  * from the tarball itself, not from npm's report of what it packed), and each
@@ -61,31 +58,20 @@
  * `npm run build:prod`.
  */
 
-import { execFileSync, execSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { URL, URLSearchParams } from 'node:url';
 import { TextDecoder, TextEncoder } from 'node:util';
 import * as vm from 'node:vm';
-import { gunzipSync } from 'node:zlib';
+import { execFileSync } from 'node:child_process';
 
-const REPO_ROOT = join(__dirname, '..', '..');
-
-/** A conditional exports target: a path, or conditions nesting more targets. */
-type ExportTarget = string | { [condition: string]: ExportTarget };
-
-interface Manifest {
-  name: string;
-  exports: Record<string, Record<string, ExportTarget>>;
-}
+import {
+  ExportTarget,
+  MANIFEST,
+  REPO_ROOT,
+  installPackage,
+  probe as probeIn,
+} from './installed-package';
 
 /** Every file path an exports target can resolve to, however deeply nested. */
 function targetPaths(target: ExportTarget): string[] {
@@ -94,94 +80,23 @@ function targetPaths(target: ExportTarget): string[] {
     : Object.values(target).flatMap(targetPaths);
 }
 
-const MANIFEST: Manifest = JSON.parse(
-  readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')
-);
 const ROOT = MANIFEST.name;
 const AGENT = `${MANIFEST.name}/agent`;
 
-let workDir: string;
 let scratch: string;
 let packedFiles: string[];
+let cleanup: (() => void) | undefined;
 
-/**
- * The regular files in a .tgz, from the archive itself: gunzip, then walk the
- * 512-byte tar headers. npm prefixes every entry with `package/`, stripped
- * here. PAX / GNU long-name records (type x, g, L) are skipped, not read.
- */
-function tarballFiles(tarball: string): string[] {
-  const tar = gunzipSync(readFileSync(tarball));
-  const field = (block: Buffer, start: number, length: number): string =>
-    block
-      .subarray(start, start + length)
-      .toString('utf8')
-      .replace(/\0.*$/s, '');
-  const files: string[] = [];
-  for (let offset = 0; offset + 512 <= tar.length; ) {
-    const header = tar.subarray(offset, offset + 512);
-    if (header.every(byte => byte === 0)) break;
-    const size = parseInt(field(header, 124, 12).trim() || '0', 8);
-    const type = field(header, 156, 1);
-    const prefix = field(header, 345, 155);
-    const name = prefix
-      ? `${prefix}/${field(header, 0, 100)}`
-      : field(header, 0, 100);
-    if (type === '0' || type === '') files.push(name.replace(/^package\//, ''));
-    offset += 512 + Math.ceil(size / 512) * 512;
-  }
-  return files;
-}
-
-/**
- * Get the tarball (given, or packed here) and install it once. npm is run
- * through the shell (`execSync`) because on Windows it is a .cmd shim, which
- * Node refuses to spawn without one. Paths are quoted: they can contain spaces.
- */
 beforeAll(() => {
-  workDir = mkdtempSync(join(tmpdir(), 'afy-package-'));
-  const given = process.env.AETHERFY_PACKAGE_TARBALL;
-  let tarball: string;
-  if (given) {
-    tarball = isAbsolute(given) ? given : resolve(REPO_ROOT, given);
-  } else {
-    const packed = JSON.parse(
-      execSync(`npm pack --json --pack-destination "${workDir}"`, {
-        cwd: REPO_ROOT,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-    ) as { filename: string }[];
-    tarball = join(workDir, packed[0].filename);
-  }
-  packedFiles = tarballFiles(tarball);
-  const shasum = createHash('sha1').update(readFileSync(tarball)).digest('hex');
-  // eslint-disable-next-line no-console
-  console.log(`package test: ${tarball}\nshasum: ${shasum}`);
-
-  scratch = join(workDir, 'scratch');
-  mkdirSync(scratch);
-  writeFileSync(
-    join(scratch, 'package.json'),
-    JSON.stringify({ name: 'afy-scratch', version: '0.0.0', private: true })
-  );
-  execSync(`npm install "${tarball}" --no-audit --no-fund --no-package-lock`, {
-    cwd: scratch,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  ({ scratch, packedFiles, cleanup } = installPackage());
 }, 600_000);
 
 afterAll(() => {
-  if (workDir) rmSync(workDir, { recursive: true, force: true });
+  cleanup?.();
 });
 
-/** Write `source` into the scratch project, run it with node, parse its JSON. */
 function probe<T>(file: string, source: string): T {
-  writeFileSync(join(scratch, file), source);
-  const out = execFileSync(process.execPath, [file], {
-    cwd: scratch,
-    encoding: 'utf8',
-  });
-  return JSON.parse(out) as T;
+  return probeIn<T>(scratch, file, source);
 }
 
 interface Identity {

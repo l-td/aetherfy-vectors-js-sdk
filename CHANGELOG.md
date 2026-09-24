@@ -55,6 +55,30 @@
 
 ### Changed
 
+- **BREAKING: an options object with a key its type does not declare throws a
+  `TypeError`.** TypeScript refuses an unknown key only in a fresh object
+  literal at a typed call site; plain JavaScript, an options object built
+  elsewhere or a spread got no check, and the SDK ignored the key.
+  `new AetherfyVectorsClient({ apiKey, region: 'eu-central-1' })` (the Python
+  SDK's pre-rename spelling) connected to the default endpoint with no error.
+  It now throws
+  `AetherfyVectorsClient constructor: unknown option(s): region. Accepted: apiKey, endpoint, timeout, enableConnectionPooling, workspace, apiRegion.`
+  Rename `region` to `apiRegion`; there is deliberately no alias. This is the
+  JavaScript side of the Python SDK's unknown-argument `TypeError`, and it
+  applies to every public options object: the `AetherfyVectorsClient`
+  constructor and `create()` (checked before region discovery),
+  `setPayload`, `retrieve`, `search`, `scroll`, `scrollIter` and `count`; the
+  `MemoryClient` constructor and `createNamespace`; `Namespace.add`,
+  `addMany` (each item) and `setSchema`; `Thread.add`, `appendMany` (each
+  item), `history` and `iterHistory`; `search`, `retrieve`, `count` and
+  `iter` on both scopes; and `fanOut` in `aetherfy-vectors/agent`. What is
+  checked is the key, not its value: `{ region: undefined }` throws too, as
+  `region=None` does in Python. A declared key set to `undefined` still means
+  "not set". `scrollIter`, `iter` and `iterHistory` now throw at the call, not
+  at the first `next()`. Points, payloads, schemas, a collection's vector
+  config and a spawn payload are data, not options, and are not key-checked.
+  The accepted keys are derived from the TypeScript types, so they cannot
+  drift from what the types document.
 - **BREAKING: a thread is a payload scope, not a collection.** Every thread in a
   workspace now lives in ONE collection (`__threads__`) with `thread_id` as a
   payload key, and every per-thread operation is a filtered operation over it.

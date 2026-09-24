@@ -198,7 +198,7 @@ const client = await AetherfyVectorsClient.create({
 });
 ```
 
-`create()` mirrors Python's `AetherfyVectorsClient(api_key=..., region='eu-central-1')`
+`create()` mirrors Python's `AetherfyVectorsClient(api_key=..., api_region='eu-central-1')`
 contract: when the call resolves, the client is fully ready — endpoint,
 analytics, and `.apiRegion` are all final. Discovery errors surface at the
 `create()` call site instead of being deferred to your first method call.
@@ -210,6 +210,24 @@ inside a sync constructor and silent deferral is a footgun.
 
 If both `AETHERFY_VECTORS_URL` and `apiRegion` are set, the env var wins
 and a warning is logged — production-agent protection rule.
+
+### Unknown options throw
+
+Every options object the SDK takes — the client constructor and `create()`,
+`search`, `retrieve`, `scroll`, `scrollIter`, `count`, `setPayload`, the
+`MemoryClient` constructor, the `Namespace` / `Thread` methods and
+`fanOut` — accepts exactly the keys its TypeScript type declares. Any
+other key throws a `TypeError` naming the key, the method and the accepted
+keys, even in plain JavaScript and even when its value is `undefined`:
+
+```typescript
+new AetherfyVectorsClient({ apiKey: 'afy_test_...', region: 'eu-central-1' });
+// TypeError: AetherfyVectorsClient constructor: unknown option(s): region.
+//   Accepted: apiKey, endpoint, timeout, enableConnectionPooling, workspace, apiRegion.
+```
+
+The API endpoint option is `apiRegion`. The Python SDK raises `TypeError`
+for an unknown argument the same way.
 
 ## 🔁 Iterating Large Collections
 
@@ -242,11 +260,11 @@ for await (const point of client.scrollIter('my_collection', opts)) {
 server-side). The iterator handles cursor management, page exhaustion,
 and pagination errors — no offset bookkeeping in user code.
 
-> **TypeScript callers** get compile-time errors on unknown options
-> keys (e.g. passing `limit` instead of `batchSize`). Untyped JS callers
-> hit a runtime kwarg-allowlist guard that throws with a guidance
-> message — passing `{ batchSize: 256, limit: 100 }` would otherwise
-> silently page at 256 with `limit` dropped.
+> **An unknown option throws.** Passing `limit` instead of `batchSize`
+> throws a `TypeError` at the `scrollIter(...)` call, naming the key and
+> listing the accepted ones — `{ batchSize: 256, limit: 100 }` would
+> otherwise page at 256 with `limit` dropped. See
+> [Unknown options throw](#unknown-options-throw).
 
 ## ✏️ Editing Payload on Existing Points
 

@@ -37,6 +37,7 @@ import {
 } from './models';
 import { Namespace } from './namespace';
 import { Thread } from './thread';
+import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
 
 /**
  * User-facing names must start with letter/digit and may contain
@@ -100,12 +101,37 @@ export interface CreateScopeOptions {
   distance?: DistanceMetric;
 }
 
+// Derived from the types by optionKeys(): see src/utils/options.ts. Checked
+// here and not left to AetherfyVectorsClient: the three memory-only keys are
+// stripped before the config is handed on, and the refusal should name the
+// constructor the caller called.
+const MEMORY_CLIENT_CONFIG_KEYS = optionKeys<MemoryClientConfig>({
+  apiKey: true,
+  endpoint: true,
+  timeout: true,
+  enableConnectionPooling: true,
+  workspace: true,
+  apiRegion: true,
+  client: true,
+  threadVectorSize: true,
+  threadDistance: true,
+});
+const CREATE_SCOPE_OPTION_KEYS = optionKeys<CreateScopeOptions>({
+  vectorSize: true,
+  distance: true,
+});
+
 export class MemoryClient {
   private readonly _client: AetherfyVectorsClient;
   private readonly threadVectorSize: number;
   private readonly threadDistance: DistanceMetric;
 
   constructor(config: MemoryClientConfig = {}) {
+    assertAllowedOptionKeys(
+      config,
+      MEMORY_CLIENT_CONFIG_KEYS,
+      'MemoryClient constructor'
+    );
     this.threadVectorSize = config.threadVectorSize ?? DEFAULT_VECTOR_SIZE;
     this.threadDistance = config.threadDistance ?? DistanceMetric.COSINE;
 
@@ -153,6 +179,11 @@ export class MemoryClient {
     name: string,
     options: CreateScopeOptions = {}
   ): Promise<Namespace> {
+    assertAllowedOptionKeys(
+      options,
+      CREATE_SCOPE_OPTION_KEYS,
+      'MemoryClient.createNamespace'
+    );
     validateUserName(name, 'namespace name');
 
     if (await this._client.collectionExists(name)) {

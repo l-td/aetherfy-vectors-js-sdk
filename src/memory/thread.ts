@@ -30,7 +30,7 @@
 import { AetherfyVectorsClient } from '../client';
 import { PointNotFoundError } from '../exceptions';
 import { Filter, Point, ScrollPoint } from '../models';
-import { assertAllowedOptionKeys } from '../utils/options';
+import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
 import { EmbeddingNotSupportedError } from './errors';
 import {
   generateId,
@@ -61,6 +61,23 @@ export interface ThreadHistoryOptions {
   order?: 'asc' | 'desc';
 }
 
+// Derived from the types by optionKeys(): see src/utils/options.ts.
+const ADD_OPTION_KEYS = optionKeys<ThreadAddOptions>({
+  role: true,
+  content: true,
+  vector: true,
+  metadata: true,
+  id: true,
+  ts: true,
+});
+const HISTORY_OPTION_KEYS = optionKeys<ThreadHistoryOptions>({
+  limit: true,
+  order: true,
+});
+const ITER_HISTORY_OPTION_KEYS = optionKeys<
+  NonNullable<Parameters<Thread['iterHistory']>[0]>
+>({ order: true });
+
 export class Thread extends Scope {
   /**
    * Thread payload top-level reserved fields — a Thread payload is
@@ -71,6 +88,9 @@ export class Thread extends Scope {
    */
   protected static override readonly RESERVED_KEYS: ReadonlySet<string> =
     new Set(['role', 'content', 'ts', THREAD_ID_KEY, THREAD_MARKER_KEY]);
+
+  /** @internal */
+  protected static override readonly SCOPE_KIND: string = 'Thread';
 
   /**
    * Internal — callers use MemoryClient.thread(id) to construct.
@@ -247,6 +267,7 @@ export class Thread extends Scope {
   // -------------------------------------------------------------------
 
   async add(options: ThreadAddOptions): Promise<string | number> {
+    assertAllowedOptionKeys(options, ADD_OPTION_KEYS, 'Thread.add');
     const { role, content, vector, metadata, id, ts } = options;
     if (!vector) throw new EmbeddingNotSupportedError();
     if (typeof role !== 'string' || role.length === 0) {
@@ -301,6 +322,11 @@ export class Thread extends Scope {
     if (messages.length === 0) return [];
 
     const points = messages.map((msg, idx) => {
+      assertAllowedOptionKeys(
+        msg,
+        ADD_OPTION_KEYS,
+        `Thread.appendMany[${idx}]`
+      );
       const { role, content, vector, metadata, id, ts } = msg;
       if (!vector) {
         throw new EmbeddingNotSupportedError(`appendMany[${idx}]`);
@@ -337,6 +363,7 @@ export class Thread extends Scope {
    * Long histories can paginate via `offset` in a future iteration.
    */
   async history(options: ThreadHistoryOptions = {}): Promise<Message[]> {
+    assertAllowedOptionKeys(options, HISTORY_OPTION_KEYS, 'Thread.history');
     const limit = options.limit ?? 50;
     const order = options.order ?? 'asc';
 
@@ -387,16 +414,22 @@ export class Thread extends Scope {
    * than 5000 messages the in-memory sort can be expensive; use
    * `history({ limit })` if you only need the most recent slice.
    */
-  async *iterHistory(
+  iterHistory(
     options: { order?: 'asc' | 'desc' } = {}
   ): AsyncGenerator<Message, void, undefined> {
+    // At the call, not in the generator body: see client.scrollIter.
     assertAllowedOptionKeys(
-      options as Record<string, unknown>,
-      ['order'],
+      options,
+      ITER_HISTORY_OPTION_KEYS,
       'Thread.iterHistory',
       'iterHistory walks the entire thread; pass order to control sort direction.'
     );
-    const order = options.order ?? 'asc';
+    return this.iterHistoryMessages(options.order ?? 'asc');
+  }
+
+  private async *iterHistoryMessages(
+    order: 'asc' | 'desc'
+  ): AsyncGenerator<Message, void, undefined> {
     if (order !== 'asc' && order !== 'desc') {
       throw new Error("order must be 'asc' or 'desc'");
     }

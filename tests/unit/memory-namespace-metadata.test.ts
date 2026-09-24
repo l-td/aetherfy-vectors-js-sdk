@@ -132,14 +132,12 @@ describe('Namespace.iter', () => {
     });
   });
 
-  it('rejects { limit: 50 } as any — runtime kwarg allowlist', async () => {
+  it('rejects { limit: 50 } as any at the call — runtime kwarg allowlist', () => {
     const { ns, client } = makeNamespace();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const gen = ns.iter({ limit: 50 } as any);
-    const err = await gen.next().catch(e => e);
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toMatch(/Namespace\.iter:/);
-    expect((err as Error).message).toMatch(/limit/);
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ns.iter({ limit: 50 } as any)
+    ).toThrow(/^Namespace\.iter: unknown option\(s\): limit\./);
     expect(client.scrollIter).not.toHaveBeenCalled();
   });
 });

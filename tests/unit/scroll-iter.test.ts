@@ -134,26 +134,31 @@ describe('AetherfyVectorsClient.scrollIter', () => {
     expect(scrollSpy.mock.calls[0][1]).toMatchObject({ limit: 256 });
   });
 
-  it('rejects { limit: 100 } as any — runtime kwarg allowlist', async () => {
+  // At the CALL, not at the first next(): a guard inside the generator body
+  // would let `const it = client.scrollIter(c, { limit: 100 })` succeed.
+  it('rejects { limit: 100 } as any at the call — runtime kwarg allowlist', () => {
     const client = makeClient();
     const scrollSpy = jest.spyOn(client, 'scroll');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const gen = client.scrollIter('col', { limit: 100 } as any);
-    const err = await gen.next().catch(e => e);
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toMatch(/scrollIter:/);
-    expect((err as Error).message).toMatch(/limit/);
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      client.scrollIter('col', { limit: 100 } as any)
+    ).toThrow(
+      new TypeError(
+        'scrollIter: unknown option(s): limit. Accepted: batchSize, ' +
+          'scrollFilter, withPayload, withVectors. Pass batchSize to control ' +
+          'page size; limit and offset are owned by the iterator.'
+      )
+    );
     expect(scrollSpy).not.toHaveBeenCalled();
   });
 
-  it('rejects { offset: "x" } as any — runtime kwarg allowlist', async () => {
+  it('rejects { offset: "x" } as any at the call — runtime kwarg allowlist', () => {
     const client = makeClient();
     const scrollSpy = jest.spyOn(client, 'scroll');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const gen = client.scrollIter('col', { offset: 'x' } as any);
-    const err = await gen.next().catch(e => e);
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toMatch(/offset/);
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      client.scrollIter('col', { offset: 'x' } as any)
+    ).toThrow(/^scrollIter: unknown option\(s\): offset\./);
     expect(scrollSpy).not.toHaveBeenCalled();
   });
 });

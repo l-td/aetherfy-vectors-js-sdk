@@ -27,7 +27,7 @@ import {
   ScrollPoint,
   SearchResult,
 } from '../models';
-import { assertAllowedOptionKeys } from '../utils/options';
+import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
 
 export interface NamespaceIterOptions {
   /** Points per server round-trip. Default 256, server cap 1000. */
@@ -74,6 +74,30 @@ export interface NamespaceSetSchemaOptions {
   description?: string;
 }
 
+// Derived from the types by optionKeys(): see src/utils/options.ts.
+const SEARCH_OPTION_KEYS = optionKeys<NamespaceSearchOptions>({
+  limit: true,
+  offset: true,
+  filter: true,
+  withPayload: true,
+  withVectors: true,
+  scoreThreshold: true,
+  searchParams: true,
+});
+const RETRIEVE_OPTION_KEYS = optionKeys<NamespaceRetrieveOptions>({
+  withPayload: true,
+  withVectors: true,
+});
+const COUNT_OPTION_KEYS = optionKeys<
+  NonNullable<Parameters<Scope['count']>[0]>
+>({ filter: true, exact: true });
+const ITER_OPTION_KEYS = optionKeys<NamespaceIterOptions>({
+  batchSize: true,
+  filter: true,
+  withPayload: true,
+  withVectors: true,
+});
+
 export class Scope {
   /**
    * Internal — callers use MemoryClient.namespace / .thread to construct.
@@ -93,6 +117,19 @@ export class Scope {
    */
   protected static readonly RESERVED_KEYS: ReadonlySet<string> =
     new Set<string>();
+
+  /**
+   * The public class name a method is reported under in an error, so a
+   * Thread's refusal says `Thread.search`, not `Namespace.search`. A literal
+   * rather than `constructor.name`, which a minifier may rename.
+   * @internal
+   */
+  protected static readonly SCOPE_KIND: string = 'Scope';
+
+  /** `<Namespace|Thread>.<method>`, for error messages. @internal */
+  protected methodLabel(method: string): string {
+    return `${(this.constructor as typeof Scope).SCOPE_KIND}.${method}`;
+  }
 
   // -------------------------------------------------------------------
   // Scoping hooks
@@ -279,21 +316,13 @@ export class Scope {
     vector: number[],
     options: NamespaceSearchOptions = {}
   ): Promise<SearchResult[]> {
-    // Same runtime allowlist as iter/iterHistory. The client's own search()
-    // guard cannot cover this layer: the object below is rebuilt key by key,
-    // so an unknown option dies here silently rather than reaching it.
+    // The client's own search() guard cannot cover this layer: the object
+    // below is rebuilt key by key, so an unknown option would die here
+    // silently rather than reach it. The same holds for every method below.
     assertAllowedOptionKeys(
-      options as Record<string, unknown>,
-      [
-        'limit',
-        'offset',
-        'filter',
-        'withPayload',
-        'withVectors',
-        'scoreThreshold',
-        'searchParams',
-      ],
-      'Namespace.search',
+      options,
+      SEARCH_OPTION_KEYS,
+      this.methodLabel('search'),
       'Engine-level search tuning goes in searchParams, e.g. { searchParams: { hnsw_ef: 256 } }.'
     );
 
@@ -319,6 +348,11 @@ export class Scope {
     ids: Array<string | number>,
     options: NamespaceRetrieveOptions = {}
   ): Promise<Point[]> {
+    assertAllowedOptionKeys(
+      options,
+      RETRIEVE_OPTION_KEYS,
+      this.methodLabel('retrieve')
+    );
     const withPayload = options.withPayload ?? true;
     const points = await this.client.retrieve(this.collection, ids, {
       // A Thread has to read payloads to tell its own points from a
@@ -333,6 +367,11 @@ export class Scope {
   async count(
     options: { filter?: Filter; exact?: boolean } = {}
   ): Promise<number> {
+    assertAllowedOptionKeys(
+      options,
+      COUNT_OPTION_KEYS,
+      this.methodLabel('count')
+    );
     return this.client.count(this.collection, {
       countFilter: this.combineFilter(options.filter),
       exact: options.exact,
@@ -347,16 +386,17 @@ export class Scope {
    * Use this for archival, export, or batch-enrichment workflows that
    * exceed what `search` and `retrieve` cover.
    */
-  async *iter(
+  iter(
     options: NamespaceIterOptions = {}
   ): AsyncGenerator<ScrollPoint, void, undefined> {
+    // At the call, not in the generator body: see client.scrollIter.
     assertAllowedOptionKeys(
-      options as Record<string, unknown>,
-      ['batchSize', 'filter', 'withPayload', 'withVectors'],
-      'Namespace.iter',
+      options,
+      ITER_OPTION_KEYS,
+      this.methodLabel('iter'),
       'Pass batchSize to control page size; limit and offset are owned by the iterator.'
     );
-    yield* this.client.scrollIter(this.collection, {
+    return this.client.scrollIter(this.collection, {
       batchSize: options.batchSize,
       scrollFilter: this.combineFilter(options.filter),
       withPayload: options.withPayload,

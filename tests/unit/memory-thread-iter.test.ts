@@ -117,14 +117,14 @@ describe('Thread.iterHistory', () => {
     expect(client.scroll).not.toHaveBeenCalled();
   });
 
-  it('rejects { batchSize: 100 } as any — runtime kwarg allowlist (only `order` allowed)', async () => {
+  it('rejects { batchSize: 100 } as any at the call — runtime kwarg allowlist (only `order` allowed)', () => {
     const { th, client } = makeThread();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const gen = th.iterHistory({ batchSize: 100 } as any);
-    const err = await gen.next().catch(e => e);
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toMatch(/Thread\.iterHistory:/);
-    expect((err as Error).message).toMatch(/batchSize/);
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      th.iterHistory({ batchSize: 100 } as any)
+    ).toThrow(
+      /^Thread\.iterHistory: unknown option\(s\): batchSize\. Accepted: order\./
+    );
     expect(client.scrollIter).not.toHaveBeenCalled();
   });
 });

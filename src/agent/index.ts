@@ -58,6 +58,7 @@ import {
 } from './errors';
 import { requestJson, USER_AGENT_PREFIX } from './http';
 import { MachineShape, Run, Spawn } from './models';
+import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
 import { SDK_VERSION } from '../version';
 
 export {
@@ -317,6 +318,9 @@ export interface FanOutOptions {
   width?: number;
 }
 
+// Derived from the type by optionKeys(): see src/utils/options.ts.
+const FAN_OUT_OPTION_KEYS = optionKeys<FanOutOptions>({ width: true });
+
 /**
  * Run `fn` over `items` on an in-machine pool, results in INPUT order.
  *
@@ -345,6 +349,7 @@ export async function fanOut<T, R>(
   items: Iterable<T>,
   options: FanOutOptions = {}
 ): Promise<R[]> {
+  assertAllowedOptionKeys(options, FAN_OUT_OPTION_KEYS, 'fanOut');
   const materialized = Array.from(items);
   const shape = machine();
 

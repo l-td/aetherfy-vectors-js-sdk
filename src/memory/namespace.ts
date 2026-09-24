@@ -13,6 +13,7 @@ import { AnalysisResult, Schema } from '../models';
 import { EmbeddingNotSupportedError } from './errors';
 import { generateId } from './models';
 import { NamespaceSetSchemaOptions, Scope } from './scope';
+import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
 
 /** Parameters for adding a memory to a Namespace. */
 export interface NamespaceAddOptions {
@@ -26,6 +27,18 @@ export interface NamespaceAddOptions {
   id?: string | number;
 }
 
+// Derived from the types by optionKeys(): see src/utils/options.ts.
+const ADD_OPTION_KEYS = optionKeys<NamespaceAddOptions>({
+  text: true,
+  vector: true,
+  metadata: true,
+  id: true,
+});
+const SET_SCHEMA_OPTION_KEYS = optionKeys<NamespaceSetSchemaOptions>({
+  enforcement: true,
+  description: true,
+});
+
 export class Namespace extends Scope {
   /**
    * Namespace payload top-level reserved fields — a Namespace payload is
@@ -36,6 +49,9 @@ export class Namespace extends Scope {
   protected static override readonly RESERVED_KEYS: ReadonlySet<string> =
     new Set(['text']);
 
+  /** @internal */
+  protected static override readonly SCOPE_KIND: string = 'Namespace';
+
   // -------------------------------------------------------------------
   // Write
   // -------------------------------------------------------------------
@@ -45,6 +61,9 @@ export class Namespace extends Scope {
    * Returns the point ID used for the write.
    */
   async add(options: NamespaceAddOptions): Promise<string | number> {
+    // `{ vector, metdata: {...} }` would otherwise store a memory with no
+    // metadata and no error.
+    assertAllowedOptionKeys(options, ADD_OPTION_KEYS, 'Namespace.add');
     const { vector, text, metadata, id } = options;
     if (!vector) throw new EmbeddingNotSupportedError();
 
@@ -84,6 +103,11 @@ export class Namespace extends Scope {
     if (items.length === 0) return [];
 
     const points = items.map((item, idx) => {
+      assertAllowedOptionKeys(
+        item,
+        ADD_OPTION_KEYS,
+        `Namespace.addMany[${idx}]`
+      );
       const { vector, text, metadata, id } = item;
       if (!vector) {
         throw new EmbeddingNotSupportedError(`addMany[${idx}]`);
@@ -121,6 +145,11 @@ export class Namespace extends Scope {
     schema: Schema,
     options: NamespaceSetSchemaOptions = {}
   ): Promise<string> {
+    assertAllowedOptionKeys(
+      options,
+      SET_SCHEMA_OPTION_KEYS,
+      'Namespace.setSchema'
+    );
     return this.client.setSchema(
       this.collection,
       schema,
