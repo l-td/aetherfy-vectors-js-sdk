@@ -216,28 +216,23 @@ export class NetworkError extends AetherfyVectorsError {
 }
 
 /**
- * Conflict errors (409) - when trying to create something that already exists
+ * A 409 with no more specific class. `COLLECTION_IN_USE` and
+ * `COLLECTION_EXISTS_IN_OTHER_REGION` keep their own classes; every other 409
+ * lands here, with the backend's code in `code`.
+ *
+ * There is deliberately no field naming the conflicting resource: an earlier
+ * `conflictingResource` read a top-level key the API never sends, so it was
+ * `undefined` on every error. Removed 2026-09-24 rather than left promising.
  */
 export class ConflictError extends AetherfyVectorsError {
-  public readonly conflictingResource?: string;
-
   constructor(
     message: string = 'Resource conflict',
-    conflictingResource?: string,
     statusCode?: number,
     details?: Record<string, unknown>
   ) {
     super(message, undefined, statusCode, details);
     this.name = 'ConflictError';
-    this.conflictingResource = conflictingResource;
     Object.setPrototypeOf(this, ConflictError.prototype);
-  }
-
-  toJSON(): Record<string, unknown> {
-    return {
-      ...super.toJSON(),
-      conflictingResource: this.conflictingResource,
-    };
   }
 }
 
@@ -605,7 +600,6 @@ export function createErrorFromResponse(
       return stamp(
         new ConflictError(
           message,
-          responseData?.conflictingResource as string,
           409,
           details as Record<string, unknown> | undefined
         )

@@ -192,14 +192,14 @@ describe('Custom Exceptions', () => {
     });
 
     it('should create ConflictError', () => {
-      const error = new ConflictError('Resource exists', 'collection-name');
+      const error = new ConflictError('Resource exists', 409);
       expect(error.message).toBe('Resource exists');
       expect(error.name).toBe('ConflictError');
-      expect(error.conflictingResource).toBe('collection-name');
+      expect(error.statusCode).toBe(409);
     });
 
     it('should serialize ConflictError to JSON', () => {
-      const error = new ConflictError('Resource exists', 'collection-name');
+      const error = new ConflictError('Resource exists');
       const json = error.toJSON();
       expect(json).toEqual({
         name: 'ConflictError',
@@ -207,7 +207,6 @@ describe('Custom Exceptions', () => {
         requestId: undefined,
         statusCode: undefined,
         details: undefined,
-        conflictingResource: 'collection-name',
       });
     });
 
@@ -411,15 +410,17 @@ describe('Custom Exceptions', () => {
 
     it('should create ConflictError for 409 status', () => {
       const error = createErrorFromResponse(
-        { message: 'Resource exists', conflictingResource: 'my-collection' },
+        { error: { code: 'SOMETHING_ELSE', message: 'Resource exists' } },
         409,
         'Conflict'
       );
 
+      // What conflicted is carried by the code and the message; there is no
+      // separate resource field for the API to leave empty.
       expect(error).toBeInstanceOf(ConflictError);
-      expect((error as ConflictError).conflictingResource).toBe(
-        'my-collection'
-      );
+      expect(error.code).toBe('SOMETHING_ELSE');
+      expect(error.message).toBe('Resource exists');
+      expect(error.statusCode).toBe(409);
     });
 
     it('should create QuotaExceededError for 400 with COLLECTION_LIMIT_EXCEEDED code', () => {

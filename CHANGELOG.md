@@ -11,6 +11,13 @@
   `thread.setSchema(...)` would have imposed a schema on every other thread in
   the workspace. Removed rather than left lying;
   `MemoryClient.clearSchemaCache()` is unchanged.
+- **`ConflictError.conflictingResource` is gone**, with the constructor
+  parameter that set it: the constructor is now
+  `(message?, statusCode?, details?)`, and `toJSON()` no longer carries the
+  key. The 409 factory filled it from a top-level `conflictingResource` key
+  the API never sends, in any casing, so it was `undefined` on every
+  `ConflictError` ever raised. The error's `code` and `message` still say what
+  conflicted. Removed outright — there are no users to deprecate for.
 - **`ApiResponse` and `PaginationInfo` are no longer exported** (the interfaces
   are gone). Both were exported from the package root and PRODUCED BY NOTHING:
   no method returns either, no type refers to either, and `PaginationInfo`'s

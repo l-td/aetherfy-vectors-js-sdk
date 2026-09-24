@@ -231,9 +231,7 @@ describe('Retry Logic with HTTP Errors', () => {
     it('should NOT retry on 409 Conflict', async () => {
       const fn = jest
         .fn()
-        .mockRejectedValue(
-          new ConflictError('Resource already exists', 'collection-name')
-        );
+        .mockRejectedValue(new ConflictError('Resource already exists'));
 
       await expect(
         retryWithBackoff(fn, {
