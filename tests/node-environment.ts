@@ -17,6 +17,12 @@
  *
  * `teardown()` runs for every file whatever happened in it, so the restore
  * lives here. node-setup.ts registers it on the file's global; this calls it.
+ *
+ * NOT A LEAK: "A worker process has failed to exit gracefully". Measured
+ * 2026-09-24: each worker's event loop was empty within ~20 ms of Jest's end
+ * signal, but the OS reported the 220-400 MB workers gone only after 540-800
+ * ms, past Jest's hard-coded 500 ms. It predates this file.
+ * --detectOpenHandles lists nock's mocked responses, which hold nothing open.
  */
 import { TestEnvironment } from 'jest-environment-node';
 

@@ -24,6 +24,11 @@
   type", "This expression is not constructable"), although it ran correctly.
   The package now ships ES-module declarations for both entry points and names
   them in `exports`, so the types match what the import returns.
+- **TypeScript with `moduleResolution: node10` (or `node`) finds
+  `aetherfy-vectors/agent`.** That resolution predates `exports`, so the subpath
+  had no declarations there at all ("Cannot find module
+  'aetherfy-vectors/agent' or its corresponding type declarations"). It is now
+  mapped with `typesVersions`; the root keeps resolving through `types`.
 
 ### Removed
 

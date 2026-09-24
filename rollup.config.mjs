@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve as resolvePath, sep } from 'node:path';
 
@@ -31,19 +31,37 @@ const isProduction = process.env.NODE_ENV === 'production';
  * module as the whole module object: "not constructable", while at runtime the
  * default IS the class. `declarations` is the .d.ts tsc emits for the entry,
  * which the twin re-exports.
+ *
+ * READ FROM package.json "exports", not written here: for each subpath,
+ * `require.default` is the CommonJS entry, `require.types` its declarations,
+ * `import.default` the wrapper and `import.types` the twin. A subpath then
+ * exists in ONE place. A second, hand-kept map could drift either way, and one
+ * direction (a subpath added to package.json but not here) was caught by
+ * nothing but the tarball test; now a subpath whose CommonJS file this build
+ * does not produce stops the build, naming it.
  */
-const ESM_WRAPPERS = {
-  'index.cjs.js': {
-    wrapper: 'index.mjs',
-    twin: 'index.d.mts',
-    declarations: 'index.d.ts',
-  },
-  'agent.cjs.js': {
-    wrapper: 'agent.esm.mjs',
-    twin: 'agent.d.mts',
-    declarations: 'agent/index.d.ts',
-  },
-};
+const OUT_DIR = 'dist';
+
+function exportsWrappers() {
+  const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+  const inOutDir = (subpath, where, target) => {
+    const prefix = `./${OUT_DIR}/`;
+    if (typeof target !== 'string' || !target.startsWith(prefix)) {
+      throw new Error(
+        `package.json exports["${subpath}"].${where} must be a path under ` +
+          `${prefix}, not ${JSON.stringify(target)}`
+      );
+    }
+    return target.slice(prefix.length);
+  };
+  return Object.entries(pkg.exports).map(([subpath, conditions]) => ({
+    subpath,
+    cjsFile: inOutDir(subpath, 'require.default', conditions.require?.default),
+    declarations: inOutDir(subpath, 'require.types', conditions.require?.types),
+    wrapper: inOutDir(subpath, 'import.default', conditions.import?.default),
+    twin: inOutDir(subpath, 'import.types', conditions.import?.types),
+  }));
+}
 
 /**
  * Generate the ESM wrappers from the BUILT CommonJS entries.
@@ -70,6 +88,9 @@ const ESM_WRAPPERS = {
  * plus, when there is a default, `export { <Name> as default }`, where <Name> is
  * READ OFF the built module too — the one named export that is the very object
  * `default` is. Nothing about the default is written down twice.
+ *
+ * Reading the export list means the build EXECUTES each CommonJS entry
+ * (`require`), so a top-level side effect added to src/ would run at build time.
  */
 function esmWrappers() {
   return {
@@ -81,12 +102,17 @@ function esmWrappers() {
       for (const key of Object.keys(require.cache)) {
         if (key.startsWith(outDir + sep)) delete require.cache[key];
       }
-      for (const [cjsFile, { wrapper, twin, declarations }] of Object.entries(
-        ESM_WRAPPERS
-      )) {
+      for (const {
+        subpath,
+        cjsFile,
+        wrapper,
+        twin,
+        declarations,
+      } of exportsWrappers()) {
         if (!bundle[cjsFile] || !bundle[cjsFile].isEntry) {
           this.error(
-            `${cjsFile} is not an entry of this build, so ${wrapper} cannot wrap it.`
+            `package.json exports["${subpath}"] names ${cjsFile}, which is not ` +
+              `an entry of this build, so ${wrapper} cannot wrap it.`
           );
         }
         if (!existsSync(resolvePath(outDir, declarations))) {
@@ -166,7 +192,7 @@ export default [
   {
     input: { index: 'src/index.ts', agent: 'src/agent/index.ts' },
     output: {
-      dir: 'dist',
+      dir: OUT_DIR,
       format: 'cjs',
       exports: 'named',
       sourcemap: true,

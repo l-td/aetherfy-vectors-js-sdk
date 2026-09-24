@@ -3,14 +3,33 @@ name: Release
 on:
   release:
     types: [published]
+  # PRE-FLIGHT: the same job, end to end, for a tag, without publishing. So the
+  # first real publish is not the first time the tag checkout, the npm token
+  # and the runner meet. It checks out the tag, packs once, tests that file,
+  # proves the token (npm whoami) and publishes with --dry-run.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to pre-flight (for example v2.0.0). Nothing is published.'
+        required: true
+        type: string
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      # true on a pre-flight, false on a real release. ONE job, one set of
+      # steps: the only difference is the --dry-run on the publish.
+      PREFLIGHT: ${{ github.event_name == 'workflow_dispatch' }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          # A release checks out its own tag (github.ref). A pre-flight checks
+          # out the tag it was given, as a tag: refs/tags/, so a branch that
+          # happens to share the name cannot be picked up instead.
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -43,8 +62,20 @@ jobs:
         env:
           AETHERFY_PACKAGE_TARBALL: ${{ steps.pack.outputs.tarball }}
 
-      - name: Publish that tarball
-        run: npm publish "$TARBALL"
+      # Proves NPM_TOKEN is set and valid before anything is published. On a
+      # real release this fails the job before the publish instead of during it.
+      - name: Check the npm token
+        run: npm whoami
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish that tarball (dry run on a pre-flight)
+        run: |
+          if [ "$PREFLIGHT" = "true" ]; then
+            npm publish "$TARBALL" --dry-run
+          else
+            npm publish "$TARBALL"
+          fi
         env:
           TARBALL: ${{ steps.pack.outputs.tarball }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

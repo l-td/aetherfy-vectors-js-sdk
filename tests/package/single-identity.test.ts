@@ -39,6 +39,11 @@
  *       declarations, fell back to index.d.ts (a CommonJS declaration here),
  *       and typed the default import as the module object: "Cannot use
  *       namespace 'AetherfyVectorsClient' as a type", "not constructable".
+ *       And under `node10` (TypeScript's classic Node resolution, which
+ *       ignores "exports"): a CommonJS consumer of both entries. There the root
+ *       resolves through the top-level "types" field and `/agent` through
+ *       "typesVersions"; without that mapping `aetherfy-vectors/agent` had no
+ *       declarations at all under node10.
  *
  * WHICH TARBALL. With AETHERFY_PACKAGE_TARBALL set, this tests THAT file — the
  * release packs once, tests the tarball, and publishes the same file, so the
@@ -370,13 +375,41 @@ const run: Promise<{ spawn_id: string }> = spawn('child');
 export const used: unknown[] = [base, page, run, null as Run | null];
 `;
 
-  it.each(['bundler', 'node16'])(
-    '(g) strict .mts and .cts consumers type-check under moduleResolution %s',
-    resolution => {
-      // The same source as an ES module and as CommonJS: the two sides of the
-      // exports map, `import` and `require`, each with its own `types`.
+  // node10 predates "exports" and ES-module syntax in declarations: a plain
+  // CommonJS consumer, named imports only, one value and one type from each
+  // entry point.
+  const NODE10_CONSUMER = `import { AetherfyVectorsClient, ScrollOptions } from '${ROOT}';
+import { AgentError, Run } from '${AGENT}';
+
+const client: AetherfyVectorsClient = new AetherfyVectorsClient({
+  apiKey: 'afy_test_1234567890123456',
+});
+const options: ScrollOptions = { limit: 1 };
+const error: Error = new AgentError('x');
+export const used: unknown[] = [client, options, error, null as Run | null];
+`;
+
+  it.each([
+    {
+      resolution: 'bundler',
+      module: 'esnext',
+      files: ['consumer.mts', 'consumer.cts'],
+    },
+    {
+      resolution: 'node16',
+      module: 'node16',
+      files: ['consumer.mts', 'consumer.cts'],
+    },
+    { resolution: 'node10', module: 'commonjs', files: ['consumer-node10.ts'] },
+  ])(
+    '(g) strict TypeScript consumers type-check under moduleResolution $resolution',
+    ({ resolution, module, files }) => {
+      // bundler/node16: the same source as an ES module and as CommonJS, the
+      // two sides of the exports map, each with its own `types`. node10: the
+      // CommonJS consumer above, through "types" and "typesVersions".
       writeFileSync(join(scratch, 'consumer.mts'), CONSUMER);
       writeFileSync(join(scratch, 'consumer.cts'), CONSUMER);
+      writeFileSync(join(scratch, 'consumer-node10.ts'), NODE10_CONSUMER);
       const config = `tsconfig.${resolution}.json`;
       writeFileSync(
         join(scratch, config),
@@ -386,7 +419,7 @@ export const used: unknown[] = [base, page, run, null as Run | null];
             noEmit: true,
             target: 'es2022',
             lib: ['es2022', 'dom'],
-            module: resolution === 'bundler' ? 'esnext' : 'node16',
+            module,
             moduleResolution: resolution,
             // The package's own declarations are checked too, not skipped:
             // they are what this test is about.
@@ -395,7 +428,7 @@ export const used: unknown[] = [base, page, run, null as Run | null];
             typeRoots: [join(REPO_ROOT, 'node_modules', '@types')],
             types: ['node'],
           },
-          files: ['consumer.mts', 'consumer.cts'],
+          files,
         })
       );
       const tsc = join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc');

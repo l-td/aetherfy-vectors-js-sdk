@@ -562,6 +562,75 @@ function knownDocsRoutes(): Set<string> {
   );
 }
 
+/**
+ * The `paths` / `paths-ignore` lists of each event under ci.yml's `on:`.
+ *
+ * A deliberately small reader for the one shape that block has, resolving the
+ * `&anchor` / `*alias` pair it uses to share one list between push and
+ * pull_request. Anything it does not recognise THROWS — a changed shape reds
+ * here, loudly, instead of reading as "no filters". (No YAML parser is a direct
+ * devDependency, for the same reason given at the call site.)
+ */
+function ciTriggerFilters(
+  workflow: string
+): Record<string, { paths?: string[]; pathsIgnore?: string[] }> {
+  const lines = workflow.replace(/\r\n/g, '\n').split('\n');
+  const start = lines.findIndex(line => line === 'on:');
+  if (start === -1) throw new Error('ci.yml has no top-level `on:` block');
+  const block: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^\S/.test(line) && !line.startsWith('#')) break;
+    block.push(line);
+  }
+
+  const anchors = new Map<string, string[]>();
+  const events: Record<string, { paths?: string[]; pathsIgnore?: string[] }> =
+    {};
+  let event: string | undefined;
+  let list: string[] | undefined;
+  for (const line of block) {
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+    const eventMatch = /^ {2}([a-z_]+):\s*$/.exec(line);
+    if (eventMatch) {
+      event = eventMatch[1];
+      events[event] = {};
+      list = undefined;
+      continue;
+    }
+    const filter = /^ {4}(paths|paths-ignore):\s*(?:&(\S+)|\*(\S+))?\s*$/.exec(
+      line
+    );
+    if (filter && event) {
+      const [, key, anchor, alias] = filter;
+      const field = key === 'paths' ? 'paths' : 'pathsIgnore';
+      if (alias) {
+        const shared = anchors.get(alias);
+        if (!shared) throw new Error(`ci.yml aliases unknown anchor *${alias}`);
+        events[event][field] = shared;
+        list = undefined;
+      } else {
+        list = [];
+        events[event][field] = list;
+        if (anchor) anchors.set(anchor, list);
+      }
+      continue;
+    }
+    const item = /^ {6}- '([^']+)'\s*$/.exec(line);
+    if (item && list) {
+      list.push(item[1]);
+      continue;
+    }
+    if (/^ {4}\S/.test(line)) {
+      list = undefined; // another key of the event (branches, types, ...)
+      continue;
+    }
+    if (list || /^ {6}-/.test(line)) {
+      throw new Error(`ci.yml: unrecognised trigger line: ${line}`);
+    }
+  }
+  return events;
+}
+
 describe('README links', () => {
   it('every github.com URL names a repository we own', () => {
     // Not "this repo only": the README cross-links the sibling Python SDK under
@@ -650,16 +719,44 @@ describe('README links', () => {
     // Found by audit: .github/workflows/ci.yml filtered on src/**, tests/**,
     // package.json, tsconfig.json, jest.config.js — and NOT on README.md. A
     // commit touching only the README triggered no workflow at all, so the
-    // guard never ran on the exact change it exists to police. It would still
-    // have caught a README made stale by a CODE change, which is why nothing
-    // looked broken. A missing path filter fails GREEN: no run, no red, no
-    // signal. So the trigger is asserted here, where a red is visible.
-    const workflow = fs.readFileSync(
-      path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'),
-      'utf8'
+    // guard never ran on the exact change it exists to police. A missing path
+    // filter fails GREEN: no run, no red, no signal. So the trigger is
+    // asserted here, where a red is visible.
+    //
+    // CI now runs BY DEFAULT: push and pull_request carry `paths-ignore` (what
+    // provably cannot change the build or tests), never `paths` (an allow-list
+    // that silently stops covering the next input someone adds).
+    //
+    // The ignore list is pinned to an EXACT set rather than checked with a
+    // glob matcher: GitHub's filter globs need a matcher, and this repo has
+    // none as a direct devDependency (reaching for a transitive one would test
+    // against whatever version happens to be hoisted). An exact set means any
+    // change to the list — a '*.md', a '**' — has to pass through this test,
+    // and whoever edits it has to decide, here, that README.md stays covered.
+    const triggers = ciTriggerFilters(
+      fs.readFileSync(
+        path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'),
+        'utf8'
+      )
     );
-    const blocks = workflow.split("- 'README.md'").length - 1;
-    expect(blocks).toBeGreaterThanOrEqual(2);
+    const expected = [
+      'CHANGELOG.md',
+      'LICENSE',
+      'docs/**',
+      '.github/dependabot.yml',
+      '.github/docs-routes.txt',
+      '.github/workflows/docs-links.yml',
+      '.github/workflows/pin-guard.yml',
+      '.github/workflows/release.yml',
+    ];
+    for (const event of ['push', 'pull_request']) {
+      expect({ event, ...triggers[event] }).toEqual({
+        event,
+        paths: undefined,
+        pathsIgnore: expected,
+      });
+    }
+    expect(expected).not.toContain('README.md');
   });
 
   it('leaves the install lines alone', () => {

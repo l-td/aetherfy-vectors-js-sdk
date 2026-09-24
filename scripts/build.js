@@ -115,24 +115,39 @@ function buildBundle() {
   run('npx rollup -c rollup.config.mjs', 'Bundle creation');
 }
 
+/**
+ * Every file package.json promises a consumer: main, module, types, browser,
+ * every target under "exports" at any depth of nesting, and every
+ * typesVersions target. READ FROM package.json, never listed here — a subpath
+ * added there extends this check by itself, and there is no second list to
+ * forget. (There were three: this one, scripts/build-fast.js's, and CI's
+ * `test -f` step. Each had already drifted from the others.)
+ */
+function promisedFiles() {
+  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  const files = new Set();
+  const collect = target => {
+    if (typeof target === 'string') files.add(target.replace(/^\.\//, ''));
+    else if (target && typeof target === 'object') {
+      Object.values(target).forEach(collect);
+    }
+  };
+  ['main', 'module', 'types', 'browser'].forEach(field => collect(pkg[field]));
+  collect(pkg.exports);
+  collect(pkg.typesVersions);
+  return [...files].sort();
+}
+
 function validateBuild() {
   logStep('Validating build output');
 
-  // Every file the exports map in package.json points at. A subpath export
-  // that resolves to nothing is invisible until someone imports it, and by
-  // then the package is published.
-  const requiredFiles = [
-    'dist/index.cjs.js',
-    'dist/index.mjs',
-    'dist/browser.js',
-    'dist/index.d.ts',
-    'dist/agent.cjs.js',
-    'dist/agent.esm.mjs',
-    'dist/agent/index.d.ts',
-    // The ES-module declaration twins, generated beside the wrappers.
-    'dist/index.d.mts',
-    'dist/agent.d.mts',
-  ];
+  // A promised file that resolves to nothing is invisible until someone
+  // imports it, and by then the package is published.
+  const requiredFiles = promisedFiles();
+  if (requiredFiles.length === 0) {
+    logError('package.json promises no files; refusing to call that valid');
+    process.exit(1);
+  }
 
   const missingFiles = requiredFiles.filter(file => !fs.existsSync(file));
 
@@ -141,7 +156,7 @@ function validateBuild() {
     process.exit(1);
   }
 
-  logSuccess('Build validation completed');
+  logSuccess(`Build validation completed (${requiredFiles.length} promised files)`);
 }
 
 function generateDocs() {
