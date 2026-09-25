@@ -16,6 +16,7 @@ import nock from 'nock';
 import {
   AetherfyVectorsClient,
   INDEX_CREATE_ATTEMPT_TIMEOUT_MS,
+  INDEX_DEFAULT_DEADLINE_MS,
   INDEX_FORWARD_MARGIN_MS,
   INDEX_WAIT_BUDGET_MS,
 } from '../../src/client';
@@ -194,13 +195,20 @@ function fakeClock(): { now: number } {
  * The index route on the fake clock. Each create answers the next body in
  * `answers` (the last one repeats) after `cost` ms or, when the attempt's
  * timeout is shorter than that, fails at the timeout the way HttpClient's
- * transport does.
+ * transport does. More than MAX_CREATES creates ends the test instead of
+ * hanging it.
  */
+const MAX_CREATES = 1000;
+
 function indexRoute(clock: { now: number }, answers: unknown[], cost = 25000) {
   const queue = [...answers];
   const attempts: Array<[number, number]> = [];
+  const pauses: number[] = [];
   const request = jest.fn(
     async (config: { timeout: number; body?: unknown }) => {
+      if (attempts.length >= MAX_CREATES) {
+        throw new Error(`test route: more than ${MAX_CREATES} creates`);
+      }
       attempts.push([clock.now, config.timeout]);
       if (config.timeout < cost) {
         clock.now += config.timeout;
@@ -214,7 +222,12 @@ function indexRoute(clock: { now: number }, answers: unknown[], cost = 25000) {
       return { status: 200, statusText: 'OK', headers: {}, data };
     }
   );
-  return { request, attempts };
+  // The client's pause between creates, on the same clock.
+  const pause = async (ms: number): Promise<void> => {
+    pauses.push(ms);
+    clock.now += ms;
+  };
+  return { request, attempts, pauses, pause };
 }
 
 function onRoute(
@@ -229,6 +242,7 @@ function onRoute(
   (client as unknown as { httpClient: unknown }).httpClient = {
     request: route.request,
   };
+  (client as unknown as { pause: unknown }).pause = route.pause;
   return client;
 }
 
@@ -279,14 +293,17 @@ describe('createFieldIndex resolves only once the index is built', () => {
       })
     );
 
-    // 0 s: given all 60 s, acknowledged at 25 s. 25 s: given the 35 s left,
-    // acknowledged at 50 s. 50 s: given the last 10 s, and cut by the
-    // deadline while the server is still waiting on the build.
+    // 0 s: given 45 s (the per-create cap, under the 60 s left),
+    // acknowledged at 25 s. 25 s: given the 35 s left, acknowledged at 50 s.
+    // 50 s: given the last 10 s, and cut by the deadline while the server is
+    // still waiting on the build. Each "acknowledged" was held the server's
+    // full 25 s, so no pause was added between creates.
     expect(route.attempts).toEqual([
-      [0, 60000],
+      [0, 45000],
       [25000, 35000],
       [50000, 10000],
     ]);
+    expect(route.pauses).toEqual([]);
     expect(clock.now).toBe(60000);
     expect(error).toBeInstanceOf(RequestTimeoutError);
     expect((error as Error).message).toBe(
@@ -347,6 +364,61 @@ describe('createFieldIndex resolves only once the index is built', () => {
       expect(route.attempts).toHaveLength(1);
     }
   );
+});
+
+// A server that answers "acknowledged" at once did not hold the create (a
+// vectordb from before db26396 answers every create that way). Re-sending at
+// once would hammer it, forever when no timeout was passed. Parity with the
+// Python SDK's TestCreateIsNeverUnbounded.
+describe('createFieldIndex is never unbounded', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('paces an instant acknowledged and ends at the default deadline', async () => {
+    const clock = fakeClock();
+    const route = indexRoute(clock, [ACKNOWLEDGED], 50);
+
+    const error = await rejection(
+      onRoute(route).createFieldIndex('articles', 'ts', 'integer')
+    );
+
+    // Pauses of 1, 2, 4, 8, then 10 s each: 9 creates start in the first
+    // minute. With no floor it would be 1200 (one per 50 ms).
+    const firstMinute = route.attempts.filter(([at]) => at < 60000);
+    expect(firstMinute).toHaveLength(9);
+    expect(route.pauses.slice(0, 6)).toEqual([
+      1000, 2000, 4000, 8000, 10000, 10000,
+    ]);
+    expect(Math.max(...route.pauses)).toBe(10000);
+    // And the call ends at the default deadline, not never.
+    expect(clock.now).toBe(INDEX_DEFAULT_DEADLINE_MS);
+    expect(route.attempts.length).toBeLessThan(70);
+    expect(error).toBeInstanceOf(RequestTimeoutError);
+    expect((error as Error).message).toBe(
+      "The payload index on 'ts' in collection 'articles' is still building " +
+        'after the 600000 ms deadline. The build carries on server-side; ' +
+        'calling createFieldIndex again waits for it.'
+    );
+  });
+
+  it('adds no pause for a server that holds each create', async () => {
+    const clock = fakeClock();
+    const route = indexRoute(clock, [
+      ACKNOWLEDGED,
+      ACKNOWLEDGED,
+      ACKNOWLEDGED,
+      COMPLETED,
+    ]);
+
+    await expect(
+      onRoute(route).createFieldIndex('articles', 'ts', 'integer')
+    ).resolves.toBe(true);
+    expect(route.pauses).toEqual([]);
+    expect(route.attempts.map(([at]) => at)).toEqual([0, 25000, 50000, 75000]);
+  });
+
+  it('the default deadline is ten minutes', () => {
+    expect(INDEX_DEFAULT_DEADLINE_MS).toBe(600000);
+  });
 });
 
 describe('createFieldIndex attempt timeout', () => {

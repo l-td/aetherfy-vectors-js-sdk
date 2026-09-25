@@ -226,8 +226,8 @@ export interface CountOptions {
  */
 export interface CreateFieldIndexOptions {
   /**
-   * Deadline in ms for the whole call, every create included. Unset waits
-   * for the build however long it takes.
+   * Deadline in ms for the whole call, every create and pause included.
+   * Unset means 600000 (10 minutes); the wait is never unbounded.
    */
   timeout?: number;
 }

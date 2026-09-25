@@ -737,8 +737,8 @@ const exists = await client.collectionExists('my-collection');
 // 'bool' | 'geo' | 'datetime' | 'uuid' | 'text', or a parameterised object.
 // Resolves once the index is built, so a filter or an orderBy scroll on the
 // key can follow straight away. A large collection can take longer than the
-// server's 25 s wait; the call then waits on. { timeout } (ms) bounds the
-// whole call: past it, RequestTimeoutError, the build carries on, and calling
+// server's 25 s wait; the call then waits on, up to { timeout } (ms, default
+// 600000). Past it, RequestTimeoutError: the build carries on, and calling
 // again waits.
 await client.createFieldIndex('my-collection', 'tenantId', 'keyword');
 await client.createFieldIndex('my-collection', 'ts', 'integer', {

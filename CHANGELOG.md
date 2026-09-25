@@ -55,7 +55,7 @@
 
 ### Changed
 
-- **`createFieldIndex` resolves only once the index is built**, re-sending the create while the server answers "acknowledged"; new `options.timeout` (ms) bounds the wait (then `RequestTimeoutError`), and `deleteFieldIndex`'s docs now say it resolves `true` for a field that was never indexed.
+- **`createFieldIndex` resolves only once the index is built**, re-sending the create while the server answers "acknowledged"; new `options.timeout` (ms) bounds the wait, 600000 by default and never unbounded (then `RequestTimeoutError`); an "acknowledged" the server did not hold is re-sent only after a 1 s to 10 s pause; `deleteFieldIndex`'s docs now say it resolves `true` for a field that was never indexed.
 - **BREAKING: an options object with a key its type does not declare throws a
   `TypeError`.** TypeScript refuses an unknown key only in a fresh object
   literal at a typed call site; plain JavaScript, an options object built

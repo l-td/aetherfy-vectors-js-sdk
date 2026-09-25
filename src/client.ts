@@ -110,6 +110,17 @@ const CREATE_FIELD_INDEX_OPTION_KEYS = optionKeys<CreateFieldIndexOptions>({
 export const INDEX_WAIT_BUDGET_MS = 25000;
 export const INDEX_FORWARD_MARGIN_MS = 5000;
 export const INDEX_CREATE_ATTEMPT_TIMEOUT_MS = 45000;
+// createFieldIndex is never unbounded: with no options.timeout it stops at
+// INDEX_DEFAULT_DEADLINE_MS with the same "still building" error. And an
+// "acknowledged" that came back faster than INDEX_WAIT_BUDGET_MS means the
+// server did not hold the create (a vectordb from before db26396 answers every
+// create that way, at once), so the next create waits first:
+// INDEX_RESEND_PAUSE_FIRST_MS, doubling up to INDEX_RESEND_PAUSE_MAX_MS. An
+// "acknowledged" the server held for its budget is re-sent at once. Mirrors
+// the Python SDK's client.py.
+export const INDEX_DEFAULT_DEADLINE_MS = 600000;
+export const INDEX_RESEND_PAUSE_FIRST_MS = 1000;
+export const INDEX_RESEND_PAUSE_MAX_MS = 10000;
 
 /**
  * Aetherfy Vectors JavaScript SDK
@@ -1191,7 +1202,10 @@ export class AetherfyVectorsClient {
    *
    * There is deliberately no way to resolve before the build finishes: a
    * caller that did would scroll into "No range index for order_by key".
-   * To bound the wait, pass `options.timeout`.
+   * The wait is always bounded: by `options.timeout`, or else by
+   * INDEX_DEFAULT_DEADLINE_MS (10 minutes). An "acknowledged" that came back
+   * before the server's 25 s wait was up (so the server did not hold the
+   * create) is re-sent only after a pause, 1 s doubling to 10 s.
    *
    * @param collectionName - Collection to index.
    * @param fieldName - Payload key to index; a dotted path addresses a
@@ -1201,13 +1215,13 @@ export class AetherfyVectorsClient {
    *   `'datetime'`, `'uuid'`, `'text'`), or an object for the
    *   parameterised forms. Forwarded verbatim.
    * @param options.timeout - Deadline in ms for this whole call, every
-   *   create included. Unset waits for the build however long it takes;
-   *   each create then has an HTTP timeout of 45 s
+   *   create and pause included. Unset means INDEX_DEFAULT_DEADLINE_MS
+   *   (600000). Each create has an HTTP timeout of 45 s
    *   (INDEX_CREATE_ATTEMPT_TIMEOUT_MS), or the client's timeout if that is
-   *   longer.
+   *   longer, or what remains of the deadline if that is shorter.
    * @returns `true`, and only once the index is built. Never `false`.
-   * @throws RequestTimeoutError - `options.timeout` passed while the index
-   *   was still building. The build carries on server-side, and calling this
+   * @throws RequestTimeoutError - The deadline (`options.timeout`, or the
+   *   default) passed while the index was still building. The build carries on server-side, and calling this
    *   method again waits for it. If no answer at all came back within the
    *   timeout, the message says so instead: it is then not known whether the
    *   create was taken.
@@ -1230,8 +1244,8 @@ export class AetherfyVectorsClient {
       throw new ValidationError('fieldName must be a non-empty string');
     }
     const scopedName = this.scopeCollection(collectionName);
-    const { timeout } = options;
-    const deadline = timeout === undefined ? undefined : Date.now() + timeout;
+    const timeout = options.timeout ?? INDEX_DEFAULT_DEADLINE_MS;
+    const deadline = Date.now() + timeout;
     const stillBuilding = (): RequestTimeoutError =>
       new RequestTimeoutError(
         `The payload index on '${fieldName}' in collection ` +
@@ -1241,18 +1255,16 @@ export class AetherfyVectorsClient {
         timeout
       );
     let acknowledged = false;
+    let pause = INDEX_RESEND_PAUSE_FIRST_MS;
 
     for (;;) {
-      let attemptTimeout = Math.max(
-        this.requestTimeoutMs,
-        INDEX_CREATE_ATTEMPT_TIMEOUT_MS
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw stillBuilding();
+      const attemptTimeout = Math.min(
+        remaining,
+        Math.max(this.requestTimeoutMs, INDEX_CREATE_ATTEMPT_TIMEOUT_MS)
       );
-      if (deadline !== undefined) {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) throw stillBuilding();
-        // Each create gets only what remains of the deadline.
-        attemptTimeout = remaining;
-      }
+      const started = Date.now();
 
       let response: HttpResponse<{ result?: unknown }>;
       try {
@@ -1263,13 +1275,14 @@ export class AetherfyVectorsClient {
           timeout: attemptTimeout,
         });
       } catch (error: unknown) {
-        // With a deadline set, every attempt was given what remained of it,
-        // so a transport failure once it has passed IS the deadline. After an
-        // "acknowledged" the build is known to be running. Before any answer
-        // it is not known the create was even taken, so that is not claimed.
+        // Before the deadline, this is one create outliving its own HTTP
+        // timeout, and that error stands. At the deadline, after an
+        // "acknowledged" the build is known to be running; on the first
+        // create it is not known the create was even taken, so that is not
+        // claimed.
         const answered =
           error !== null && typeof error === 'object' && 'status' in error;
-        if (!answered && deadline !== undefined && Date.now() >= deadline) {
+        if (!answered && Date.now() >= deadline) {
           if (acknowledged) throw stillBuilding();
           throw new RequestTimeoutError(
             `The payload index create on '${fieldName}' in collection ` +
@@ -1300,7 +1313,18 @@ export class AetherfyVectorsClient {
         );
       }
       acknowledged = true;
+      if (Date.now() - started < INDEX_WAIT_BUDGET_MS) {
+        // The server did not hold this create, so re-sending at once would
+        // hammer it.
+        await this.pause(Math.min(pause, Math.max(deadline - Date.now(), 0)));
+        pause = Math.min(pause * 2, INDEX_RESEND_PAUSE_MAX_MS);
+      }
     }
+  }
+
+  /** Wait between index creates; a seam so tests can run on a fake clock. */
+  private pause(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
