@@ -735,8 +735,17 @@ const exists = await client.collectionExists('my-collection');
 // index any key you filter on for every read (a tenant id, a status, a
 // timestamp you range over). fieldSchema: 'keyword' | 'integer' | 'float' |
 // 'bool' | 'geo' | 'datetime' | 'uuid' | 'text', or a parameterised object.
+// Resolves once the index is built, so a filter or an orderBy scroll on the
+// key can follow straight away. A large collection can take longer than the
+// server's 25 s wait; the call then waits on. { timeout } (ms) bounds the
+// whole call: past it, RequestTimeoutError, the build carries on, and calling
+// again waits.
 await client.createFieldIndex('my-collection', 'tenantId', 'keyword');
-// Idempotent: false when the index (or the collection) is already gone.
+await client.createFieldIndex('my-collection', 'ts', 'integer', {
+  timeout: 120000,
+});
+// true when the collection exists, even if the field was never indexed;
+// false only when the collection does not exist.
 await client.deleteFieldIndex('my-collection', 'tenantId');
 
 // Get collection info
@@ -1048,8 +1057,8 @@ client.destroy();
 | `getCollections()`                                       | List all collections                                                               | `Promise<Collection[]>`   |
 | `collectionExists(name)`                                 | Check if collection exists                                                         | `Promise<boolean>`        |
 | `getCollection(name)`                                    | Get collection info                                                                | `Promise<Collection>`     |
-| `createFieldIndex(collection, field, schema?)`           | Create a payload index on one field (default schema `'keyword'`)                   | `Promise<boolean>`        |
-| `deleteFieldIndex(collection, field)`                    | Drop a payload index; false when already gone                                      | `Promise<boolean>`        |
+| `createFieldIndex(collection, field, schema?, options?)` | Create a payload index on one field (default `'keyword'`); resolves once built     | `Promise<boolean>`        |
+| `deleteFieldIndex(collection, field)`                    | Drop a payload index; false only when the collection does not exist                | `Promise<boolean>`        |
 | `upsert(collection, points)`                             | Insert/update vectors                                                              | `Promise<boolean>`        |
 | `delete(collection, selector)`                           | Delete vectors                                                                     | `Promise<boolean>`        |
 | `retrieve(collection, ids, options)`                     | Get vectors by ID                                                                  | `Promise<Point[]>`        |

@@ -222,6 +222,17 @@ export interface CountOptions {
 }
 
 /**
+ * Options for createFieldIndex
+ */
+export interface CreateFieldIndexOptions {
+  /**
+   * Deadline in ms for the whole call, every create included. Unset waits
+   * for the build however long it takes.
+   */
+  timeout?: number;
+}
+
+/**
  * Options for scroll operations (Qdrant-compatible pagination)
  */
 export interface ScrollOptions {

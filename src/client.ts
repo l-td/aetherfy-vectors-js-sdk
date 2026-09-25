@@ -9,6 +9,7 @@ import {
   SearchOptions,
   RetrieveOptions,
   CountOptions,
+  CreateFieldIndexOptions,
   ScrollOptions,
   ScrollResult,
   ScrollPoint,
@@ -32,9 +33,11 @@ import {
   SchemaNotFoundError,
   SchemaValidationError,
   PartialUpsertError,
+  RequestTimeoutError,
   createErrorFromResponse,
   isRetryableError,
 } from './exceptions';
+import { HttpResponse } from './http/types';
 import { retryWithBackoff, validatePointId } from './utils';
 import { assertAllowedOptionKeys, optionKeys } from './utils/options';
 import { serializeFilter } from './utils/filter';
@@ -87,6 +90,26 @@ const COUNT_OPTION_KEYS = optionKeys<CountOptions>({
   countFilter: true,
   exact: true,
 });
+const CREATE_FIELD_INDEX_OPTION_KEYS = optionKeys<CreateFieldIndexOptions>({
+  timeout: true,
+});
+
+// Payload-index create. The server holds ONE create for up to
+// INDEX_WAIT_BUDGET_MS while Qdrant builds the index, then answers
+// "acknowledged" (still building). Mirrors vectordb backend/config/timeouts.js
+// INDEX_WAIT_BUDGET_MS; no cross-repo gate ties the two, so a change there
+// must be copied here. When the region that answers does not host the
+// collection it forwards the create first, which vectordb allows
+// INDEX_FORWARD_MARGIN_MS for (FORWARD_MARGIN_MS in the same file). Each
+// create attempt's HTTP timeout, INDEX_CREATE_ATTEMPT_TIMEOUT_MS (or the
+// client's timeout if that is longer), must outlast both, plus this client's
+// own hop, or the SDK times out before the server's answer arrives. The
+// default 30 s did not leave room for the forward. Pinned in
+// tests/unit/field-index.test.ts. Mirrors the Python SDK's client.py.
+// Exported for the tests, not from the package.
+export const INDEX_WAIT_BUDGET_MS = 25000;
+export const INDEX_FORWARD_MARGIN_MS = 5000;
+export const INDEX_CREATE_ATTEMPT_TIMEOUT_MS = 45000;
 
 /**
  * Aetherfy Vectors JavaScript SDK
@@ -158,6 +181,8 @@ export class AetherfyVectorsClient {
   private httpClient: HttpClient;
   private authManager: APIKeyManager;
   private readonly endpoint: string;
+  /** The per-attempt request timeout this client was built with, in ms. */
+  private readonly requestTimeoutMs: number;
   /**
    * The active workspace, or `undefined` if workspace scoping is disabled.
    * Set at construction time (either explicitly or via the
@@ -207,8 +232,10 @@ export class AetherfyVectorsClient {
     const apiKey = APIKeyManager.resolveApiKey(config.apiKey);
     this.authManager = new APIKeyManager(apiKey);
 
+    this.requestTimeoutMs =
+      config.timeout || AetherfyVectorsClient.DEFAULT_TIMEOUT;
     this.httpClient = new HttpClient({
-      timeout: config.timeout || AetherfyVectorsClient.DEFAULT_TIMEOUT,
+      timeout: this.requestTimeoutMs,
       defaultHeaders: this.authManager.getAuthHeaders(),
       enableConnectionPooling: config.enableConnectionPooling,
     });
@@ -1152,11 +1179,19 @@ export class AetherfyVectorsClient {
   // -------------------------------------------------------------------
 
   /**
-   * Create a payload index on one field.
+   * Create a payload index on one field, and resolve once it is built.
    *
    * PUT /collections/{name}/index with `{ field_name, field_schema }`.
-   * The call is idempotent server-side: re-creating an existing index
-   * with the same schema succeeds.
+   * The server waits for the build for up to 25 s. A build that takes
+   * longer is answered "acknowledged" (still building), and this method
+   * then sends the create again, which waits for the running build, until
+   * the answer is "completed". So when it resolves, a filter or an
+   * `orderBy` scroll on the key works in the region that answered.
+   * Re-creating an existing index with the same schema resolves at once.
+   *
+   * There is deliberately no way to resolve before the build finishes: a
+   * caller that did would scroll into "No range index for order_by key".
+   * To bound the wait, pass `options.timeout`.
    *
    * @param collectionName - Collection to index.
    * @param fieldName - Payload key to index; a dotted path addresses a
@@ -1165,36 +1200,116 @@ export class AetherfyVectorsClient {
    *   (`'keyword'`, `'integer'`, `'float'`, `'bool'`, `'geo'`,
    *   `'datetime'`, `'uuid'`, `'text'`), or an object for the
    *   parameterised forms. Forwarded verbatim.
+   * @param options.timeout - Deadline in ms for this whole call, every
+   *   create included. Unset waits for the build however long it takes;
+   *   each create then has an HTTP timeout of 45 s
+   *   (INDEX_CREATE_ATTEMPT_TIMEOUT_MS), or the client's timeout if that is
+   *   longer.
+   * @returns `true`, and only once the index is built. Never `false`.
+   * @throws RequestTimeoutError - `options.timeout` passed while the index
+   *   was still building. The build carries on server-side, and calling this
+   *   method again waits for it. If no answer at all came back within the
+   *   timeout, the message says so instead: it is then not known whether the
+   *   create was taken.
+   * @throws AetherfyVectorsError - The server answered a status other than
+   *   "completed" or "acknowledged"; the index is not confirmed.
    */
   async createFieldIndex(
     collectionName: string,
     fieldName: string,
-    fieldSchema: string | Record<string, unknown> = 'keyword'
+    fieldSchema: string | Record<string, unknown> = 'keyword',
+    options: CreateFieldIndexOptions = {}
   ): Promise<boolean> {
+    assertAllowedOptionKeys(
+      options,
+      CREATE_FIELD_INDEX_OPTION_KEYS,
+      'createFieldIndex'
+    );
     this.validateCollectionName(collectionName);
     if (!fieldName || typeof fieldName !== 'string') {
       throw new ValidationError('fieldName must be a non-empty string');
     }
     const scopedName = this.scopeCollection(collectionName);
-
-    try {
-      await this.httpClient.put(
-        this.apiUrl(this.buildCollectionPath(collectionName, '/index')),
-        { field_name: fieldName, field_schema: fieldSchema }
+    const { timeout } = options;
+    const deadline = timeout === undefined ? undefined : Date.now() + timeout;
+    const stillBuilding = (): RequestTimeoutError =>
+      new RequestTimeoutError(
+        `The payload index on '${fieldName}' in collection ` +
+          `'${collectionName}' is still building after the ${timeout} ms ` +
+          'deadline. The build carries on server-side; calling ' +
+          'createFieldIndex again waits for it.',
+        timeout
       );
-      return true;
-    } catch (error: unknown) {
-      this.evictCachesIfNotFound(scopedName, error);
-      throw this.handleError(error);
+    let acknowledged = false;
+
+    for (;;) {
+      let attemptTimeout = Math.max(
+        this.requestTimeoutMs,
+        INDEX_CREATE_ATTEMPT_TIMEOUT_MS
+      );
+      if (deadline !== undefined) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw stillBuilding();
+        // Each create gets only what remains of the deadline.
+        attemptTimeout = remaining;
+      }
+
+      let response: HttpResponse<{ result?: unknown }>;
+      try {
+        response = await this.httpClient.request<{ result?: unknown }>({
+          url: this.apiUrl(this.buildCollectionPath(collectionName, '/index')),
+          method: 'PUT',
+          body: { field_name: fieldName, field_schema: fieldSchema },
+          timeout: attemptTimeout,
+        });
+      } catch (error: unknown) {
+        // With a deadline set, every attempt was given what remained of it,
+        // so a transport failure once it has passed IS the deadline. After an
+        // "acknowledged" the build is known to be running. Before any answer
+        // it is not known the create was even taken, so that is not claimed.
+        const answered =
+          error !== null && typeof error === 'object' && 'status' in error;
+        if (!answered && deadline !== undefined && Date.now() >= deadline) {
+          if (acknowledged) throw stillBuilding();
+          throw new RequestTimeoutError(
+            `The payload index create on '${fieldName}' in collection ` +
+              `'${collectionName}' got no answer within the ${timeout} ms ` +
+              'deadline, so it is not known whether it was taken. Calling ' +
+              'createFieldIndex again is safe.',
+            timeout
+          );
+        }
+        this.evictCachesIfNotFound(scopedName, error);
+        throw this.handleError(error);
+      }
+
+      const result = response.data?.result;
+      const status =
+        result !== null && typeof result === 'object'
+          ? (result as { status?: unknown }).status
+          : undefined;
+      if (status === 'completed') return true;
+      if (status !== 'acknowledged') {
+        throw new AetherfyVectorsError(
+          `createFieldIndex got status ${
+            typeof status === 'string' ? `'${status}'` : String(status)
+          } ` +
+            `for the payload index on '${fieldName}' in collection ` +
+            `'${collectionName}', expected 'completed' or 'acknowledged'; ` +
+            'the index is not confirmed built.'
+        );
+      }
+      acknowledged = true;
     }
   }
 
   /**
    * Drop the payload index on one field.
    *
-   * DELETE /collections/{name}/index/{fieldName}. Returns false when the
-   * collection (or the index) is already gone, mirroring the idempotent
-   * shape of the other drop operations.
+   * DELETE /collections/{name}/index/{fieldName}. Resolves `true` when the
+   * collection exists, INCLUDING when that field was never indexed: the
+   * server answers that with 200, like a real drop. Resolves `false` only
+   * when the collection itself does not exist (404).
    */
   async deleteFieldIndex(
     collectionName: string,

@@ -182,6 +182,7 @@ const OPTIONS_INTERFACE: Record<string, { argIndex: number; iface: string }> = {
   search: { argIndex: 2, iface: 'SearchOptions' },
   retrieve: { argIndex: 2, iface: 'RetrieveOptions' },
   count: { argIndex: 1, iface: 'CountOptions' },
+  createFieldIndex: { argIndex: 3, iface: 'CreateFieldIndexOptions' },
   scrollIter: { argIndex: 1, iface: 'ScrollIterOptions' },
   // Added because the skip counter reported them: they had interfaces all
   // along and were going unchecked purely because nothing listed them. That is

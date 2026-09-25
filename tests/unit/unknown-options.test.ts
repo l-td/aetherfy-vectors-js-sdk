@@ -275,12 +275,16 @@ const OK = {
   data: { result: { count: 0, points: [], next_page_offset: null } },
 };
 
+const INDEX_BUILT = { status: 200, data: { result: { status: 'completed' } } };
+
 function fakeTransport() {
   return {
     get: jest.fn().mockResolvedValue(OK),
     post: jest.fn().mockResolvedValue(OK),
     put: jest.fn().mockResolvedValue(OK),
     delete: jest.fn().mockResolvedValue(OK),
+    // createFieldIndex's only call; it resolves only on a built index.
+    request: jest.fn().mockResolvedValue(INDEX_BUILT),
     destroy: jest.fn(),
   };
 }
@@ -421,6 +425,18 @@ const ENTRY_POINTS: EntryPoint[] = [
     label: 'setPayload',
     where: { owner: 'AetherfyVectorsClient', member: 'setPayload', param: 3 },
     setup: onVectors((c, o) => c.setPayload('col', { a: 1 }, [1], o as any)),
+  },
+  {
+    id: 'AetherfyVectorsClient.createFieldIndex#3',
+    label: 'createFieldIndex',
+    where: {
+      owner: 'AetherfyVectorsClient',
+      member: 'createFieldIndex',
+      param: 3,
+    },
+    setup: onVectors((c, o) =>
+      c.createFieldIndex('col', 'k', 'keyword', o as any)
+    ),
   },
   {
     id: 'AetherfyVectorsClient.retrieve#2',

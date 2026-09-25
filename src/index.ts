@@ -48,6 +48,7 @@ export {
   SearchOptions,
   RetrieveOptions,
   CountOptions,
+  CreateFieldIndexOptions,
   ScrollOptions,
   ScrollResult,
   ScrollIterOptions,
