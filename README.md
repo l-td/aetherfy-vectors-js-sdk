@@ -227,7 +227,9 @@ new AetherfyVectorsClient({ apiKey: 'afy_test_...', region: 'eu-central-1' });
 ```
 
 The API endpoint option is `apiRegion`. The Python SDK raises `TypeError`
-for an unknown argument the same way.
+for an unknown argument the same way. `new MemoryClient({ client })` uses that
+client as-is, so passing a connection key beside it (`apiKey`, `endpoint`, …)
+throws too, naming the key.
 
 ## 🔁 Iterating Large Collections
 

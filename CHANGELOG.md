@@ -78,7 +78,10 @@
   at the first `next()`. Points, payloads, schemas, a collection's vector
   config and a spawn payload are data, not options, and are not key-checked.
   The accepted keys are derived from the TypeScript types, so they cannot
-  drift from what the types document.
+  drift from what the types document. `new MemoryClient({ client, ... })`
+  also throws for any connection key (`apiKey`, `endpoint`, `timeout`,
+  `workspace`, …) passed beside `client`, which is used as-is and used to
+  ignore them silently.
 - **BREAKING: a thread is a payload scope, not a collection.** Every thread in a
   workspace now lives in ONE collection (`__threads__`) with `thread_id` as a
   payload key, and every per-thread operation is a filtered operation over it.

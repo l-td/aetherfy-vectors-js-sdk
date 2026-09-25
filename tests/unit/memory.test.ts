@@ -128,6 +128,34 @@ describe('MemoryClient construction', () => {
     const m = newMemory(mock);
     expect(m.vectors).toBe(mock);
   });
+
+  it('refuses connection keys beside a client, naming them: they would configure nothing', () => {
+    const mock = buildMockClient();
+    expect(
+      () =>
+        new MemoryClient({
+          client: mock,
+          apiKey: 'afy_test_1234567890123456',
+          workspace: undefined,
+        })
+    ).toThrow(
+      new TypeError(
+        'MemoryClient constructor: apiKey, workspace cannot be passed with ' +
+          'client, which is used as-is; configure them on that client.'
+      )
+    );
+  });
+
+  it('a client alone, or with the memory-only keys, still constructs', () => {
+    const mock = buildMockClient();
+    const m = new MemoryClient({
+      client: mock,
+      threadVectorSize: 1536,
+      threadDistance: DistanceMetric.DOT,
+    });
+    expect(m.vectors).toBe(mock);
+    expect(newMemory(mock).vectors).toBe(mock);
+  });
 });
 
 // ---------------------------------------------------------------------------

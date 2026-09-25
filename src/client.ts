@@ -44,7 +44,9 @@ import { validateVectors } from './schema';
 // The accepted keys of every public options object on this client, derived
 // from its type by optionKeys(): a key added to or removed from the type
 // without the same change here does not compile. See src/utils/options.ts.
-const CLIENT_CONFIG_KEYS = optionKeys<ClientConfig>({
+// CLIENT_CONFIG_KEYS is exported for MemoryClient, which refuses these keys
+// beside a bring-your-own client (not part of the package's exports).
+export const CLIENT_CONFIG_KEYS = optionKeys<ClientConfig>({
   apiKey: true,
   endpoint: true,
   timeout: true,

@@ -11,7 +11,7 @@
  * AetherfyVectorsClient directly via `memory.vectors` or its own import.
  */
 
-import { AetherfyVectorsClient } from '../client';
+import { AetherfyVectorsClient, CLIENT_CONFIG_KEYS } from '../client';
 import {
   ClientConfig,
   Collection,
@@ -64,8 +64,9 @@ export interface MemoryClientConfig extends ClientConfig {
   /**
    * Bring-your-own AetherfyVectorsClient.
    *
-   * When supplied, all other config fields (apiKey, endpoint, timeout,
-   * workspace) are ignored — the client is used as-is. Useful when:
+   * When supplied, the client is used as-is, so the connection keys
+   * (apiKey, endpoint, timeout, workspace, ...) cannot be passed beside it:
+   * they would configure nothing, and a TypeError names them. Useful when:
    *
    * - Sharing a single AetherfyVectorsClient across MemoryClient and
    *   other code that uses the raw vectors API.
@@ -136,6 +137,17 @@ export class MemoryClient {
     this.threadDistance = config.threadDistance ?? DistanceMetric.COSINE;
 
     if (config.client !== undefined) {
+      // A key, not a value, is what is refused: as everywhere else,
+      // `{ client, workspace: undefined }` throws too.
+      const ignored = Object.keys(config).filter(k =>
+        CLIENT_CONFIG_KEYS.includes(k)
+      );
+      if (ignored.length > 0) {
+        throw new TypeError(
+          `MemoryClient constructor: ${ignored.join(', ')} cannot be passed ` +
+            'with client, which is used as-is; configure them on that client.'
+        );
+      }
       this._client = config.client;
     } else {
       // Default to auto-detection of AETHERFY_WORKSPACE unless explicitly
