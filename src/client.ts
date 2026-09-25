@@ -231,7 +231,6 @@ export class AetherfyVectorsClient {
       }
       // env var wins over apiRegion= regardless of how the caller got here.
       if (envEndpoint) {
-        // eslint-disable-next-line no-console
         console.warn(
           `Both AETHERFY_VECTORS_URL and apiRegion=${config.apiRegion} are set; ` +
             'using AETHERFY_VECTORS_URL (apiRegion= is a standalone/local-dev ' +
