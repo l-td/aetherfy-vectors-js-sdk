@@ -9,6 +9,21 @@ import http from 'http';
 import https from 'https';
 
 import { SDK_VERSION } from '../version';
+import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
+
+// Derived from the types by optionKeys(): see src/utils/options.ts.
+const HTTP_CLIENT_OPTION_KEYS = optionKeys<HttpClientOptions>({
+  timeout: true,
+  defaultHeaders: true,
+  enableConnectionPooling: true,
+});
+const REQUEST_CONFIG_KEYS = optionKeys<RequestConfig>({
+  url: true,
+  method: true,
+  headers: true,
+  body: true,
+  timeout: true,
+});
 
 // Type guard for axios errors
 function isAxiosError(error: unknown): error is AxiosErrorType {
@@ -47,6 +62,11 @@ export class HttpClient {
   private httpsAgent?: unknown;
 
   constructor(options: HttpClientOptions = {}) {
+    assertAllowedOptionKeys(
+      options,
+      HTTP_CLIENT_OPTION_KEYS,
+      'HttpClient constructor'
+    );
     this.timeout = options.timeout || 30000;
     this.defaultHeaders = {
       'Content-Type': 'application/json',
@@ -137,6 +157,7 @@ export class HttpClient {
    * Make an HTTP request with timeout handling and response parsing
    */
   async request<T>(config: RequestConfig): Promise<HttpResponse<T>> {
+    assertAllowedOptionKeys(config, REQUEST_CONFIG_KEYS, 'HttpClient.request');
     const { url, method, headers = {}, body, timeout = this.timeout } = config;
 
     const requestHeaders = {

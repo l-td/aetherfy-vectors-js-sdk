@@ -71,7 +71,8 @@
   `MemoryClient` constructor and `createNamespace`; `Namespace.add`,
   `addMany` (each item) and `setSchema`; `Thread.add`, `appendMany` (each
   item), `history` and `iterHistory`; `search`, `retrieve`, `count` and
-  `iter` on both scopes; and `fanOut` in `aetherfy-vectors/agent`. What is
+  `iter` on both scopes; `retryWithBackoff`; `HttpClient`'s constructor and
+  `request`; and `fanOut` in `aetherfy-vectors/agent`. What is
   checked is the key, not its value: `{ region: undefined }` throws too, as
   `region=None` does in Python. A declared key set to `undefined` still means
   "not set". `scrollIter`, `iter` and `iterHistory` now throw at the call, not

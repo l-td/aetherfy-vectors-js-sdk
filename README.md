@@ -215,8 +215,8 @@ and a warning is logged — production-agent protection rule.
 
 Every options object the SDK takes — the client constructor and `create()`,
 `search`, `retrieve`, `scroll`, `scrollIter`, `count`, `setPayload`, the
-`MemoryClient` constructor, the `Namespace` / `Thread` methods and
-`fanOut` — accepts exactly the keys its TypeScript type declares. Any
+`MemoryClient` constructor, the `Namespace` / `Thread` methods,
+`retryWithBackoff`, `HttpClient` and `fanOut` — accepts exactly the keys its TypeScript type declares. Any
 other key throws a `TypeError` naming the key, the method and the accepted
 keys, even in plain JavaScript and even when its value is `undefined`:
 

@@ -1,5 +1,6 @@
 import { Point, DistanceMetric } from './models';
 import { AetherfyVectorsError, ValidationError } from './exceptions';
+import { assertAllowedOptionKeys, optionKeys } from './utils/options';
 
 /**
  * Environment detection utilities
@@ -404,6 +405,17 @@ export function sanitizeForLogging(data: unknown): unknown {
  * @param options - Retry options
  * @returns Promise that resolves to function result
  */
+// Derived from the type by optionKeys(): see src/utils/options.ts.
+const RETRY_OPTION_KEYS = optionKeys<
+  NonNullable<Parameters<typeof retryWithBackoff>[1]>
+>({
+  maxRetries: true,
+  baseDelay: true,
+  maxDelay: true,
+  backoffFactor: true,
+  retryCondition: true,
+});
+
 export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   options: {
@@ -414,6 +426,7 @@ export async function retryWithBackoff<T>(
     retryCondition?: (_error: unknown) => boolean;
   } = {}
 ): Promise<T> {
+  assertAllowedOptionKeys(options, RETRY_OPTION_KEYS, 'retryWithBackoff');
   const {
     maxRetries = 3,
     baseDelay = 1000,
