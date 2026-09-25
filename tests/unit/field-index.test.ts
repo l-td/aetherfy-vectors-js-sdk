@@ -15,7 +15,7 @@
 import nock from 'nock';
 import {
   AetherfyVectorsClient,
-  INDEX_CREATE_ATTEMPT_TIMEOUT_MS,
+  INDEX_ATTEMPT_TIMEOUT_MS,
   INDEX_DEFAULT_DEADLINE_MS,
   INDEX_FORWARD_MARGIN_MS,
   INDEX_WAIT_BUDGET_MS,
@@ -184,11 +184,12 @@ describe('deleteFieldIndex', () => {
 // Parity with the Python SDK's TestCreateWaitsUntilTheIndexIsBuilt.
 // ---------------------------------------------------------------------------
 
-/** A clock that only moves when the fake route says so. */
+/**
+ * A clock that only moves when the fake route says so. onRoute() installs it
+ * as the client's now() seam; the real one is performance.now().
+ */
 function fakeClock(): { now: number } {
-  const clock = { now: 0 };
-  jest.spyOn(Date, 'now').mockImplementation(() => clock.now);
-  return clock;
+  return { now: 0 };
 }
 
 /**
@@ -227,7 +228,7 @@ function indexRoute(clock: { now: number }, answers: unknown[], cost = 25000) {
     pauses.push(ms);
     clock.now += ms;
   };
-  return { request, attempts, pauses, pause };
+  return { request, attempts, pauses, pause, now: () => clock.now };
 }
 
 function onRoute(
@@ -243,6 +244,7 @@ function onRoute(
     request: route.request,
   };
   (client as unknown as { pause: unknown }).pause = route.pause;
+  (client as unknown as { now: unknown }).now = route.now;
   return client;
 }
 
@@ -308,7 +310,7 @@ describe('createFieldIndex resolves only once the index is built', () => {
     expect(error).toBeInstanceOf(RequestTimeoutError);
     expect((error as Error).message).toBe(
       "The payload index on 'ts' in collection 'articles' is still building " +
-        'after the 60000 ms deadline. The build carries on server-side; ' +
+        'after the 60 s deadline. The build carries on server-side; ' +
         'calling createFieldIndex again waits for it.'
     );
     expect((error as RequestTimeoutError).timeoutMs).toBe(60000);
@@ -340,7 +342,7 @@ describe('createFieldIndex resolves only once the index is built', () => {
     expect(error).toBeInstanceOf(RequestTimeoutError);
     expect((error as Error).message).toBe(
       "The payload index create on 'ts' in collection 'articles' got no " +
-        'answer within the 5000 ms deadline, so it is not known whether it ' +
+        'answer within the 5 s deadline, so it is not known whether it ' +
         'was taken. Calling createFieldIndex again is safe.'
     );
     expect(route.attempts).toEqual([[0, 5000]]);
@@ -395,7 +397,7 @@ describe('createFieldIndex is never unbounded', () => {
     expect(error).toBeInstanceOf(RequestTimeoutError);
     expect((error as Error).message).toBe(
       "The payload index on 'ts' in collection 'articles' is still building " +
-        'after the 600000 ms deadline. The build carries on server-side; ' +
+        'after the 600 s deadline. The build carries on server-side; ' +
         'calling createFieldIndex again waits for it.'
     );
   });
@@ -436,9 +438,7 @@ describe('createFieldIndex attempt timeout', () => {
     expect(INDEX_FORWARD_MARGIN_MS).toBe(5000);
     // With room for this client's own hop on top.
     const held = INDEX_WAIT_BUDGET_MS + INDEX_FORWARD_MARGIN_MS;
-    expect(INDEX_CREATE_ATTEMPT_TIMEOUT_MS).toBeGreaterThanOrEqual(
-      held + 10000
-    );
+    expect(INDEX_ATTEMPT_TIMEOUT_MS).toBeGreaterThanOrEqual(held + 10000);
     // The client-wide default alone does not leave that room, which is why
     // the create does not use it.
     const defaultTimeout = (
@@ -453,8 +453,8 @@ describe('createFieldIndex attempt timeout', () => {
 
     await onRoute(route, 10000).createFieldIndex('articles', 'ts', 'integer');
     expect(route.attempts.map(([, given]) => given)).toEqual([
-      INDEX_CREATE_ATTEMPT_TIMEOUT_MS,
-      INDEX_CREATE_ATTEMPT_TIMEOUT_MS,
+      INDEX_ATTEMPT_TIMEOUT_MS,
+      INDEX_ATTEMPT_TIMEOUT_MS,
     ]);
   });
 
@@ -464,5 +464,101 @@ describe('createFieldIndex attempt timeout', () => {
 
     await onRoute(route, 90000).createFieldIndex('articles', 'ts', 'integer');
     expect(route.attempts.map(([, given]) => given)).toEqual([90000]);
+  });
+});
+
+// vectordb holds an index delete like a create (?wait=true, 25 s, and a
+// forward from a region that does not host the collection). A delete given only
+// the client's timeout gave up before the server's answer, and it is not
+// retried, so the caller got a timeout for a delete that succeeded. Parity with
+// the Python SDK's TestDeleteAttemptTimeout.
+describe('deleteFieldIndex attempt timeout', () => {
+  it('a delete the server holds 28 s succeeds', async () => {
+    const clock = fakeClock();
+    const route = indexRoute(clock, [{ result: true, status: 'ok' }], 28000);
+
+    // The client's own timeout is 10 s, well under the hold.
+    await expect(
+      onRoute(route, 10000).deleteFieldIndex('articles', 'ts')
+    ).resolves.toBe(true);
+    expect(route.attempts).toEqual([[0, INDEX_ATTEMPT_TIMEOUT_MS]]);
+    expect(route.request.mock.calls[0][0]).toMatchObject({ method: 'DELETE' });
+  });
+
+  it('is still one request', async () => {
+    const clock = fakeClock();
+    const route = indexRoute(clock, [{ result: true }], 60000);
+
+    await expect(
+      onRoute(route).deleteFieldIndex('articles', 'ts')
+    ).rejects.toThrow();
+    expect(route.attempts).toHaveLength(1);
+  });
+});
+
+// A deadline of 0 or less used to reject "still building" without sending
+// anything, claiming a build it never started. It is refused up front. Parity
+// with the Python SDK's TestCreateTimeoutMustBePositive.
+describe('createFieldIndex options.timeout must be positive', () => {
+  it.each([
+    ['0', 0, '0'],
+    ['-1', -1, '-1'],
+    ['-0.5', -0.5, '-0.5'],
+    ['Infinity', Infinity, 'Infinity'],
+    ['NaN', NaN, 'NaN'],
+    ['a string', '60000', "'60000'"],
+    ['true', true, 'true'],
+  ])(
+    '%s is refused naming the value, before any request',
+    async (_c, bad, shown) => {
+      const route = indexRoute(fakeClock(), [COMPLETED], 10);
+
+      const error = await rejection(
+        onRoute(route).createFieldIndex('articles', 'ts', 'integer', {
+          timeout: bad as unknown as number,
+        })
+      );
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as Error).message).toBe(
+        `options.timeout must be a finite number of milliseconds above 0, got ${shown}`
+      );
+      expect(route.attempts).toHaveLength(0);
+    }
+  );
+
+  it('a small positive timeout is taken', async () => {
+    const route = indexRoute(fakeClock(), [COMPLETED], 10);
+
+    await expect(
+      onRoute(route).createFieldIndex('a', 'ts', 'integer', { timeout: 500 })
+    ).resolves.toBe(true);
+  });
+});
+
+// The deadline and the held-or-not check run on performance.now(), which is
+// monotonic. Date.now() is the wall clock: an NTP step or a VM resuming moves
+// it, and with it every deadline measured on it.
+describe('createFieldIndex keeps its time on the monotonic clock', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('ends at its deadline while the wall clock stands still', async () => {
+    const clock = fakeClock();
+    const route = indexRoute(clock, [ACKNOWLEDGED], 50);
+    jest
+      .spyOn(globalThis.performance, 'now')
+      .mockImplementation(() => clock.now);
+    jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const client = onRoute(route);
+    // The real clock seam this time, not the test's.
+    delete (client as unknown as { now?: unknown }).now;
+
+    const error = await rejection(
+      client.createFieldIndex('articles', 'ts', 'integer', { timeout: 60000 })
+    );
+
+    expect(error).toBeInstanceOf(RequestTimeoutError);
+    expect((error as Error).message).toMatch(/still building after the 60 s/);
+    expect(clock.now).toBe(60000);
+    expect(route.attempts.length).toBeLessThan(15);
   });
 });

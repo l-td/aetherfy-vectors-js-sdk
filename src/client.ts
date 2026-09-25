@@ -94,22 +94,23 @@ const CREATE_FIELD_INDEX_OPTION_KEYS = optionKeys<CreateFieldIndexOptions>({
   timeout: true,
 });
 
-// Payload-index create. The server holds ONE create for up to
-// INDEX_WAIT_BUDGET_MS while Qdrant builds the index, then answers
-// "acknowledged" (still building). Mirrors vectordb backend/config/timeouts.js
-// INDEX_WAIT_BUDGET_MS; no cross-repo gate ties the two, so a change there
-// must be copied here. When the region that answers does not host the
-// collection it forwards the create first, which vectordb allows
-// INDEX_FORWARD_MARGIN_MS for (FORWARD_MARGIN_MS in the same file). Each
-// create attempt's HTTP timeout, INDEX_CREATE_ATTEMPT_TIMEOUT_MS (or the
-// client's timeout if that is longer), must outlast both, plus this client's
-// own hop, or the SDK times out before the server's answer arrives. The
-// default 30 s did not leave room for the forward. Pinned in
+// Payload-index writes (create and delete). The server holds ONE of them for
+// up to INDEX_WAIT_BUDGET_MS while Qdrant applies it, then answers
+// "acknowledged" (still in progress). Mirrors vectordb
+// backend/config/timeouts.js INDEX_WAIT_BUDGET_MS. When the region that answers
+// does not host the collection it forwards the write first, which vectordb
+// allows INDEX_FORWARD_MARGIN_MS for (FORWARD_MARGIN_MS in the same file). Each
+// attempt's HTTP timeout, INDEX_ATTEMPT_TIMEOUT_MS (or the client's timeout if
+// that is longer), must outlast both, plus this client's own hop, or the SDK
+// times out before the server's answer arrives. The default 30 s did not leave
+// room for the forward. The relation is pinned against vectordb's and the
+// Python SDK's source by aetherfy-e2e-tests
+// tests/pyunit/test_index_timeouts_pair.py, and locally in
 // tests/unit/field-index.test.ts. Mirrors the Python SDK's client.py.
 // Exported for the tests, not from the package.
 export const INDEX_WAIT_BUDGET_MS = 25000;
 export const INDEX_FORWARD_MARGIN_MS = 5000;
-export const INDEX_CREATE_ATTEMPT_TIMEOUT_MS = 45000;
+export const INDEX_ATTEMPT_TIMEOUT_MS = 45000;
 // createFieldIndex is never unbounded: with no options.timeout it stops at
 // INDEX_DEFAULT_DEADLINE_MS with the same "still building" error. And an
 // "acknowledged" that came back faster than INDEX_WAIT_BUDGET_MS means the
@@ -1215,16 +1216,18 @@ export class AetherfyVectorsClient {
    *   `'datetime'`, `'uuid'`, `'text'`), or an object for the
    *   parameterised forms. Forwarded verbatim.
    * @param options.timeout - Deadline in ms for this whole call, every
-   *   create and pause included. Unset means INDEX_DEFAULT_DEADLINE_MS
-   *   (600000). Each create has an HTTP timeout of 45 s
-   *   (INDEX_CREATE_ATTEMPT_TIMEOUT_MS), or the client's timeout if that is
+   *   create and pause included: a finite number above 0. Unset means
+   *   INDEX_DEFAULT_DEADLINE_MS (600000). Each create has an HTTP timeout of
+   *   45 s (INDEX_ATTEMPT_TIMEOUT_MS), or the client's timeout if that is
    *   longer, or what remains of the deadline if that is shorter.
    * @returns `true`, and only once the index is built. Never `false`.
+   * @throws ValidationError - `options.timeout` is not a finite number above
+   *   0. Nothing is sent.
    * @throws RequestTimeoutError - The deadline (`options.timeout`, or the
-   *   default) passed while the index was still building. The build carries on server-side, and calling this
-   *   method again waits for it. If no answer at all came back within the
-   *   timeout, the message says so instead: it is then not known whether the
-   *   create was taken.
+   *   default) passed while the index was still building. The build carries
+   *   on server-side, and calling this method again waits for it. If no
+   *   answer at all came back within the deadline, the message says so
+   *   instead: it is then not known whether the create was taken.
    * @throws AetherfyVectorsError - The server answered a status other than
    *   "completed" or "acknowledged"; the index is not confirmed.
    */
@@ -1243,28 +1246,50 @@ export class AetherfyVectorsClient {
     if (!fieldName || typeof fieldName !== 'string') {
       throw new ValidationError('fieldName must be a non-empty string');
     }
+    const given: unknown = options.timeout;
+    if (
+      given !== undefined &&
+      (typeof given !== 'number' || !Number.isFinite(given) || given <= 0)
+    ) {
+      throw new ValidationError(
+        'options.timeout must be a finite number of milliseconds above 0, ' +
+          `got ${typeof given === 'string' ? `'${given}'` : String(given)}`
+      );
+    }
     const scopedName = this.scopeCollection(collectionName);
     const timeout = options.timeout ?? INDEX_DEFAULT_DEADLINE_MS;
-    const deadline = Date.now() + timeout;
+    const deadline = this.now() + timeout;
+    // The messages name the deadline in seconds, as the Python SDK's do; the
+    // option itself stays in ms, like every other duration in this SDK.
+    const seconds = `${timeout / 1000} s`;
     const stillBuilding = (): RequestTimeoutError =>
       new RequestTimeoutError(
         `The payload index on '${fieldName}' in collection ` +
-          `'${collectionName}' is still building after the ${timeout} ms ` +
+          `'${collectionName}' is still building after the ${seconds} ` +
           'deadline. The build carries on server-side; calling ' +
           'createFieldIndex again waits for it.',
+        timeout
+      );
+    const noAnswer = (): RequestTimeoutError =>
+      new RequestTimeoutError(
+        `The payload index create on '${fieldName}' in collection ` +
+          `'${collectionName}' got no answer within the ${seconds} ` +
+          'deadline, so it is not known whether it was taken. Calling ' +
+          'createFieldIndex again is safe.',
         timeout
       );
     let acknowledged = false;
     let pause = INDEX_RESEND_PAUSE_FIRST_MS;
 
     for (;;) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) throw stillBuilding();
+      const remaining = deadline - this.now();
+      // Only a build some answer reported is claimed.
+      if (remaining <= 0) throw acknowledged ? stillBuilding() : noAnswer();
       const attemptTimeout = Math.min(
         remaining,
-        Math.max(this.requestTimeoutMs, INDEX_CREATE_ATTEMPT_TIMEOUT_MS)
+        Math.max(this.requestTimeoutMs, INDEX_ATTEMPT_TIMEOUT_MS)
       );
-      const started = Date.now();
+      const started = this.now();
 
       let response: HttpResponse<{ result?: unknown }>;
       try {
@@ -1282,15 +1307,8 @@ export class AetherfyVectorsClient {
         // claimed.
         const answered =
           error !== null && typeof error === 'object' && 'status' in error;
-        if (!answered && Date.now() >= deadline) {
-          if (acknowledged) throw stillBuilding();
-          throw new RequestTimeoutError(
-            `The payload index create on '${fieldName}' in collection ` +
-              `'${collectionName}' got no answer within the ${timeout} ms ` +
-              'deadline, so it is not known whether it was taken. Calling ' +
-              'createFieldIndex again is safe.',
-            timeout
-          );
+        if (!answered && this.now() >= deadline) {
+          throw acknowledged ? stillBuilding() : noAnswer();
         }
         this.evictCachesIfNotFound(scopedName, error);
         throw this.handleError(error);
@@ -1313,16 +1331,22 @@ export class AetherfyVectorsClient {
         );
       }
       acknowledged = true;
-      if (Date.now() - started < INDEX_WAIT_BUDGET_MS) {
+      if (this.now() - started < INDEX_WAIT_BUDGET_MS) {
         // The server did not hold this create, so re-sending at once would
         // hammer it.
-        await this.pause(Math.min(pause, Math.max(deadline - Date.now(), 0)));
+        await this.pause(Math.min(pause, Math.max(deadline - this.now(), 0)));
         pause = Math.min(pause * 2, INDEX_RESEND_PAUSE_MAX_MS);
       }
     }
   }
 
-  /** Wait between index creates; a seam so tests can run on a fake clock. */
+  // createFieldIndex's clock and its wait between creates: seams, so the tests
+  // run on a fake clock. Monotonic, not Date.now(): a wall-clock jump (NTP, a
+  // VM resuming) must not move the deadline or the held-or-not check.
+  private now(): number {
+    return performance.now();
+  }
+
   private pause(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
@@ -1334,6 +1358,10 @@ export class AetherfyVectorsClient {
    * collection exists, INCLUDING when that field was never indexed: the
    * server answers that with 200, like a real drop. Resolves `false` only
    * when the collection itself does not exist (404).
+   *
+   * One request, not retried. The server may hold it as long as a create (up
+   * to 25 s, plus a forward), so its HTTP timeout is INDEX_ATTEMPT_TIMEOUT_MS
+   * (45 s), or the client's timeout if that is longer.
    */
   async deleteFieldIndex(
     collectionName: string,
@@ -1346,14 +1374,16 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      await this.httpClient.delete(
-        this.apiUrl(
+      await this.httpClient.request({
+        url: this.apiUrl(
           this.buildCollectionPath(
             collectionName,
             `/index/${encodeURIComponent(fieldName)}`
           )
-        )
-      );
+        ),
+        method: 'DELETE',
+        timeout: Math.max(this.requestTimeoutMs, INDEX_ATTEMPT_TIMEOUT_MS),
+      });
       return true;
     } catch (error: unknown) {
       if (
