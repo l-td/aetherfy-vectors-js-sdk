@@ -53,7 +53,7 @@ function makeClient(): AetherfyVectorsClient {
 async function captureBody(
   path: string,
   run: (client: AetherfyVectorsClient) => Promise<unknown>,
-  reply: Record<string, unknown> = { result: [] }
+  reply: Record<string, unknown> = { result: { points: [] } }
 ): Promise<string> {
   const client = makeClient();
   let raw = '';
@@ -147,7 +147,7 @@ describe('Filter clause vocabulary — wire contract', () => {
   describe('call sites', () => {
     it('search sends must_not on the wire', async () => {
       const raw = await captureBody(
-        '/api/v1/collections/test-collection/points/search',
+        '/api/v1/collections/test-collection/points/query',
         c =>
           c.search('test-collection', QUERY_VECTOR, {
             queryFilter: { must: MUST, mustNot: MUST_NOT, should: SHOULD },
@@ -192,12 +192,12 @@ describe('Filter clause vocabulary — wire contract', () => {
 
     it('a filterless search body is unchanged', async () => {
       const raw = await captureBody(
-        '/api/v1/collections/test-collection/points/search',
+        '/api/v1/collections/test-collection/points/query',
         c => c.search('test-collection', QUERY_VECTOR)
       );
       expect(raw).toBe(
         JSON.stringify({
-          vector: QUERY_VECTOR,
+          query: QUERY_VECTOR,
           limit: 10,
           offset: 0,
           with_payload: true,
@@ -209,8 +209,8 @@ describe('Filter clause vocabulary — wire contract', () => {
     it('a typo reaching search throws instead of shipping a dropped clause', async () => {
       const client = makeClient();
       const scope = nock(BASE)
-        .post('/api/v1/collections/test-collection/points/search')
-        .reply(200, { result: [] });
+        .post('/api/v1/collections/test-collection/points/query')
+        .reply(200, { result: { points: [] } });
 
       await expect(
         client.search('test-collection', QUERY_VECTOR, {

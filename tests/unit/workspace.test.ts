@@ -102,13 +102,13 @@ describe('Workspace Support', () => {
 
       const searchScope = nock(baseUrl)
         .post(
-          '/api/v1/workspaces/invoice-pipeline/collections/documents/points/search',
+          '/api/v1/workspaces/invoice-pipeline/collections/documents/points/query',
           body => {
-            return body.vector.length === 384;
+            return body.query.length === 384;
           }
         )
         .reply(200, {
-          result: [{ id: 1, score: 0.95, payload: { text: 'test' } }],
+          result: { points: [{ id: 1, score: 0.95, payload: { text: 'test' } }] },
         });
 
       const queryVector = new Array(384).fill(0.1);

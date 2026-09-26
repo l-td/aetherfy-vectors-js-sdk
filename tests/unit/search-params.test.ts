@@ -2,7 +2,7 @@
  * Wire-level contract for SearchOptions.searchParams.
  *
  * The backend forwards the search body verbatim to Qdrant (raw-body
- * passthrough on POST /points/search), so `params` is a pure serialization
+ * passthrough on POST /points/query), so `params` is a pure serialization
  * contract: what the SDK puts in the body is what the engine gets. These
  * tests pin the serialized bytes, not search behavior — no live search
  * needed.
@@ -24,7 +24,7 @@ import { AetherfyVectorsClient } from '../../src/client';
 import { SearchOptions } from '../../src/models';
 
 const BASE = 'https://vectors.aetherfy.com';
-const PATH = '/api/v1/collections/test-collection/points/search';
+const PATH = '/api/v1/collections/test-collection/points/query';
 const QUERY_VECTOR = [0.1, 0.2, 0.3];
 
 /**
@@ -34,7 +34,7 @@ const QUERY_VECTOR = [0.1, 0.2, 0.3];
  * cache key is byte-derived.
  */
 const BASELINE_BODY = JSON.stringify({
-  vector: QUERY_VECTOR,
+  query: QUERY_VECTOR,
   limit: 10,
   offset: 0,
   with_payload: true,
@@ -63,7 +63,7 @@ async function captureSearchBody(
       raw = typeof body === 'string' ? body : JSON.stringify(body);
       return true;
     })
-    .reply(200, { result: [] });
+    .reply(200, { result: { points: [] } });
 
   await client.search('test-collection', QUERY_VECTOR, options);
   scope.done();

@@ -730,8 +730,8 @@ describe('AetherfyVectorsClient', () => {
       ];
 
       nock('https://vectors.aetherfy.com')
-        .post('/api/v1/collections/test-collection/points/search')
-        .reply(200, { result: mockResults });
+        .post('/api/v1/collections/test-collection/points/query')
+        .reply(200, { result: { points: mockResults } });
 
       const queryVector = [0.1, 0.2, 0.3];
       const results = await client.search('test-collection', queryVector, {
@@ -1089,7 +1089,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle non-retryable HTTP errors in search', async () => {
       nock('https://vectors.aetherfy.com')
-        .post('/api/v1/collections/test-collection/points/search')
+        .post('/api/v1/collections/test-collection/points/query')
         .reply(404, {
           message: 'Collection not found',
           code: 'NOT_FOUND',

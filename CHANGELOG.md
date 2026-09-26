@@ -55,6 +55,13 @@
 
 ### Changed
 
+- **BREAKING (wire): `search()` sends `POST /collections/{name}/points/query`**
+  instead of Qdrant's retired `/points/search`, which the API now refuses with
+  410 `ROUTE_RETIRED`. The call, its options and its return value are
+  unchanged: the vector goes in the body as `query`, every other option keeps
+  its wire name (`limit`, `offset`, `filter`, `with_payload`, `with_vector`,
+  `score_threshold`, `params`), and the matches are read from `result.points`.
+  An SDK older than this breaks on search against the current API.
 - **`createFieldIndex` resolves only once the index is built**, re-sending the create while the server answers "acknowledged"; new `options.timeout` (ms) bounds the wait, 600000 by default and never unbounded (then `RequestTimeoutError`; a `timeout` that is not a finite number above 0 throws `ValidationError`); each create or `deleteFieldIndex` request gets a 45 s HTTP timeout, since the server may hold it 25 s plus a forward; an "acknowledged" the server did not hold is re-sent only after a 1 s to 10 s pause; `deleteFieldIndex`'s docs now say it resolves `true` for a field that was never indexed.
 - **BREAKING: an options object with a key its type does not declare throws a
   `TypeError`.** TypeScript refuses an unknown key only in a fresh object
@@ -164,6 +171,10 @@
 
 ### Release needed
 
+- **Publish together with the API that refuses `/points/search`.** Published
+  1.x `search()` calls `/points/search` and gets 410 `ROUTE_RETIRED` from that
+  API; this version calls `/points/query`, which that API serves. Push the
+  vectordb change and publish this release in the same window.
 - **The pending release is no longer a patch.** The changes above remove
   `createThread`'s options argument and the `Thread` schema methods, and change
   where a thread's data lives. Under semver that is a MAJOR bump: publish this
