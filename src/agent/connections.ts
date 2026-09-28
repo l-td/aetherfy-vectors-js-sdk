@@ -19,7 +19,9 @@
  * A PER-NAME IN-PROCESS CACHE. A token is reused until it would have less than
  * `max(minValidSeconds, 60)` seconds left — the control plane's own margin —
  * so a loop calling `connection('google')` per item costs one request per
- * token lifetime.
+ * token lifetime. A token with no expiry (Notion's) is asked for again after
+ * NO_EXPIRY_RECHECK_MS, so a disconnect or a reconnect on the dashboard reaches
+ * a long-running agent.
  */
 
 import {
@@ -46,6 +48,12 @@ export const MIN_VALID_SECONDS_DEFAULT = 300;
 /** The control plane never hands out less; the cache holds to the same floor. */
 const REFRESH_FLOOR_SECONDS = 60;
 
+/**
+ * How long a token with no expiry is reused before the control plane is asked
+ * again. Without a bound it would outlive its own revocation.
+ */
+const NO_EXPIRY_RECHECK_MS = 5 * 60 * 1000;
+
 export interface ConnectionOptions {
   /** 0 to 3000, default 300. The token stays valid at least this long. */
   minValidSeconds?: number;
@@ -56,15 +64,20 @@ const CONNECTION_OPTION_KEYS = optionKeys<ConnectionOptions>({
   minValidSeconds: true,
 });
 
-const cache = new Map<string, ConnectionToken>();
+const cache = new Map<string, { token: ConnectionToken; fetchedAt: number }>();
 
 /** Empties the per-process cache. For tests. */
 export function clearConnectionCache(): void {
   cache.clear();
 }
 
-function freshEnough(token: ConnectionToken, minValidSeconds: number): boolean {
-  if (token.expires_at === null) return true;
+function freshEnough(
+  { token, fetchedAt }: { token: ConnectionToken; fetchedAt: number },
+  minValidSeconds: number
+): boolean {
+  if (token.expires_at === null) {
+    return Date.now() - fetchedAt < NO_EXPIRY_RECHECK_MS;
+  }
   const marginMs = Math.max(minValidSeconds, REFRESH_FLOOR_SECONDS) * 1000;
   return token.expires_at.getTime() - Date.now() > marginMs;
 }
@@ -111,7 +124,7 @@ export async function connection(
   }
 
   const cached = cache.get(name);
-  if (cached && freshEnough(cached, minValidSeconds)) return cached;
+  if (cached && freshEnough(cached, minValidSeconds)) return cached.token;
 
   const apiUrl = requireEnv(
     'AETHERFY_API_URL',
@@ -147,7 +160,7 @@ export async function connection(
         typeof answer.account_label === 'string' ? answer.account_label : null,
       scopes: Array.isArray(answer.scopes) ? answer.scopes.map(String) : [],
     };
-    cache.set(name, token);
+    cache.set(name, { token, fetchedAt: Date.now() });
     return token;
   }
 

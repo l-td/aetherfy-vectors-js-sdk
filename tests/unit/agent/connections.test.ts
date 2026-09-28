@@ -120,15 +120,32 @@ describe('connection()', () => {
     ).toBe('new');
   });
 
-  it('caches a never-expiring token for good', async () => {
-    const scope = nock(HOST)
-      .post(PATH)
-      .once()
-      .reply(200, answer(null, 't', { provider: 'notion' }));
-    const first = await connection('google', { minValidSeconds: 3000 });
-    expect(first.expires_at).toBeNull();
-    expect(await connection('google', { minValidSeconds: 3000 })).toBe(first);
-    expect(scope.isDone()).toBe(true);
+  it('rechecks a never-expiring token after five minutes', async () => {
+    // Cached, but not for good: a disconnect on the dashboard revokes it, and
+    // a long-running agent must hear about that.
+    const start = Date.now();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const scope = nock(HOST)
+        .post(PATH)
+        .once()
+        .reply(200, answer(null, 'first', { provider: 'notion' }));
+      const first = await connection('google', { minValidSeconds: 3000 });
+      expect(first.expires_at).toBeNull();
+      now.mockReturnValue(start + 5 * 60 * 1000 - 1);
+      expect(await connection('google', { minValidSeconds: 3000 })).toBe(first);
+      expect(scope.isDone()).toBe(true);
+
+      nock(HOST)
+        .post(PATH)
+        .reply(200, answer(null, 'second', { provider: 'notion' }));
+      now.mockReturnValue(start + 5 * 60 * 1000);
+      expect(
+        (await connection('google', { minValidSeconds: 3000 })).access_token
+      ).toBe('second');
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it.each([
