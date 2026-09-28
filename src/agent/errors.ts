@@ -336,3 +336,36 @@ export class WaitTimeoutInvalid extends RunReadError {
     Object.setPrototypeOf(this, WaitTimeoutInvalid.prototype);
   }
 }
+
+/**
+ * The control plane refused to mint an agent token.
+ *
+ * `code` is the platform's stable code and the thing to branch on:
+ * `AGENT_TOKEN_AUDIENCE_UNKNOWN` (not an audience tokens are minted for),
+ * `AGENT_TOKEN_SCOPE_NOT_GRANTED` (a scope this key cannot grant there),
+ * `AGENT_TOKENS_UNCONFIGURED` (tokens are not enabled on this platform), or
+ * `AGENT_TOKEN_REQUIRES_AGENT_KEY` (the key in `AETHERFY_API_KEY` is an account
+ * key, not the one Aetherfy injected). `detail` carries the envelope's extras,
+ * e.g. `audiences` and `not_granted`.
+ */
+export class TokenError extends AgentError {
+  public readonly status?: number;
+  public readonly code?: string;
+  public readonly detail: Record<string, unknown>;
+
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      code?: string;
+      detail?: Record<string, unknown>;
+    } = {}
+  ) {
+    super(message);
+    this.name = 'TokenError';
+    this.status = options.status;
+    this.code = options.code;
+    this.detail = options.detail ?? {};
+    Object.setPrototypeOf(this, TokenError.prototype);
+  }
+}

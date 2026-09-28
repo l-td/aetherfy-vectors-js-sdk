@@ -179,6 +179,7 @@ const EXPECTED_CLAIMS: string[] = [
   'RunReadError.code',
   'SchemaValidationError.errors',
   'SpawnError.code',
+  'TokenError.code',
   'TooManyRunsInFlight.inFlightCount',
   'TooManyRunsInFlight.maxInFlightRuns',
   'ValidationError.message',

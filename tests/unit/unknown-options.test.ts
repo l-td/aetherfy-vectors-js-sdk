@@ -49,7 +49,7 @@ import { AetherfyVectorsClient } from '../../src/client';
 import { HttpClient } from '../../src/http/client';
 import { createClient } from '../../src/index';
 import { retryWithBackoff } from '../../src/utils';
-import { fanOut } from '../../src/agent';
+import { fanOut, token } from '../../src/agent';
 import { MemoryClient } from '../../src/memory/client';
 import { Namespace } from '../../src/memory/namespace';
 import { Thread } from '../../src/memory/thread';
@@ -664,6 +664,34 @@ const ENTRY_POINTS: EntryPoint[] = [
       touched: () => null,
     }),
   },
+  {
+    id: 'token()#0',
+    label: 'token',
+    where: { owner: 'token', param: 0 },
+    required: { audience: 'aetherfy-control-plane' },
+    setup: () => {
+      // The exchange's one collaborator is the control plane, stood in for by
+      // fetch. A fresh key per setup, because token() caches per key: a row
+      // served from an earlier row's cache would do no work and prove nothing.
+      const calls: unknown[] = [];
+      process.env.AETHERFY_API_URL = 'https://agents.aetherfy.com/api/v1';
+      process.env.AETHERFY_API_KEY = `afy_test_${Math.random()}`;
+      global.fetch = (async (...args: unknown[]) => {
+        calls.push(args);
+        return new Response(
+          JSON.stringify({
+            token: 'afyat_test_x',
+            expires_at: new Date(Date.now() + 600_000).toISOString(),
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } }
+        );
+      }) as typeof fetch;
+      return {
+        call: options => token(options as any),
+        touched: () => calls.length,
+      };
+    },
+  },
 ];
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -682,9 +710,16 @@ beforeEach(() => {
   logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
 });
 
+const realFetch = global.fetch;
+
 afterEach(() => {
   logSpy.mockRestore();
   for (const name of Object.keys(AGENT_SHAPE)) delete process.env[name];
+  // token()'s row stands in for the control plane with fetch and the two
+  // variables it reads; no other row may inherit them.
+  global.fetch = realFetch;
+  delete process.env.AETHERFY_API_URL;
+  delete process.env.AETHERFY_API_KEY;
 });
 
 /** Run the call to completion: await a promise, drain an async iterator. */

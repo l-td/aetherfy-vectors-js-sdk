@@ -665,6 +665,28 @@ try {
 }
 ```
 
+### Handing out a short-lived token instead of the key
+
+`AETHERFY_API_KEY` lives as long as the deployment. When code running on the
+agent needs to give a credential to something else, give it a token instead:
+one audience, a subset of the key's scopes, and dead within fifteen minutes or
+the moment the deployment ends. `token()` caches it until a minute before it
+expires, so calling it before every request is cheap.
+
+```typescript
+import { token, TokenError } from 'aetherfy-vectors/agent';
+
+try {
+  const minted = await token({
+    audience: 'aetherfy-control-plane',
+    scopes: ['runs:read'],
+  });
+  console.log(minted.token, minted.expires_at);
+} catch (error) {
+  if (error instanceof TokenError) console.log(error.code);
+}
+```
+
 Full contract, including the environment variables behind every call:
 [docs.aetherfy.com/agents/task-contract](https://docs.aetherfy.com/agents/task-contract).
 

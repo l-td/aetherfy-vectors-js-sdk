@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`token({ audience, scopes })` on `aetherfy-vectors/agent`** exchanges the
+  agent's own `AETHERFY_API_KEY` for a short-lived agent token
+  (`POST /agent-tokens`) and resolves to an `AgentToken` (`token`,
+  `expires_at`). The token names one audience, carries a subset of the key's
+  scopes, and stops working within fifteen minutes or when the deployment
+  ends: it is what code on an agent hands onward instead of the key. Cached per
+  key, audience and scopes until a minute before it expires. A refusal rejects
+  with the new `TokenError`, carrying the platform's `code`. An unknown option
+  is refused like every other options object.
+
 ### Fixed
 
 - **Agent errors are now `instanceof AetherfyVectorsError` from the root.**
@@ -92,7 +104,6 @@
   EVER, and the fourth `createThread` threw `COLLECTION_LIMIT_EXCEEDED` and
   fired the "you hit your plan limit" email. Creating a thread now consumes no
   collection slot.
-
   - `createThread(threadId)` no longer accepts a `CreateScopeOptions` argument.
     One collection has one vector size and one distance metric; they come from
     `new MemoryClient({ threadVectorSize: 384, threadDistance: DistanceMetric.COSINE })`
@@ -138,7 +149,7 @@
 - **The package root exports everything the SDK hands you.**
   `ThreadVectorSizeMismatchError` was thrown by the memory client and exported
   from the memory module but not from `aetherfy-vectors`, so `err instanceof
-  ThreadVectorSizeMismatchError` was impossible for a root importer.
+ThreadVectorSizeMismatchError` was impossible for a root importer.
   `ScrollOptions` and `ScrollResult` — the parameter and return types of
   `client.scroll()` — were the only method option/result types the root did not
   export. All three are exported now, and `tests/unit/public-surface.test.ts`
@@ -183,7 +194,6 @@
 
 - **`aetherfy-vectors/agent` — what code running on an Aetherfy agent does.**
   A new subpath export on this same package, beside the root entry:
-
   - `payload()` reads this run's input. The file named by
     `AETHERFY_SPAWN_PAYLOAD_PATH` first, then the documented HTTP fallback
     when the machine could not write it; `{}` for a run given no input, which
@@ -309,7 +319,7 @@
   verbatim, there is no inbound transform in this SDK, and the wire field is
   `points_count`. The same defect `UsageStats` carried, one interface over —
   and it was provable the whole time, because the e2e suite reads the
-  snake_case name *through this method* and passes against live infrastructure.
+  snake_case name _through this method_ and passes against live infrastructure.
   `name`, `description`, `status` and `regions` were correct only because the
   two vocabularies spell them identically; that is coincidence, not a
   transform, and the type now says so. Pinned by a new live e2e shape guard.
@@ -410,7 +420,7 @@ in here rather than carried to a `1.0.1` that never existed.
 ### Packaging
 
 - Added the missing `LICENSE` file. `package.json` declared `"license":
-  "MIT"` and listed `LICENSE` in `files`, but no such file existed, so the
+"MIT"` and listed `LICENSE` in `files`, but no such file existed, so the
   tarball would have shipped without one.
 - Corrected `repository.url` and `bugs.url`, which pointed at a
   `github.com/aetherfy/aetherfy-vectors-js` repository that does not exist.

@@ -53,11 +53,12 @@ import {
   RunNotFound,
   RunReadError,
   SpawnError,
+  TokenError,
   TooManyRunsInFlight,
   WaitTimeoutInvalid,
 } from './errors';
 import { requestJson, USER_AGENT_PREFIX } from './http';
-import { MachineShape, Run, Spawn } from './models';
+import { AgentToken, MachineShape, Run, Spawn } from './models';
 import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
 import { SDK_VERSION } from '../version';
 
@@ -72,10 +73,11 @@ export {
   RunNotFound,
   RunReadError,
   SpawnError,
+  TokenError,
   TooManyRunsInFlight,
   WaitTimeoutInvalid,
 };
-export type { MachineShape, Run, Spawn };
+export type { AgentToken, MachineShape, Run, Spawn };
 
 /**
  * The release this helper announces in its User-Agent. NOT a literal of its
@@ -764,4 +766,112 @@ function spawnUrl(): string {
     "this agent's id, the spawn's parent"
   );
   return url.split('{id}').join(agentId);
+}
+
+export interface TokenOptions {
+  /** The service the token is for, e.g. `aetherfy-control-plane`. */
+  audience: string;
+  /** Scopes to carry. Omitted: every scope the key holds for the audience. */
+  scopes?: string[];
+}
+
+// Derived from the type by optionKeys(): see src/utils/options.ts.
+const TOKEN_OPTION_KEYS = optionKeys<TokenOptions>({
+  audience: true,
+  scopes: true,
+});
+
+/**
+ * A cached token is handed out until this long before it expires, so a caller
+ * never receives one that dies on the way to the service it is meant for.
+ * Byte-for-byte the Python helper's margin.
+ */
+const TOKEN_REFRESH_MARGIN_SECONDS = 60;
+
+/**
+ * key + audience + scopes -> token and its expiry. Keyed by the KEY as well as
+ * the request: a task machine is handed a new key for every run it serves, and
+ * a token minted from the previous run's key dies with that run.
+ */
+const tokenCache = new Map<
+  string,
+  { minted: AgentToken; expiresAtMs: number }
+>();
+
+/**
+ * Exchange this machine's key for a short-lived agent token for `audience`.
+ *
+ * Hand the token onward — to a tool, a sub-process, another service — instead
+ * of `AETHERFY_API_KEY`. It names one audience and that service refuses any
+ * other, carries only `scopes` (every scope the key holds for that audience
+ * when omitted), and stops working within fifteen minutes, or the moment this
+ * deployment ends.
+ *
+ * CACHED until a minute before it expires, per key, audience and scopes, so
+ * calling this before every request costs one exchange per ten minutes rather
+ * than one per request.
+ *
+ * @throws {TokenError} The control plane refused — read `code`.
+ * @throws {NotRunningOnAgent} `AETHERFY_API_KEY` or `AETHERFY_API_URL` is unset.
+ * @throws {AgentTransportError} The request never reached the control plane.
+ */
+export async function token(options: TokenOptions): Promise<AgentToken> {
+  assertAllowedOptionKeys(options, TOKEN_OPTION_KEYS, 'token');
+  const apiKey = requireEnv(
+    'AETHERFY_API_KEY',
+    'the key a token is exchanged for'
+  );
+  const apiUrl = requireEnv('AETHERFY_API_URL', "the control plane's base URL");
+  const scopes = options.scopes ? [...options.scopes].sort() : undefined;
+
+  const cacheKey = JSON.stringify([apiKey, options.audience, scopes ?? null]);
+  const cached = tokenCache.get(cacheKey);
+  if (
+    cached &&
+    Date.now() < cached.expiresAtMs - TOKEN_REFRESH_MARGIN_SECONDS * 1000
+  ) {
+    return cached.minted;
+  }
+
+  const { status, body } = await requestJson(
+    'POST',
+    `${apiUrl.replace(/\/+$/, '')}/agent-tokens`,
+    {
+      apiKey,
+      userAgent: userAgent(),
+      body: scopes
+        ? { audience: options.audience, scopes }
+        : { audience: options.audience },
+    }
+  );
+
+  const record = asRecord(body);
+  if (status === 201 && record) {
+    const minted: AgentToken = {
+      token: stringOf(record.token),
+      expires_at: stringOf(record.expires_at),
+    };
+    const expiresAtMs = Date.parse(minted.expires_at);
+    if (Number.isNaN(expiresAtMs)) {
+      throw new TokenError(
+        `The token was minted but its expires_at (${minted.expires_at}) is ` +
+          'not a timestamp, so it cannot be cached safely.',
+        { status }
+      );
+    }
+    tokenCache.set(cacheKey, { minted, expiresAtMs });
+    return minted;
+  }
+
+  const detail = detailOf(body);
+  throw new TokenError(
+    typeof detail.message === 'string'
+      ? detail.message
+      : `Minting a token failed with status ${status}.`,
+    {
+      status,
+      code: typeof detail.code === 'string' ? detail.code : undefined,
+      detail,
+    }
+  );
 }
