@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`connection(name, { minValidSeconds })` in `aetherfy-vectors/agent`**
+  returns a fresh OAuth access token (`ConnectionToken`) for a Google, Slack
+  or Notion connection made on the Aetherfy dashboard, from the control
+  plane's `POST /connections/{name}/token`. Tokens are cached per name in the
+  process until they would have less than `max(minValidSeconds, 60)` seconds
+  left; an unknown option is refused like every other options object.
+  Refusals are typed: `ConnectionNotFound`, `ConnectionNeedsReauth`,
+  `ConnectionUnavailable` (retryable) and `ConnectionAccessDenied`, all
+  extending `ConnectionTokenError`. Same semantics as the Python helper's
+  `aetherfy_agent.connection`.
+
 ### Fixed
 
 - **Agent errors are now `instanceof AetherfyVectorsError` from the root.**
