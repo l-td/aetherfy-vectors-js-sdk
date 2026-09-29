@@ -9,7 +9,8 @@
   (`POST /agent-tokens`) and resolves to an `AgentToken` (`token`,
   `expires_at`). The token names one audience, carries a subset of the key's
   scopes, and stops working within fifteen minutes or when the deployment
-  ends: it is what code on an agent hands onward instead of the key. Cached per
+  ends. The only audience today is the control plane, so a token is a narrower
+  credential for it, not something to give a third party. Cached per
   key, audience and scopes until a minute before it expires. A refusal rejects
   with the new `TokenError`, carrying the platform's `code`. An unknown option
   is refused like every other options object.
@@ -319,7 +320,7 @@ ThreadVectorSizeMismatchError` was impossible for a root importer.
   verbatim, there is no inbound transform in this SDK, and the wire field is
   `points_count`. The same defect `UsageStats` carried, one interface over —
   and it was provable the whole time, because the e2e suite reads the
-  snake_case name _through this method_ and passes against live infrastructure.
+  snake*case name \_through this method* and passes against live infrastructure.
   `name`, `description`, `status` and `regions` were correct only because the
   two vocabularies spell them identically; that is coincidence, not a
   transform, and the type now says so. Pinned by a new live e2e shape guard.

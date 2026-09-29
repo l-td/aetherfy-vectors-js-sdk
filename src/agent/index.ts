@@ -428,6 +428,9 @@ export async function fanOut<T, R>(
  * @throws {TooManyRunsInFlight} 429, the concurrent-run cap is full. The one
  *   failure here worth retrying.
  * @throws {SpawnError} Any other refusal — read `code`, not the prose.
+ *   `AUTH_AGENT_KEY_OUT_OF_SCOPE` (403) means the credential in
+ *   `AETHERFY_API_KEY` may not spawn as this agent — e.g. a token that does not
+ *   carry `runs:spawn`.
  * @throws {AgentTransportError} The request never reached the control plane.
  */
 export async function spawn(
@@ -585,7 +588,11 @@ export async function writeResult(value: unknown): Promise<void> {
  * this run itself in `AETHERFY_SPAWN_ID`.
  *
  * @throws {RunNotFound} 404, no run has that id.
- * @throws {RunAccessDenied} 403, the run belongs to another account.
+ * @throws {RunAccessDenied} 403 `DEPLOYMENT_ACCESS_DENIED`, the run belongs to
+ *   another account (an account key was used).
+ * @throws {RunReadError} 403 `AUTH_AGENT_KEY_OUT_OF_SCOPE` when this machine's
+ *   own `AETHERFY_API_KEY` reads a run that is neither this agent's own nor one
+ *   it spawned: an agent's key reads only those.
  * @throws {RunReadError} Any other refusal — read `code`, not the prose.
  * @throws {AgentTransportError} The request never reached the control plane.
  */
@@ -618,7 +625,11 @@ export async function result(runId: string): Promise<Run> {
  * @throws {WaitTimeoutInvalid} 422, the server rejected the timeout anyway —
  *   its bound moved and this helper's copy is stale.
  * @throws {RunNotFound} 404, no run has that id.
- * @throws {RunAccessDenied} 403, the run belongs to another account.
+ * @throws {RunAccessDenied} 403 `DEPLOYMENT_ACCESS_DENIED`, the run belongs to
+ *   another account (an account key was used).
+ * @throws {RunReadError} 403 `AUTH_AGENT_KEY_OUT_OF_SCOPE` when this machine's
+ *   own `AETHERFY_API_KEY` reads a run that is neither this agent's own nor one
+ *   it spawned: an agent's key reads only those.
  * @throws {RunReadError} Any other refusal.
  * @throws {AgentTransportError} The request never reached the control plane.
  */
@@ -801,11 +812,17 @@ const tokenCache = new Map<
 /**
  * Exchange this machine's key for a short-lived agent token for `audience`.
  *
- * Hand the token onward — to a tool, a sub-process, another service — instead
- * of `AETHERFY_API_KEY`. It names one audience and that service refuses any
- * other, carries only `scopes` (every scope the key holds for that audience
- * when omitted), and stops working within fifteen minutes, or the moment this
- * deployment ends.
+ * The token is this same agent, narrowed further: it names one audience and
+ * that service refuses any other, carries only `scopes` (every scope the key
+ * holds for that audience when omitted), and stops working within fifteen
+ * minutes, or the moment this deployment ends. Use it where code on this
+ * machine needs less than the key — a `runs:read` token for a component that
+ * only reads runs.
+ *
+ * IT IS A BEARER CREDENTIAL FOR ITS AUDIENCE, and today the only audience is
+ * `aetherfy-control-plane`. Do not give it to a third-party service to prove
+ * who this agent is: whoever holds it can call the Aetherfy agents API with its
+ * scopes until it expires.
  *
  * CACHED until a minute before it expires, per key, audience and scopes, so
  * calling this before every request costs one exchange per ten minutes rather
