@@ -336,3 +336,105 @@ export class WaitTimeoutInvalid extends RunReadError {
     Object.setPrototypeOf(this, WaitTimeoutInvalid.prototype);
   }
 }
+
+/**
+ * The control-plane codes the connection token route answers with, each given
+ * a class below. One definition each, used both to pick the class and to stamp
+ * its `code`.
+ */
+export const CONNECTION_NOT_FOUND = 'CONNECTION_NOT_FOUND';
+export const CONNECTION_NEEDS_REAUTH = 'CONNECTION_NEEDS_REAUTH';
+export const CONNECTION_PROVIDER_UNAVAILABLE =
+  'CONNECTION_PROVIDER_UNAVAILABLE';
+export const CONNECTION_REQUIRES_AGENT_KEY = 'CONNECTION_REQUIRES_AGENT_KEY';
+
+/**
+ * The control plane refused a connection token.
+ *
+ * Same discipline as {@link RunReadError}: the STATUS AND THE CODE together
+ * select a subclass, and an unrecognised pairing arrives as this class
+ * reporting exactly what came back. `retryable` says whether asking again
+ * shortly can succeed.
+ */
+export class ConnectionTokenError extends AgentError {
+  public readonly status?: number;
+  public readonly code?: string;
+  public readonly detail: Record<string, unknown>;
+  public readonly retryable: boolean;
+
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      code?: string;
+      detail?: Record<string, unknown>;
+      retryable?: boolean;
+    } = {}
+  ) {
+    super(message);
+    this.name = 'ConnectionTokenError';
+    this.status = options.status;
+    this.code = options.code;
+    this.detail = options.detail ?? {};
+    this.retryable = options.retryable ?? false;
+    Object.setPrototypeOf(this, ConnectionTokenError.prototype);
+  }
+}
+
+/**
+ * `404 CONNECTION_NOT_FOUND` — no connection by that name on this agent or its
+ * workspace. Connect it on the dashboard, or check the name.
+ */
+export class ConnectionNotFound extends ConnectionTokenError {
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 404, code: CONNECTION_NOT_FOUND, detail });
+    this.name = 'ConnectionNotFound';
+    Object.setPrototypeOf(this, ConnectionNotFound.prototype);
+  }
+}
+
+/**
+ * `409 CONNECTION_NEEDS_REAUTH` — the provider refused the stored grant (it
+ * was revoked, or lapsed). Only reconnecting it on the dashboard helps.
+ */
+export class ConnectionNeedsReauth extends ConnectionTokenError {
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 409, code: CONNECTION_NEEDS_REAUTH, detail });
+    this.name = 'ConnectionNeedsReauth';
+    Object.setPrototypeOf(this, ConnectionNeedsReauth.prototype);
+  }
+}
+
+/**
+ * `502 CONNECTION_PROVIDER_UNAVAILABLE` — the provider did not answer a
+ * refresh in time and the stored token has expired. Transient: retry shortly.
+ */
+export class ConnectionUnavailable extends ConnectionTokenError {
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, {
+      status: 502,
+      code: CONNECTION_PROVIDER_UNAVAILABLE,
+      detail,
+      retryable: true,
+    });
+    this.name = 'ConnectionUnavailable';
+    Object.setPrototypeOf(this, ConnectionUnavailable.prototype);
+  }
+}
+
+/**
+ * `403 CONNECTION_REQUIRES_AGENT_KEY` — the key is not a running agent's own.
+ * Tokens are handed only to the `AETHERFY_API_KEY` the platform injects into
+ * an agent machine; an account key is refused.
+ */
+export class ConnectionAccessDenied extends ConnectionTokenError {
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, {
+      status: 403,
+      code: CONNECTION_REQUIRES_AGENT_KEY,
+      detail,
+    });
+    this.name = 'ConnectionAccessDenied';
+    Object.setPrototypeOf(this, ConnectionAccessDenied.prototype);
+  }
+}
