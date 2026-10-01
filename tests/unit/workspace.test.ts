@@ -108,7 +108,9 @@ describe('Workspace Support', () => {
           }
         )
         .reply(200, {
-          result: { points: [{ id: 1, score: 0.95, payload: { text: 'test' } }] },
+          result: {
+            points: [{ id: 1, score: 0.95, payload: { text: 'test' } }],
+          },
         });
 
       const queryVector = new Array(384).fill(0.1);

@@ -35,7 +35,10 @@ describe('search() sends POST /points/query', () => {
     await makeClient().search('docs', VECTOR, {
       limit: 7,
       offset: 3,
-      queryFilter: { must: [{ key: 'city', match: { value: 'Rome' } }], mustNot: [{ key: 'n', range: { gt: 5 } }] },
+      queryFilter: {
+        must: [{ key: 'city', match: { value: 'Rome' } }],
+        mustNot: [{ key: 'n', range: { gt: 5 } }],
+      },
       withPayload: false,
       withVectors: true,
       scoreThreshold: 0.42,
@@ -47,7 +50,10 @@ describe('search() sends POST /points/query', () => {
       query: VECTOR,
       limit: 7,
       offset: 3,
-      filter: { must: [{ key: 'city', match: { value: 'Rome' } }], must_not: [{ key: 'n', range: { gt: 5 } }] },
+      filter: {
+        must: [{ key: 'city', match: { value: 'Rome' } }],
+        must_not: [{ key: 'n', range: { gt: 5 } }],
+      },
       with_payload: false,
       with_vector: true,
       score_threshold: 0.42,
@@ -60,18 +66,30 @@ describe('search() sends POST /points/query', () => {
   it('reads the matches from result.points', async () => {
     const points = [
       { id: 1, version: 0, score: 0.99, payload: { t: 'a' } },
-      { id: 'b3f7', version: 2, score: 0.5, payload: { t: 'b' }, vector: [1, 0, 0] },
+      {
+        id: 'b3f7',
+        version: 2,
+        score: 0.5,
+        payload: { t: 'b' },
+        vector: [1, 0, 0],
+      },
     ];
-    nock(BASE).post(QUERY_PATH).reply(200, { result: { points }, status: 'ok', time: 0.001 });
+    nock(BASE)
+      .post(QUERY_PATH)
+      .reply(200, { result: { points }, status: 'ok', time: 0.001 });
 
     expect(await makeClient().search('docs', VECTOR)).toEqual(points);
   });
 
   it('never calls the retired /points/search', async () => {
-    const retired = nock(BASE).post('/api/v1/collections/docs/points/search').reply(410, {
-      error: { code: 'ROUTE_RETIRED', message: 'retired' },
-    });
-    nock(BASE).post(QUERY_PATH).reply(200, { result: { points: [] } });
+    const retired = nock(BASE)
+      .post('/api/v1/collections/docs/points/search')
+      .reply(410, {
+        error: { code: 'ROUTE_RETIRED', message: 'retired' },
+      });
+    nock(BASE)
+      .post(QUERY_PATH)
+      .reply(200, { result: { points: [] } });
 
     await makeClient().search('docs', VECTOR);
     expect(retired.isDone()).toBe(false);
