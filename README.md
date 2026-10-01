@@ -665,6 +665,34 @@ try {
 }
 ```
 
+With the agent's own `AETHERFY_API_KEY`, the control plane lets a run read only
+itself and the runs its agent spawned; reading any other run is refused with
+`RunReadError` and `code` `AUTH_AGENT_KEY_OUT_OF_SCOPE`.
+
+### Handing out a short-lived token instead of the key
+
+`AETHERFY_API_KEY` lives as long as the deployment. When code running on the
+agent needs less than the key — say, only to read its runs — mint it a token:
+one audience, a subset of the key's scopes, and dead within fifteen minutes or
+the moment the deployment ends. Today the only audience is
+`aetherfy-control-plane`, so a token is a credential for the Aetherfy agents
+API: never give one to a third-party service. `token()` caches it until a minute before it
+expires, so calling it before every request is cheap.
+
+```typescript
+import { token, TokenError } from 'aetherfy-vectors/agent';
+
+try {
+  const minted = await token({
+    audience: 'aetherfy-control-plane',
+    scopes: ['runs:read'],
+  });
+  console.log(minted.token, minted.expires_at);
+} catch (error) {
+  if (error instanceof TokenError) console.log(error.code);
+}
+```
+
 Full contract, including the environment variables behind every call:
 [docs.aetherfy.com/agents/task-contract](https://docs.aetherfy.com/agents/task-contract).
 

@@ -303,6 +303,11 @@ export class RunNotFound extends RunReadError {
 /**
  * `403 DEPLOYMENT_ACCESS_DENIED` — the run belongs to another account.
  *
+ * Not thrown for an agent's own key reading a run that is not its own: that is
+ * `403 AUTH_AGENT_KEY_OUT_OF_SCOPE`, a different code for a different problem
+ * (what the key may read, not whose run it is), and it arrives as a plain
+ * {@link RunReadError} carrying that `code`.
+ *
  * Distinct from {@link RunNotFound} because the platform distinguishes them,
  * and the two are different problems: an id that does not exist is a bug in
  * what you passed, an id you may not read is a bug in whose key you used.
@@ -334,5 +339,38 @@ export class WaitTimeoutInvalid extends RunReadError {
     });
     this.name = 'WaitTimeoutInvalid';
     Object.setPrototypeOf(this, WaitTimeoutInvalid.prototype);
+  }
+}
+
+/**
+ * The control plane refused to mint an agent token.
+ *
+ * `code` is the platform's stable code and the thing to branch on:
+ * `AGENT_TOKEN_AUDIENCE_UNKNOWN` (not an audience tokens are minted for),
+ * `AGENT_TOKEN_SCOPE_NOT_GRANTED` (a scope this key cannot grant there),
+ * `AGENT_TOKENS_UNCONFIGURED` (tokens are not enabled on this platform), or
+ * `AGENT_TOKEN_REQUIRES_AGENT_KEY` (the key in `AETHERFY_API_KEY` is an account
+ * key, not the one Aetherfy injected). `detail` carries the envelope's extras,
+ * e.g. `audiences` and `not_granted`.
+ */
+export class TokenError extends AgentError {
+  public readonly status?: number;
+  public readonly code?: string;
+  public readonly detail: Record<string, unknown>;
+
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      code?: string;
+      detail?: Record<string, unknown>;
+    } = {}
+  ) {
+    super(message);
+    this.name = 'TokenError';
+    this.status = options.status;
+    this.code = options.code;
+    this.detail = options.detail ?? {};
+    Object.setPrototypeOf(this, TokenError.prototype);
   }
 }
