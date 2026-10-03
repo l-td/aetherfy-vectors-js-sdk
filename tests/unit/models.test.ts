@@ -27,7 +27,7 @@ describe('generateId', () => {
 describe('DistanceMetric', () => {
   it('should have correct enum values', () => {
     expect(DistanceMetric.COSINE).toBe('Cosine');
-    expect(DistanceMetric.EUCLIDEAN).toBe('Euclidean');
+    expect(DistanceMetric.EUCLIDEAN).toBe('Euclid');
     expect(DistanceMetric.DOT).toBe('Dot');
     expect(DistanceMetric.MANHATTAN).toBe('Manhattan');
   });
@@ -36,7 +36,7 @@ describe('DistanceMetric', () => {
     const metrics = Object.values(DistanceMetric);
     expect(metrics).toHaveLength(4);
     expect(metrics).toContain('Cosine');
-    expect(metrics).toContain('Euclidean');
+    expect(metrics).toContain('Euclid');
     expect(metrics).toContain('Dot');
     expect(metrics).toContain('Manhattan');
   });

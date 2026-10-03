@@ -55,6 +55,15 @@
 
 ### Changed
 
+- **BREAKING (wire): `DistanceMetric.EUCLIDEAN` is `'Euclid'`, not
+  `'Euclidean'`.** `'Euclid'` is the API's own name: a collection created with
+  it reads back `'Euclid'`, where `'Euclidean'` never round-tripped (it was
+  stored and returned as `'Euclid'`, so comparing a collection's distance to
+  the constant silently failed). The API now refuses `"Euclidean"` with 400
+  `VALIDATION_ERROR` (field `vectors`), so a 1.x SDK cannot create a Euclidean
+  collection against it. The constant's name is unchanged, and
+  `createCollection` still accepts the strings `'euclidean'` and `'euclid'` in
+  any case, sending `'Euclid'`.
 - **BREAKING (wire): `search()` sends `POST /collections/{name}/points/query`**
   instead of Qdrant's retired `/points/search`, which the API now refuses with
   410 `ROUTE_RETIRED`. The call, its options and its return value are
