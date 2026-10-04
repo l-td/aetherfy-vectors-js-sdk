@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-04
+
+This release contains BREAKING changes (marked below). They ship in a minor
+version, not 2.0.0, because the package has no users yet (owner ruling,
+2026-09-24); the labels stay because they are true.
+
 ### Fixed
 
 - **Agent errors are now `instanceof AetherfyVectorsError` from the root.**
@@ -184,13 +190,11 @@
   1.x `search()` calls `/points/search` and gets 410 `ROUTE_RETIRED` from that
   API; this version calls `/points/query`, which that API serves. Push the
   vectordb change and publish this release in the same window.
-- **The pending release is no longer a patch.** The changes above remove
-  `createThread`'s options argument and the `Thread` schema methods, and change
-  where a thread's data lives. Under semver that is a MAJOR bump: publish this
-  as **2.0.0**, not 1.1.1 or 1.2.0. Threads written by 1.1.0 live in per-thread
-  collections that 2.0.0 does not read; there is no migration and no shim,
-  which is fine while the SDK has no users but must be stated in the release
-  notes.
+- **Breaking, in a minor release.** The changes above remove `createThread`'s
+  options argument and the `Thread` schema methods, and change where a thread's
+  data lives. Threads written by 1.1.0 live in per-thread collections that
+  1.2.0 does not read; there is no migration and no shim, which is fine while
+  the SDK has no users.
 - **The published 1.1.0 does not recognise `AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED`.**
   It still matches the old code, so against the current platform a full
   runs-in-flight limit reaches 1.1.0 callers as a plain `SpawnError` instead of
