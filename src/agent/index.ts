@@ -586,8 +586,8 @@ export async function writeResult(value: unknown): Promise<void> {
  * @throws {RunAccessDenied} 403 `DEPLOYMENT_ACCESS_DENIED`, the run belongs to
  *   another account (an account key was used).
  * @throws {RunReadError} 403 `AUTH_AGENT_KEY_OUT_OF_SCOPE` when this machine's
- *   own `AETHERFY_API_KEY` reads a run that is neither this agent's own nor one
- *   it spawned: an agent's key reads only those.
+ *   own `AETHERFY_API_KEY` reads a run that key may not read (which ones it
+ *   may: https://docs.aetherfy.com/platform/api-keys#agent-scoped-keys-issued-by-aetherfy).
  * @throws {RunReadError} Any other refusal — read `code`, not the prose.
  * @throws {AgentTransportError} The request never reached the control plane.
  */
@@ -623,8 +623,8 @@ export async function result(runId: string): Promise<Run> {
  * @throws {RunAccessDenied} 403 `DEPLOYMENT_ACCESS_DENIED`, the run belongs to
  *   another account (an account key was used).
  * @throws {RunReadError} 403 `AUTH_AGENT_KEY_OUT_OF_SCOPE` when this machine's
- *   own `AETHERFY_API_KEY` reads a run that is neither this agent's own nor one
- *   it spawned: an agent's key reads only those.
+ *   own `AETHERFY_API_KEY` reads a run that key may not read (which ones it
+ *   may: https://docs.aetherfy.com/platform/api-keys#agent-scoped-keys-issued-by-aetherfy).
  * @throws {RunReadError} Any other refusal.
  * @throws {AgentTransportError} The request never reached the control plane.
  */
