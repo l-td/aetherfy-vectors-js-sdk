@@ -51,7 +51,8 @@ export {
   DEFAULT_VECTOR_SIZE,
   THREAD_ID_KEY,
   THREAD_MARKER_KEY,
-  THREADS_COLLECTION,
+  THREADS_COLLECTION_PREFIX,
+  threadsCollectionName,
 } from './models';
 export type { Message } from './models';
 

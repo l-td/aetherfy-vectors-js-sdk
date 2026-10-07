@@ -11,7 +11,7 @@
 export const DEFAULT_VECTOR_SIZE = 384;
 
 /**
- * The one collection every thread in a workspace lives in.
+ * The prefix of the one collection every thread in a workspace lives in.
  *
  * Threads are rows keyed by `threadId` in a payload — Qdrant's documented
  * multitenancy shape. A collection per conversation is the shape it warns
@@ -20,12 +20,26 @@ export const DEFAULT_VECTOR_SIZE = 384;
  * counts against plans.max_collections (Free 3), so a collection per
  * conversation capped a Free account at three conversations ever.
  *
- * The name is legal SERVER-side — vectordb's scoping layer accepts
- * `[a-zA-Z0-9_-]{1,100}`, no dots — and unreachable from the user-facing
- * name regex in client.ts, which requires a leading letter or digit. So no
- * namespace can ever collide with it.
+ * ONE PER WORKSPACE, NAMED FOR IT (threadsCollectionName): `__threads__`
+ * outside any workspace, `__threads__<workspace>` in one. Collection names
+ * are unique per ACCOUNT (the server answers 409 COLLECTION_NAME_TAKEN for a
+ * name another workspace holds), so one `__threads__` per workspace could
+ * exist in exactly one workspace. A workspace name is unique per account and
+ * cannot be renamed, so the name is stable and cannot collide; it is
+ * `[a-z0-9-]{3,63}`, so the prefix plus it stays inside the server's
+ * `[a-zA-Z0-9_-]{1,100}`.
+ *
+ * The prefix is unreachable from the user-facing name regex in client.ts,
+ * which requires a leading letter or digit, so no namespace can collide with
+ * it. The control plane refuses to move a collection with this prefix
+ * between workspaces; an e2e pair test holds the two prefixes equal.
  */
-export const THREADS_COLLECTION = '__threads__';
+export const THREADS_COLLECTION_PREFIX = '__threads__';
+
+/** The threads collection of `workspace` (undefined: outside any workspace). */
+export function threadsCollectionName(workspace: string | undefined): string {
+  return THREADS_COLLECTION_PREFIX + (workspace ?? '');
+}
 
 /**
  * The tenant key. A NORMAL customer payload key, not a reserved/attested

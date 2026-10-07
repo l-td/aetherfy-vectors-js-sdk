@@ -9,8 +9,8 @@
  * - Namespace/thread lifecycle (create, list, exists, get, delete)
  * - Required-scope rule (no root-level add/search)
  * - Required-create rule (add/search before create → error)
- * - Reserved-name isolation via the name regex (`__threads__`)
- * - Threads as payload rows in one shared `__threads__` collection
+ * - Reserved-name isolation via the name regex (the `__threads__` prefix)
+ * - Threads as payload rows in one shared `__threads__<workspace>` collection
  * - Forward-compat error when vector is omitted
  * - Operations parity (search/retrieve/delete/count/schema/analytics)
  * - Thread.history() ordering
@@ -28,7 +28,8 @@ import {
   NamespaceNotFoundError,
   THREAD_ID_KEY,
   THREAD_MARKER_KEY,
-  THREADS_COLLECTION,
+  THREADS_COLLECTION_PREFIX,
+  threadsCollectionName,
   ThreadAlreadyExistsError,
   ThreadNotFoundError,
   ThreadVectorSizeMismatchError,
@@ -43,6 +44,9 @@ import {
 } from '../../src/models';
 import { validatePointId } from '../../src/utils';
 import { ValidationError } from '../../src/exceptions';
+
+// The mocked client below is in workspace "my-bot".
+const THREADS = threadsCollectionName('my-bot');
 
 // Mock upsert that runs the real point-id validator on each point, mirroring
 // what AetherfyVectorsClient.upsert does. Lets memory tests pin that an
@@ -80,9 +84,7 @@ function buildMockClient(): MockedClient {
     deleteCollection: jest.fn().mockResolvedValue(true),
     getCollections: jest.fn().mockResolvedValue([]),
     collectionExists: jest.fn().mockResolvedValue(false),
-    getCollection: jest
-      .fn()
-      .mockResolvedValue(fakeCollection(THREADS_COLLECTION)),
+    getCollection: jest.fn().mockResolvedValue(fakeCollection(THREADS)),
     createFieldIndex: jest.fn().mockResolvedValue(true),
     deleteFieldIndex: jest.fn().mockResolvedValue(true),
     scrollIter: jest.fn(),
@@ -200,22 +202,17 @@ describe('name validation', () => {
 
   it('rejects the shared threads collection name via the name regex', async () => {
     const m = newMemory(buildMockClient());
-    await expect(m.createNamespace(THREADS_COLLECTION)).rejects.toThrow(
-      InvalidNameError
-    );
-    await expect(m.namespace(THREADS_COLLECTION)).rejects.toThrow(
-      InvalidNameError
-    );
-    await expect(m.deleteNamespace(THREADS_COLLECTION)).rejects.toThrow(
-      InvalidNameError
-    );
+    await expect(m.createNamespace(THREADS)).rejects.toThrow(InvalidNameError);
+    await expect(m.namespace(THREADS)).rejects.toThrow(InvalidNameError);
+    await expect(m.deleteNamespace(THREADS)).rejects.toThrow(InvalidNameError);
   });
 
   it('the threads collection name is legal server-side', () => {
     // vectordb's scoping layer accepts [a-zA-Z0-9_-]{1,100} and nothing
     // else (no dots), so a name the memory layer picks has to clear THAT
     // rule, not just the SDK's looser one.
-    expect(THREADS_COLLECTION).toMatch(/^[a-zA-Z0-9_-]{1,100}$/);
+    expect(THREADS).toMatch(/^[a-zA-Z0-9_-]{1,100}$/);
+    expect(THREADS.startsWith(THREADS_COLLECTION_PREFIX)).toBe(true);
   });
 
   it('rejects non-string names with InvalidNameError', async () => {
@@ -294,7 +291,7 @@ describe('Namespace lifecycle', () => {
     mock.getCollections.mockResolvedValue([
       fakeCollection('customer-42'),
       fakeCollection('scrape-log'),
-      fakeCollection(THREADS_COLLECTION),
+      fakeCollection(THREADS),
     ]);
     const m = newMemory(mock);
     await expect(m.listNamespaces()).resolves.toEqual([
@@ -363,7 +360,7 @@ describe('Thread lifecycle', () => {
     mock.collectionExists.mockResolvedValue(false);
     const m = newMemory(mock);
     await m.createThread('conv-99');
-    expect(mock.createCollection.mock.calls[0][0]).toBe(THREADS_COLLECTION);
+    expect(mock.createCollection.mock.calls[0][0]).toBe(THREADS);
 
     mock.collectionExists.mockResolvedValue(true);
     mock.count.mockResolvedValue(0);
@@ -379,7 +376,7 @@ describe('Thread lifecycle', () => {
     const m = newMemory(mock);
     await m.createThread('conv-99');
     const [coll, points] = mock.upsert.mock.calls[0];
-    expect(coll).toBe(THREADS_COLLECTION);
+    expect(coll).toBe(THREADS);
     expect(points).toHaveLength(1);
     expect(points[0].payload).toEqual({
       [THREAD_ID_KEY]: 'conv-99',
@@ -400,8 +397,8 @@ describe('Thread lifecycle', () => {
     const m = newMemory(mock);
     await m.createThread('conv-99');
     expect(mock.createFieldIndex.mock.calls).toEqual([
-      [THREADS_COLLECTION, THREAD_ID_KEY, 'keyword'],
-      [THREADS_COLLECTION, THREAD_MARKER_KEY, 'bool'],
+      [THREADS, THREAD_ID_KEY, 'keyword'],
+      [THREADS, THREAD_MARKER_KEY, 'bool'],
     ]);
   });
 
@@ -411,7 +408,7 @@ describe('Thread lifecycle', () => {
     const mock = buildMockClient();
     mock.collectionExists.mockResolvedValue(true);
     mock.getCollection.mockResolvedValue({
-      name: THREADS_COLLECTION,
+      name: THREADS,
       config: { size: 1536, distance: DistanceMetric.COSINE },
     } as Collection);
     const m = newMemory(mock);
@@ -451,7 +448,7 @@ describe('Thread lifecycle', () => {
     mock.collectionExists.mockResolvedValue(true);
     mock.getCollection.mockResolvedValue(
       // the whole collection, every thread
-      fakeCollection(THREADS_COLLECTION, { points_count: 5000 })
+      fakeCollection(THREADS, { points_count: 5000 })
     );
     mock.count.mockResolvedValue(42);
     const m = newMemory(mock);
@@ -505,7 +502,7 @@ describe('Thread lifecycle', () => {
     const m = newMemory(mock);
     await m.deleteThread('conv-99');
     expect(mock.deleteCollection).not.toHaveBeenCalled();
-    expect(mock.delete).toHaveBeenCalledWith(THREADS_COLLECTION, {
+    expect(mock.delete).toHaveBeenCalledWith(THREADS, {
       must: [{ key: THREAD_ID_KEY, match: { value: 'conv-99' } }],
     });
   });
@@ -524,7 +521,7 @@ describe('Thread lifecycle', () => {
     mock.collectionExists.mockResolvedValue(true);
     const m = newMemory(mock);
     await expect(m.threadExists('conv-99')).resolves.toBe(true);
-    expect(mock.count).toHaveBeenCalledWith(THREADS_COLLECTION, {
+    expect(mock.count).toHaveBeenCalledWith(THREADS, {
       countFilter: {
         must: [
           { key: THREAD_ID_KEY, match: { value: 'conv-99' } },
@@ -908,7 +905,7 @@ describe('Thread operations', () => {
     });
 
     const [coll, points] = mock.upsert.mock.calls[0];
-    expect(coll).toBe(THREADS_COLLECTION);
+    expect(coll).toBe(THREADS);
     expect(points[0].id).toBe(pid);
     expect(points[0].vector).toEqual([0.1, 0.2]);
     // Every message carries the thread clause's key.
@@ -979,7 +976,7 @@ describe('Thread operations', () => {
     expect(ids).toEqual([ids[0], '33333333-3333-4333-8333-333333333333']);
     expect(mock.upsert).toHaveBeenCalledTimes(1);
     const [coll, points] = mock.upsert.mock.calls[0];
-    expect(coll).toBe(THREADS_COLLECTION);
+    expect(coll).toBe(THREADS);
     expect(points).toHaveLength(2);
     expect(points[0].payload).toEqual({
       role: 'user',
@@ -1204,7 +1201,7 @@ describe('Thread operations', () => {
     const t = await openThread(mock);
     await t.clear();
     expect(mock.deleteCollection).not.toHaveBeenCalled();
-    expect(mock.delete).toHaveBeenCalledWith(THREADS_COLLECTION, {
+    expect(mock.delete).toHaveBeenCalledWith(THREADS, {
       must: [{ key: THREAD_ID_KEY, match: { value: 'conv-99' } }],
     });
   });
