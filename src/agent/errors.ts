@@ -303,6 +303,11 @@ export class RunNotFound extends RunReadError {
 /**
  * `403 DEPLOYMENT_ACCESS_DENIED` — the run belongs to another account.
  *
+ * Not thrown for an agent's own key reading a run that is not its own: that is
+ * `403 AUTH_AGENT_KEY_OUT_OF_SCOPE`, a different code for a different problem
+ * (what the key may read, not whose run it is), and it arrives as a plain
+ * {@link RunReadError} carrying that `code`.
+ *
  * Distinct from {@link RunNotFound} because the platform distinguishes them,
  * and the two are different problems: an id that does not exist is a bug in
  * what you passed, an id you may not read is a bug in whose key you used.

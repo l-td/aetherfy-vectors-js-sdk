@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Documented
+- `result()` and `wait()` called with the agent's own `AETHERFY_API_KEY` on a
+  run that is neither the agent's own nor one it spawned get 403
+  `AUTH_AGENT_KEY_OUT_OF_SCOPE` from the control plane, which arrives as
+  `RunReadError` with that `code` — not `RunAccessDenied`, which stays
+  `DEPLOYMENT_ACCESS_DENIED` (another account's run). No behaviour change.
+
 ## [1.2.0] - 2026-10-04
 
 This release contains BREAKING changes (marked below). They ship in a minor

@@ -665,6 +665,10 @@ try {
 }
 ```
 
+With the agent's own `AETHERFY_API_KEY`, the control plane lets a run read only
+itself and the runs its agent spawned; reading any other run is refused with
+`RunReadError` and `code` `AUTH_AGENT_KEY_OUT_OF_SCOPE`.
+
 Full contract, including the environment variables behind every call:
 [docs.aetherfy.com/agents/task-contract](https://docs.aetherfy.com/agents/task-contract).
 
