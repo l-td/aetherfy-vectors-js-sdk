@@ -438,9 +438,16 @@ export class PartialUpsertError extends AetherfyVectorsError {
     }>
   ) {
     const failedCount = failed.reduce((n, f) => n + f.pointIds.length, 0);
+    // A failed chunk's outcome is unknown, never "not written": a chunk that
+    // timed out or lost its connection may have been applied, and the server
+    // writes a large chunk in parts, so a refusal can come after part of it
+    // was written.
     super(
-      `Partial upsert: ${saved} of ${total} points saved; ${failedCount} failed across ${failed.length} chunk(s). ` +
-        `See .failed for per-chunk point IDs and errors.`
+      `Partial upsert: ${saved} of ${total} points confirmed saved; the outcome of the other ` +
+        `${failedCount} point(s), in ${failed.length} chunk(s) that failed, is unknown: a chunk ` +
+        `that timed out, lost its connection or was refused may have been written in whole or ` +
+        `in part. Retrying the upsert is safe: it replaces points by id. See .failed for ` +
+        `per-chunk point IDs and errors.`
     );
     this.name = 'PartialUpsertError';
     this.saved = saved;

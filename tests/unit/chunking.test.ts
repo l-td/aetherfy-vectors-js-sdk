@@ -15,6 +15,7 @@ import {
 import {
   PartialUpsertError,
   AetherfyVectorsError,
+  RequestTimeoutError,
   ValidationError,
 } from '../../src/exceptions';
 
@@ -178,9 +179,10 @@ describe('PartialUpsertError', () => {
     expect(err.saved).toBe(3);
     expect(err.total).toBe(6);
     expect(err.failed).toEqual(failed);
-    expect(err.message).toContain('3 of 6 points saved');
-    expect(err.message).toContain('3 failed');
-    expect(err.message).toContain('1 chunk');
+    expect(err.message).toContain('3 of 6 points confirmed saved');
+    expect(err.message).toContain(
+      'the other 3 point(s), in 1 chunk(s) that failed, is unknown'
+    );
   });
 
   it('aggregates failed-point count across multiple failed chunks', () => {
@@ -189,8 +191,24 @@ describe('PartialUpsertError', () => {
       { pointIds: ['c', 'd', 'e'], error: new ValidationError('chunk 2') },
     ];
     const err = new PartialUpsertError(0, 5, failed);
-    expect(err.message).toContain('0 of 5 points saved');
-    expect(err.message).toContain('5 failed across 2 chunk(s)');
+    expect(err.message).toContain('0 of 5 points confirmed saved');
+    expect(err.message).toContain(
+      'the other 5 point(s), in 2 chunk(s) that failed, is unknown'
+    );
+  });
+
+  it('never calls a failed chunk not written, and says retrying is safe', () => {
+    // A chunk that timed out may have been written: the message must not
+    // count it as failed-to-save, and must say a retry is safe.
+    const failed = [
+      { pointIds: ['a'], error: new RequestTimeoutError('timed out') },
+    ];
+    const err = new PartialUpsertError(4, 5, failed);
+    expect(err.message).toContain('may have been written');
+    expect(err.message).toContain(
+      'Retrying the upsert is safe: it replaces points by id'
+    );
+    expect(err.message).not.toContain('1 failed');
   });
 
   it('serialises with full diagnostic info via toJSON', () => {
