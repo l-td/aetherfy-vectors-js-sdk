@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`AgentWorkspaceForbiddenError` (exported from the package root), with `.workspace`** — the vector API now refuses an agent's injected key a workspace
+  it was not granted (403 `AGENT_KEY_WORKSPACE_FORBIDDEN`; `workspace` names it,
+  or is null for the collections in no workspace). The error says how to grant
+  access (the agent's page in the dashboard, or `afy access <agent> --add`). Not
+  retryable. `AGENT_ACCESS_UNAVAILABLE` (503) arrives as the existing retryable
+  service-unavailable error.
+
 ### Changed
 
 - `PartialUpsertError`'s message no longer counts the points of a failed chunk

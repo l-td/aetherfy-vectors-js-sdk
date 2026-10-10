@@ -90,6 +90,7 @@ export {
   ConflictError,
   CollectionInUseError,
   CollectionInOtherRegionError,
+  AgentWorkspaceForbiddenError,
   QuotaExceededError,
   SchemaNotFoundError,
   SchemaValidationError,
