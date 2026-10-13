@@ -85,3 +85,18 @@ export interface Run {
   /** Everything the control plane sent, unmodified. */
   raw: Record<string, unknown>;
 }
+
+/**
+ * A short-lived Aetherfy agent token, minted from this machine's own key.
+ *
+ * `token` is sent as `Authorization: Bearer <token>` to the service it was
+ * minted for, and to nothing else: it names one audience and that service
+ * refuses any other. `expires_at` is the ISO 8601 instant it stops working, as
+ * the control plane sent it. The key lives as long as the deployment, the token
+ * at most fifteen minutes. Today the only audience is the control plane, so the
+ * token is a credential for it: never give it to a third party.
+ */
+export interface AgentToken {
+  token: string;
+  expires_at: string;
+}

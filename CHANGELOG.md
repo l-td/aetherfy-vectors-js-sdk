@@ -4,6 +4,16 @@
 
 ### Added
 
+- **`token({ audience, scopes })` on `aetherfy-vectors/agent`** exchanges the
+  agent's own `AETHERFY_API_KEY` for a short-lived agent token
+  (`POST /agent-tokens`) and resolves to an `AgentToken` (`token`,
+  `expires_at`). The token names one audience, carries a subset of the key's
+  scopes, and stops working within fifteen minutes or when the deployment
+  ends. The only audience today is the control plane, so a token is a narrower
+  credential for it, not something to give a third party. Cached per
+  key, audience and scopes until a minute before it expires. A refusal rejects
+  with the new `TokenError`, carrying the platform's `code`. An unknown option
+  is refused like every other options object.
 - **`AgentWorkspaceForbiddenError` (exported from the package root), with `.workspace`** — the vector API now refuses an agent's injected key a workspace
   it was not granted (403 `AGENT_KEY_WORKSPACE_FORBIDDEN`; `workspace` names it,
   or is null for the collections in no workspace). The error says how to grant
