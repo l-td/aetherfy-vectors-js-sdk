@@ -252,7 +252,7 @@ describe('AetherfyVectorsClient', () => {
     it('should list collections', async () => {
       const mockCollections = [
         { name: 'collection1', config: { size: 128, distance: 'Cosine' } },
-        { name: 'collection2', config: { size: 256, distance: 'Euclidean' } },
+        { name: 'collection2', config: { size: 256, distance: 'Euclid' } },
       ];
 
       nock('https://vectors.aetherfy.com')
@@ -520,10 +520,28 @@ describe('AetherfyVectorsClient', () => {
       expect(scope.isDone()).toBe(true);
     });
 
+    it('DistanceMetric.EUCLIDEAN goes on the wire as "Euclid", the name the API stores and returns', async () => {
+      // "Euclidean" is not an API distance; the API refuses it (400
+      // VALIDATION_ERROR, field "vectors").
+      const scope = nock('https://vectors.aetherfy.com')
+        .post(
+          '/api/v1/collections',
+          body => body.name === 'test' && body.vectors.distance === 'Euclid'
+        )
+        .reply(201, { success: true });
+
+      await client.createCollection('test', {
+        size: 128,
+        distance: DistanceMetric.EUCLIDEAN,
+      });
+
+      expect(scope.isDone()).toBe(true);
+    });
+
     it('should accept distance metric as lowercase string "euclidean"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post('/api/v1/collections', body => {
-          return body.name === 'test' && body.vectors.distance === 'Euclidean';
+          return body.name === 'test' && body.vectors.distance === 'Euclid';
         })
         .reply(201, { success: true });
 
@@ -538,7 +556,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as lowercase string "euclid" (alias)', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post('/api/v1/collections', body => {
-          return body.name === 'test' && body.vectors.distance === 'Euclidean';
+          return body.name === 'test' && body.vectors.distance === 'Euclid';
         })
         .reply(201, { success: true });
 
@@ -730,8 +748,8 @@ describe('AetherfyVectorsClient', () => {
       ];
 
       nock('https://vectors.aetherfy.com')
-        .post('/api/v1/collections/test-collection/points/search')
-        .reply(200, { result: mockResults });
+        .post('/api/v1/collections/test-collection/points/query')
+        .reply(200, { result: { points: mockResults } });
 
       const queryVector = [0.1, 0.2, 0.3];
       const results = await client.search('test-collection', queryVector, {
@@ -1089,7 +1107,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle non-retryable HTTP errors in search', async () => {
       nock('https://vectors.aetherfy.com')
-        .post('/api/v1/collections/test-collection/points/search')
+        .post('/api/v1/collections/test-collection/points/query')
         .reply(404, {
           message: 'Collection not found',
           code: 'NOT_FOUND',

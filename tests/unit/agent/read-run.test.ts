@@ -286,6 +286,27 @@ describe('the refusals', () => {
     }
   );
 
+  it.each([
+    ['result', (id: string) => result(id)],
+    ['wait', (id: string) => wait(id)],
+  ])(
+    "%s: a run outside the agent key's scope is a RunReadError, not RunAccessDenied",
+    async (_name, call) => {
+      // The agent's own key reads only its own run and the runs it spawned
+      // (aetherfy-control-plane api/middleware/agent_scope.py). Any other run
+      // is a different code from another account's run.
+      fetchMock.mockResolvedValue(
+        reply(403, refusal('AUTH_AGENT_KEY_OUT_OF_SCOPE', 'out of scope'))
+      );
+
+      const error = await caught<RunReadError>(call(RUN_ID));
+      expect(error).toBeInstanceOf(RunReadError);
+      expect(error).not.toBeInstanceOf(RunAccessDenied);
+      expect(error.status).toBe(403);
+      expect(error.code).toBe('AUTH_AGENT_KEY_OUT_OF_SCOPE');
+    }
+  );
+
   it('keeps the two provably distinct', async () => {
     fetchMock.mockResolvedValue(reply(404, refusal('DEPLOYMENT_NOT_FOUND')));
     await expect(result(RUN_ID)).rejects.toBeInstanceOf(RunNotFound);

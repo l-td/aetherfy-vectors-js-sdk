@@ -123,7 +123,11 @@ export function matches(
 }
 
 export class FakeVectorsClient {
-  readonly workspace: string | undefined = 'my-bot';
+  readonly workspace: string | undefined;
+  /** `null`: outside any workspace (an absent argument is "my-bot"). */
+  constructor(workspace: string | null = 'my-bot') {
+    this.workspace = workspace ?? undefined;
+  }
   readonly collections = new Map<
     string,
     { config: VectorConfig; points: Map<string | number, Stored> }

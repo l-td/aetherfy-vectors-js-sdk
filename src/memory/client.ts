@@ -33,7 +33,7 @@ import {
   generateId,
   THREAD_ID_KEY,
   THREAD_MARKER_KEY,
-  THREADS_COLLECTION,
+  threadsCollectionName,
 } from './models';
 import { Namespace } from './namespace';
 import { Thread } from './thread';
@@ -41,9 +41,9 @@ import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
 
 /**
  * User-facing names must start with letter/digit and may contain
- * letters, digits, dots, hyphens, underscores. Max 255 chars. The
- * `__threads__` collection name is therefore unreachable from this regex,
- * so no namespace can collide with it.
+ * letters, digits, dots, hyphens, underscores. Max 255 chars. The threads
+ * collection's `__threads__` prefix is therefore unreachable from this
+ * regex, so no namespace can collide with it.
  */
 const NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,254}$/;
 
@@ -170,10 +170,21 @@ export class MemoryClient {
   }
 
   /**
+   * This workspace's threads collection (models.threadsCollectionName).
+   * Derived from this client's own workspace every time, so it can only ever
+   * name this workspace's collection: a threads collection of another
+   * workspace is never opened or adopted.
+   */
+  private get threads(): string {
+    return threadsCollectionName(this.workspace);
+  }
+
+  /**
    * Direct access to the underlying AetherfyVectorsClient.
    *
    * Use this as the low-level escape hatch for any operation not exposed
-   * on MemoryClient. Collection names are workspace-scoped automatically.
+   * on MemoryClient. Every collection it reaches is in this client's
+   * workspace (collection NAMES are unique per account).
    */
   get vectors(): AetherfyVectorsClient {
     return this._client;
@@ -242,13 +253,14 @@ export class MemoryClient {
    * All namespace names in this workspace.
    *
    * Threads are no longer collections, so there is nothing thread-shaped
-   * left to filter out of the collection list — except the single
-   * `__threads__` collection they all share, which is an implementation
+   * left to filter out of the collection list — except this workspace's
+   * threads collection, which they all share, which is an implementation
    * detail and not a namespace.
    */
   async listNamespaces(): Promise<string[]> {
     const cols = await this._client.getCollections();
-    return cols.filter(c => c.name !== THREADS_COLLECTION).map(c => c.name);
+    const threads = this.threads;
+    return cols.filter(c => c.name !== threads).map(c => c.name);
   }
 
   /** Drop the namespace atomically. Idempotent: returns false if absent. */
@@ -298,8 +310,8 @@ export class MemoryClient {
    * whose every read carries a tenant filter.
    */
   private async ensureThreadsCollection(): Promise<void> {
-    if (await this._client.collectionExists(THREADS_COLLECTION)) {
-      const existing = await this._client.getCollection(THREADS_COLLECTION);
+    if (await this._client.collectionExists(this.threads)) {
+      const existing = await this._client.getCollection(this.threads);
       const size = existing.config?.size;
       if (!size) {
         // A missing/zero size means UNKNOWN here, never a zero-dimension
@@ -320,14 +332,10 @@ export class MemoryClient {
       size: this.threadVectorSize,
       distance: this.threadDistance,
     };
-    await this._client.createCollection(THREADS_COLLECTION, vectors);
+    await this._client.createCollection(this.threads, vectors);
+    await this._client.createFieldIndex(this.threads, THREAD_ID_KEY, 'keyword');
     await this._client.createFieldIndex(
-      THREADS_COLLECTION,
-      THREAD_ID_KEY,
-      'keyword'
-    );
-    await this._client.createFieldIndex(
-      THREADS_COLLECTION,
+      this.threads,
       THREAD_MARKER_KEY,
       'bool'
     );
@@ -335,10 +343,10 @@ export class MemoryClient {
 
   /** True iff this thread's marker point is present. */
   private async threadMarkerExists(threadId: string): Promise<boolean> {
-    if (!(await this._client.collectionExists(THREADS_COLLECTION))) {
+    if (!(await this._client.collectionExists(this.threads))) {
       return false;
     }
-    const n = await this._client.count(THREADS_COLLECTION, {
+    const n = await this._client.count(this.threads, {
       countFilter: this.markerFilter(threadId),
       exact: true,
     });
@@ -371,7 +379,7 @@ export class MemoryClient {
       throw new ThreadAlreadyExistsError(threadId);
     }
 
-    await this._client.upsert(THREADS_COLLECTION, [
+    await this._client.upsert(this.threads, [
       {
         id: generateId(),
         vector: this.markerVector(this.threadVectorSize),
@@ -381,7 +389,7 @@ export class MemoryClient {
         },
       },
     ]);
-    return new Thread(threadId, THREADS_COLLECTION, this._client);
+    return new Thread(threadId, this.threads, this._client);
   }
 
   async thread(threadId: string): Promise<Thread> {
@@ -389,7 +397,7 @@ export class MemoryClient {
     if (!(await this.threadMarkerExists(threadId))) {
       throw new ThreadNotFoundError(threadId);
     }
-    return new Thread(threadId, THREADS_COLLECTION, this._client);
+    return new Thread(threadId, this.threads, this._client);
   }
 
   /**
@@ -417,8 +425,8 @@ export class MemoryClient {
     if (!(await this.threadMarkerExists(threadId))) {
       throw new ThreadNotFoundError(threadId);
     }
-    const info = await this._client.getCollection(THREADS_COLLECTION);
-    const own = new Thread(threadId, THREADS_COLLECTION, this._client);
+    const info = await this._client.getCollection(this.threads);
+    const own = new Thread(threadId, this.threads, this._client);
     return { ...info, name: threadId, points_count: await own.count() };
   }
 
@@ -438,11 +446,11 @@ export class MemoryClient {
    * keeps first-seen order.
    */
   async listThreads(): Promise<string[]> {
-    if (!(await this._client.collectionExists(THREADS_COLLECTION))) {
+    if (!(await this._client.collectionExists(this.threads))) {
       return [];
     }
     const ids: string[] = [];
-    for await (const point of this._client.scrollIter(THREADS_COLLECTION, {
+    for await (const point of this._client.scrollIter(this.threads, {
       scrollFilter: {
         must: [{ key: THREAD_MARKER_KEY, match: { value: true } }],
       } as unknown as Filter,
@@ -466,7 +474,7 @@ export class MemoryClient {
     if (!(await this.threadMarkerExists(threadId))) {
       return false;
     }
-    return this._client.delete(THREADS_COLLECTION, {
+    return this._client.delete(this.threads, {
       must: [{ key: THREAD_ID_KEY, match: { value: threadId } }],
     } as unknown as Filter);
   }

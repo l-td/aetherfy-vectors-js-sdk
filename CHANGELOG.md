@@ -15,6 +15,68 @@
   `ConnectionUnavailable` (retryable) and `ConnectionAccessDenied`, all
   extending `ConnectionTokenError`. Same semantics as the Python helper's
   `aetherfy_agent.connection`.
+- **`AgentWorkspaceForbiddenError` (exported from the package root), with `.workspace`** — the vector API now refuses an agent's injected key a workspace
+  it was not granted (403 `AGENT_KEY_WORKSPACE_FORBIDDEN`; `workspace` names it,
+  or is null for the collections in no workspace). The error says how to grant
+  access (the agent's page in the dashboard, or `afy access <agent> --add`). Not
+  retryable. `AGENT_ACCESS_UNAVAILABLE` (503) arrives as the existing retryable
+  service-unavailable error.
+
+### Changed
+
+- `PartialUpsertError`'s message no longer counts the points of a failed chunk
+  as failed: it reports them as of unknown outcome. A chunk that timed out or
+  lost its connection may have been written, and the server writes a large
+  chunk in parts, so a refusal can come after part of it was written. The
+  message now says so, and that retrying the upsert is safe because it
+  replaces points by id. Only the message changed: the class, `.saved`,
+  `.total` and `.failed` are as before.
+- **BREAKING: the memory layer's threads collection is named for its
+  workspace** — `__threads__<workspace>` in a workspace, `__threads__` outside
+  one. Collection names are unique per account, so the single `__threads__`
+  every workspace used could exist in one workspace only: a second workspace's
+  first `createThread` was refused 409 `COLLECTION_NAME_TAKEN`. A
+  `MemoryClient` derives the name from its own workspace on every use, so it
+  never opens another workspace's threads collection. A `__threads__` created
+  inside a workspace by an earlier version is not read: create the threads
+  again (there is no migration shim).
+- **BREAKING (export): `THREADS_COLLECTION` is replaced by
+  `THREADS_COLLECTION_PREFIX` (`'__threads__'`) and
+  `threadsCollectionName(workspace)`.**
+- The control plane now refuses to move a threads collection to another
+  workspace (`COLLECTION_SDK_MANAGED`); the prefix it refuses on is held equal
+  to `THREADS_COLLECTION_PREFIX` by an e2e pair test.
+
+### Documentation
+
+- The README no longer says workspaces avoid name collisions: collection names
+  are unique per account, and a workspace decides where a collection is
+  reachable from, not what it may be called.
+- **BREAKING (platform): an agent's injected `AETHERFY_API_KEY` is no longer
+  the account on the Aetherfy agents API.** The control plane now answers it
+  403 `AUTH_AGENT_KEY_OUT_OF_SCOPE` on every route outside the routes listed at
+  [docs.aetherfy.com/platform/api-keys](https://docs.aetherfy.com/platform/api-keys#agent-scoped-keys-issued-by-aetherfy),
+  and on a listed route whose path names another agent or another agent's run.
+  The `agent` helpers call only listed routes and are unaffected; code in an
+  agent that used the key for anything else (deploying, listing agents,
+  secrets, workspaces) now gets that 403. To give an agent account access on
+  purpose, create a key yourself, store it as one of the agent's secrets under
+  a name of your own (the `AETHERFY_` prefix is reserved), and send that key
+  instead. On the Aetherfy vector API the injected key still acts for the whole
+  account.
+
+### Documented
+- `result()` and `wait()` called with the agent's own `AETHERFY_API_KEY` on a
+  run it may not read get that 403, which arrives as `RunReadError` with `code`
+  `AUTH_AGENT_KEY_OUT_OF_SCOPE` — not `RunAccessDenied`, which stays
+  `DEPLOYMENT_ACCESS_DENIED` (another account's run). The SDK's own behaviour
+  is unchanged.
+
+## [1.2.0] - 2026-10-04
+
+This release contains BREAKING changes (marked below). They ship in a minor
+version, not 2.0.0, because the package has no users yet (owner ruling,
+2026-09-24); the labels stay because they are true.
 
 ### Fixed
 
@@ -69,6 +131,22 @@
 
 ### Changed
 
+- **BREAKING (wire): `DistanceMetric.EUCLIDEAN` is `'Euclid'`, not
+  `'Euclidean'`.** `'Euclid'` is the API's own name: a collection created with
+  it reads back `'Euclid'`, where `'Euclidean'` never round-tripped (it was
+  stored and returned as `'Euclid'`, so comparing a collection's distance to
+  the constant silently failed). The API now refuses `"Euclidean"` with 400
+  `VALIDATION_ERROR` (field `vectors`), so a 1.x SDK cannot create a Euclidean
+  collection against it. The constant's name is unchanged, and
+  `createCollection` still accepts the strings `'euclidean'` and `'euclid'` in
+  any case, sending `'Euclid'`.
+- **BREAKING (wire): `search()` sends `POST /collections/{name}/points/query`**
+  instead of Qdrant's retired `/points/search`, which the API now refuses with
+  410 `ROUTE_RETIRED`. The call, its options and its return value are
+  unchanged: the vector goes in the body as `query`, every other option keeps
+  its wire name (`limit`, `offset`, `filter`, `with_payload`, `with_vector`,
+  `score_threshold`, `params`), and the matches are read from `result.points`.
+  An SDK older than this breaks on search against the current API.
 - **`createFieldIndex` resolves only once the index is built**, re-sending the create while the server answers "acknowledged"; new `options.timeout` (ms) bounds the wait, 600000 by default and never unbounded (then `RequestTimeoutError`; a `timeout` that is not a finite number above 0 throws `ValidationError`); each create or `deleteFieldIndex` request gets a 45 s HTTP timeout, since the server may hold it 25 s plus a forward; an "acknowledged" the server did not hold is re-sent only after a 1 s to 10 s pause; `deleteFieldIndex`'s docs now say it resolves `true` for a field that was never indexed.
 - **BREAKING: an options object with a key its type does not declare throws a
   `TypeError`.** TypeScript refuses an unknown key only in a fresh object
@@ -178,13 +256,15 @@
 
 ### Release needed
 
-- **The pending release is no longer a patch.** The changes above remove
-  `createThread`'s options argument and the `Thread` schema methods, and change
-  where a thread's data lives. Under semver that is a MAJOR bump: publish this
-  as **2.0.0**, not 1.1.1 or 1.2.0. Threads written by 1.1.0 live in per-thread
-  collections that 2.0.0 does not read; there is no migration and no shim,
-  which is fine while the SDK has no users but must be stated in the release
-  notes.
+- **Publish together with the API that refuses `/points/search`.** Published
+  1.x `search()` calls `/points/search` and gets 410 `ROUTE_RETIRED` from that
+  API; this version calls `/points/query`, which that API serves. Push the
+  vectordb change and publish this release in the same window.
+- **Breaking, in a minor release.** The changes above remove `createThread`'s
+  options argument and the `Thread` schema methods, and change where a thread's
+  data lives. Threads written by 1.1.0 live in per-thread collections that
+  1.2.0 does not read; there is no migration and no shim, which is fine while
+  the SDK has no users.
 - **The published 1.1.0 does not recognise `AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED`.**
   It still matches the old code, so against the current platform a full
   runs-in-flight limit reaches 1.1.0 callers as a plain `SpawnError` instead of

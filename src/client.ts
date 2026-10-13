@@ -472,7 +472,7 @@ export class AetherfyVectorsClient {
    *
    * @param collectionName Bare (unscoped) collection name from the caller.
    * @param suffix         Optional path suffix appended after the
-   *                       collection segment (e.g. `/points/search`).
+   *                       collection segment (e.g. `/points/query`).
    *                       Must already begin with `/` when non-empty.
    * @private
    */
@@ -1524,6 +1524,12 @@ export class AetherfyVectorsClient {
   /**
    * Perform similarity search in a collection
    *
+   * Sent as POST /collections/{name}/points/query, Qdrant's search route (the
+   * API refuses the retired /points/search with 410 ROUTE_RETIRED). The call
+   * and its options are unchanged: the vector goes in the body as `query`, the
+   * other options keep their wire names, and the matches come back under
+   * `result.points`.
+   *
    * @param collectionName - Name of the collection to search
    * @param queryVector - Query vector for similarity search
    * @param options - Search options
@@ -1572,12 +1578,12 @@ export class AetherfyVectorsClient {
 
     try {
       const response = await this.executeWithRetry(async () =>
-        this.httpClient.post<{ result: SearchResult[] }>(
+        this.httpClient.post<{ result: { points: SearchResult[] } }>(
           this.apiUrl(
-            this.buildCollectionPath(collectionName, '/points/search')
+            this.buildCollectionPath(collectionName, '/points/query')
           ),
           {
-            vector: queryVector,
+            query: queryVector,
             limit: options.limit ?? 10,
             offset: options.offset ?? 0,
             filter: serializeFilter(options.queryFilter, 'search'),
@@ -1593,7 +1599,7 @@ export class AetherfyVectorsClient {
         )
       );
 
-      return response.data.result || [];
+      return response.data.result?.points || [];
     } catch (error: unknown) {
       this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);

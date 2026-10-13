@@ -151,9 +151,9 @@ describe('AetherfyVectorsClient — workspaced URL contract (post-A/B)', () => {
       trigger: (c: AetherfyVectorsClient) => Promise<unknown>;
     }> = [
       {
-        name: 'search → /points/search',
+        name: 'search → /points/query',
         method: 'POST',
-        suffix: '/points/search',
+        suffix: '/points/query',
         trigger: c => c.search(COLL, new Array(128).fill(0.1), { limit: 1 }),
       },
       {
