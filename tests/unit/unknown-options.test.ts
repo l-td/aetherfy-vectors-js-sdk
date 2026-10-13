@@ -49,7 +49,10 @@ import { AetherfyVectorsClient } from '../../src/client';
 import { HttpClient } from '../../src/http/client';
 import { createClient } from '../../src/index';
 import { retryWithBackoff } from '../../src/utils';
-import { fanOut } from '../../src/agent';
+import nock from 'nock';
+
+import { connection, fanOut } from '../../src/agent';
+import { clearConnectionCache } from '../../src/agent/connections';
 import { MemoryClient } from '../../src/memory/client';
 import { Namespace } from '../../src/memory/namespace';
 import { Thread } from '../../src/memory/thread';
@@ -664,6 +667,41 @@ const ENTRY_POINTS: EntryPoint[] = [
       touched: () => null,
     }),
   },
+  {
+    id: 'connection()#1',
+    label: 'connection',
+    where: { owner: 'connection', param: 1 },
+    setup: () => {
+      // The network is the collaborator: every request that reaches the
+      // token route is counted, so a refusal is shown to come first.
+      clearConnectionCache();
+      let requests = 0;
+      // .optionally(): a refusal never reaches it, and must not be reported
+      // as a pending mock by tests/node-setup.ts for doing its job.
+      nock('https://agents.aetherfy.com')
+        .post('/api/v1/connections/google/token')
+        .optionally()
+        .reply(() => {
+          requests += 1;
+          return [
+            200,
+            {
+              access_token: 't',
+              token_type: 'Bearer',
+              expires_at: null,
+              provider: 'google',
+              name: 'google',
+              account_label: null,
+              scopes: [],
+            },
+          ];
+        });
+      return {
+        call: options => connection('google', options as any),
+        touched: () => requests,
+      };
+    },
+  },
 ];
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -673,6 +711,9 @@ const AGENT_SHAPE: Record<string, string> = {
   AETHERFY_VCPUS: '2',
   AETHERFY_MEMORY_MB: '1024',
   AETHERFY_REGION: 'us-east-1',
+  // connection() reads these; the token route itself is nock (its row above).
+  AETHERFY_API_URL: 'https://agents.aetherfy.com/api/v1',
+  AETHERFY_API_KEY: API_KEY,
 };
 let logSpy: jest.SpyInstance;
 

@@ -4,6 +4,17 @@
 
 ### Added
 
+- **`connection(name, { minValidSeconds })` in `aetherfy-vectors/agent`**
+  returns a fresh OAuth access token (`ConnectionToken`) for a Google, Slack
+  or Notion connection made on the Aetherfy dashboard, from the control
+  plane's `POST /connections/{name}/token`. Tokens are cached per name in the
+  process until they would have less than `max(minValidSeconds, 60)` seconds
+  left, and a token with no expiry (Notion) is asked for again after five
+  minutes; an unknown option is refused like every other options object.
+  Refusals are typed: `ConnectionNotFound`, `ConnectionNeedsReauth`,
+  `ConnectionUnavailable` (retryable) and `ConnectionAccessDenied`, all
+  extending `ConnectionTokenError`. Same semantics as the Python helper's
+  `aetherfy_agent.connection`.
 - **`AgentWorkspaceForbiddenError` (exported from the package root), with `.workspace`** — the vector API now refuses an agent's injected key a workspace
   it was not granted (403 `AGENT_KEY_WORKSPACE_FORBIDDEN`; `workspace` names it,
   or is null for the collections in no workspace). The error says how to grant

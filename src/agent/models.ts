@@ -85,3 +85,22 @@ export interface Run {
   /** Everything the control plane sent, unmodified. */
   raw: Record<string, unknown>;
 }
+
+/**
+ * A fresh access token for one connection (Google, Slack, Notion).
+ *
+ * Send `access_token` to the provider's own API as
+ * `Authorization: ${token_type} ${access_token}`. `expires_at` is null for a
+ * provider whose tokens do not expire (Notion). No refresh token ever reaches
+ * the agent: Aetherfy refreshes, and `connection()` asks again when this one
+ * runs low.
+ */
+export interface ConnectionToken {
+  access_token: string;
+  token_type: string;
+  expires_at: Date | null;
+  provider: string;
+  name: string;
+  account_label: string | null;
+  scopes: string[];
+}

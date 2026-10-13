@@ -56,11 +56,21 @@ import {
   TooManyRunsInFlight,
   WaitTimeoutInvalid,
 } from './errors';
-import { requestJson, USER_AGENT_PREFIX } from './http';
-import { MachineShape, Run, Spawn } from './models';
+import { requestJson } from './http';
+import { ConnectionToken, MachineShape, Run, Spawn } from './models';
+import { requireEnv, userAgent } from './runtime';
 import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
 import { SDK_VERSION } from '../version';
 
+export {
+  ConnectionAccessDenied,
+  ConnectionNeedsReauth,
+  ConnectionNotFound,
+  ConnectionTokenError,
+  ConnectionUnavailable,
+} from './errors';
+export { connection } from './connections';
+export type { ConnectionOptions } from './connections';
 export {
   AgentError,
   AgentTransportError,
@@ -75,7 +85,7 @@ export {
   TooManyRunsInFlight,
   WaitTimeoutInvalid,
 };
-export type { MachineShape, Run, Spawn };
+export type { ConnectionToken, MachineShape, Run, Spawn };
 
 /**
  * The release this helper announces in its User-Agent. NOT a literal of its
@@ -128,20 +138,6 @@ const WAIT_TRANSPORT_MARGIN_SECONDS = 15;
 export const WAIT_TIMEOUT_MIN_SECONDS = 1;
 export const WAIT_TIMEOUT_MAX_SECONDS = 60;
 export const WAIT_TIMEOUT_DEFAULT_SECONDS = 30;
-
-function userAgent(): string {
-  return `${USER_AGENT_PREFIX}${AGENT_HELPER_VERSION}`;
-}
-
-function requireEnv(
-  variable: string,
-  purpose: string,
-  remedy?: string
-): string {
-  const value = process.env[variable];
-  if (!value) throw new NotRunningOnAgent(variable, purpose, remedy);
-  return value;
-}
 
 /**
  * What to say when the RESULT PATH is missing, instead of the default "the
