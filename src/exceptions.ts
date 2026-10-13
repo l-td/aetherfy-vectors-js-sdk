@@ -283,6 +283,45 @@ export class CollectionInOtherRegionError extends AetherfyVectorsError {
 }
 
 /**
+ * An agent's API key addressed a workspace it has not been granted (403
+ * AGENT_KEY_WORKSPACE_FORBIDDEN). The key Aetherfy injects into a deployed
+ * agent reaches its own workspace plus the workspaces the account owner
+ * granted it; any other is refused whether or not the collection exists
+ * there. `workspace` names it, or is null for the collections in no
+ * workspace. Not retryable: the owner grants access on the agent's page in
+ * the dashboard, or with `afy access <agent> --add <workspace>`, and it takes
+ * effect within 60 seconds.
+ */
+export class AgentWorkspaceForbiddenError extends AetherfyVectorsError {
+  public readonly workspace: string | null;
+
+  constructor(workspace: string | null, message?: string) {
+    const where = workspace
+      ? `workspace '${workspace}'`
+      : 'the collections in no workspace';
+    const add = workspace ? workspace : '""';
+    super(
+      (message || `This agent's API key cannot use ${where}.`) +
+        ` Ask the account owner to grant this agent access to ${where}: ` +
+        `the agent's page in the dashboard, or \`afy access <agent> --add ${add}\`.`,
+      undefined,
+      403,
+      { workspace }
+    );
+    this.name = 'AgentWorkspaceForbiddenError';
+    this.workspace = workspace;
+    Object.setPrototypeOf(this, AgentWorkspaceForbiddenError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      workspace: this.workspace,
+    };
+  }
+}
+
+/**
  * Quota exceeded errors
  */
 export class QuotaExceededError extends AetherfyVectorsError {
@@ -438,9 +477,16 @@ export class PartialUpsertError extends AetherfyVectorsError {
     }>
   ) {
     const failedCount = failed.reduce((n, f) => n + f.pointIds.length, 0);
+    // A failed chunk's outcome is unknown, never "not written": a chunk that
+    // timed out or lost its connection may have been applied, and the server
+    // writes a large chunk in parts, so a refusal can come after part of it
+    // was written.
     super(
-      `Partial upsert: ${saved} of ${total} points saved; ${failedCount} failed across ${failed.length} chunk(s). ` +
-        `See .failed for per-chunk point IDs and errors.`
+      `Partial upsert: ${saved} of ${total} points confirmed saved; the outcome of the other ` +
+        `${failedCount} point(s), in ${failed.length} chunk(s) that failed, is unknown: a chunk ` +
+        `that timed out, lost its connection or was refused may have been written in whole or ` +
+        `in part. Retrying the upsert is safe: it replaces points by id. See .failed for ` +
+        `per-chunk point IDs and errors.`
     );
     this.name = 'PartialUpsertError';
     this.saved = saved;
@@ -532,8 +578,18 @@ export function createErrorFromResponse(
         )
       );
 
-    case 401:
     case 403:
+      if (errorCode === 'AGENT_KEY_WORKSPACE_FORBIDDEN') {
+        const workspace = nestedError?.workspace;
+        return stamp(
+          new AgentWorkspaceForbiddenError(
+            typeof workspace === 'string' ? workspace : null
+          )
+        );
+      }
+      return stamp(new AuthenticationError(message));
+
+    case 401:
       return stamp(new AuthenticationError(message));
 
     case 404:

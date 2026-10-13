@@ -4,7 +4,7 @@
  * vectors-client method with the right arguments.
  */
 
-import { THREAD_ID_KEY, THREADS_COLLECTION } from '../../src/memory/models';
+import { THREAD_ID_KEY, threadsCollectionName } from '../../src/memory/models';
 import { Namespace } from '../../src/memory/namespace';
 import { Thread } from '../../src/memory/thread';
 import type { AetherfyVectorsClient } from '../../src/client';
@@ -50,7 +50,7 @@ function makeThread() {
         { id: P1, payload: { [THREAD_ID_KEY]: 'conv-1', role: 'user' } },
       ]),
   } as unknown as AetherfyVectorsClient;
-  const th = new Thread('conv-1', THREADS_COLLECTION, client);
+  const th = new Thread('conv-1', threadsCollectionName('my-bot'), client);
   return {
     th,
     client: client as unknown as {
@@ -113,7 +113,6 @@ describe('Namespace.iter', () => {
     client.scrollIter.mockReturnValue(makeAsyncIter([]));
     const flt = { must: [{ key: 'x', match: { value: 'y' } }] };
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for await (const _ of ns.iter({
       batchSize: 100,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
