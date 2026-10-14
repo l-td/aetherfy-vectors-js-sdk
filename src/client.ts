@@ -39,7 +39,7 @@ import {
 } from './exceptions';
 import { HttpResponse } from './http/types';
 import { retryWithBackoff, validatePointId } from './utils';
-import { Operation, shouldRetry } from './retry-policy';
+import { OPERATIONS, Operation } from './retry-policy';
 import { assertAllowedOptionKeys, optionKeys } from './utils/options';
 import { serializeFilter } from './utils/filter';
 import { chunkPointsByBytes, MAX_REQUEST_BYTES } from './utils/chunking';
@@ -1367,7 +1367,9 @@ export class AetherfyVectorsClient {
               ),
               method: 'PUT',
               body: { field_name: fieldName, field_schema: fieldSchema },
-              timeout: attemptTimeout,
+              // Each attempt, retries included, gets only the time left
+              // (as Python's per-attempt budget): none runs past deadline.
+              timeout: Math.min(attemptTimeout, deadline - this.now()),
             }),
           deadline
         );
@@ -2201,11 +2203,11 @@ export class AetherfyVectorsClient {
     deadline?: number
   ): Promise<T> {
     return retryWithBackoff(request, {
+      retryClass: OPERATIONS[operation],
       maxRetries: 3,
       baseDelay: AetherfyVectorsClient.retryBaseDelayMs,
-      retryCondition: error =>
-        shouldRetry(operation, error) &&
-        (deadline === undefined || this.now() < deadline),
+      deadline,
+      now: () => this.now(),
     });
   }
 

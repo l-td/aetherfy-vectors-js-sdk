@@ -1,6 +1,7 @@
 import { Point, DistanceMetric } from './models';
 import { AetherfyVectorsError, ValidationError } from './exceptions';
 import { assertAllowedOptionKeys, optionKeys } from './utils/options';
+import { ONCE, REPEATABLE, RetryClass, shouldRetryClass } from './retry-policy';
 
 /**
  * Environment detection utilities
@@ -409,31 +410,49 @@ export function sanitizeForLogging(data: unknown): unknown {
 const RETRY_OPTION_KEYS = optionKeys<
   NonNullable<Parameters<typeof retryWithBackoff>[1]>
 >({
+  retryClass: true,
   maxRetries: true,
   baseDelay: true,
   maxDelay: true,
   backoffFactor: true,
-  retryCondition: true,
+  deadline: true,
+  now: true,
 });
 
 export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   options: {
+    /**
+     * Whether repeating the operation gives the same result (retry-policy.ts):
+     * REPEATABLE or ONCE. Required: which failures are retried is decided by
+     * the retry rule for this class, never by the error's type alone.
+     */
+    retryClass: RetryClass;
     maxRetries?: number;
     baseDelay?: number;
     maxDelay?: number;
     backoffFactor?: number;
-    retryCondition?: (_error: unknown) => boolean;
-  } = {}
+    /** No retry starts once `now()` has reached it, nor a wait ending past it. */
+    deadline?: number;
+    /** The clock `deadline` is on (default Date.now). */
+    now?: () => number;
+  }
 ): Promise<T> {
   assertAllowedOptionKeys(options, RETRY_OPTION_KEYS, 'retryWithBackoff');
   const {
+    retryClass,
     maxRetries = 3,
     baseDelay = 1000,
     maxDelay = 30000,
     backoffFactor = 2,
-    retryCondition = () => true,
+    deadline,
+    now = Date.now,
   } = options;
+  if (retryClass !== REPEATABLE && retryClass !== ONCE) {
+    throw new TypeError(
+      `retryWithBackoff: retryClass must be '${REPEATABLE}' or '${ONCE}'`
+    );
+  }
 
   let lastError: unknown;
 
@@ -443,7 +462,7 @@ export async function retryWithBackoff<T>(
     } catch (error) {
       lastError = error;
 
-      if (attempt === maxRetries || !retryCondition(error)) {
+      if (attempt === maxRetries || !shouldRetryClass(retryClass, error)) {
         throw error;
       }
 
@@ -454,6 +473,9 @@ export async function retryWithBackoff<T>(
 
       // Add jitter to prevent thundering herd
       const jitteredDelay = delay * (0.5 + Math.random() * 0.5);
+      if (deadline !== undefined && now() + jitteredDelay >= deadline) {
+        throw error;
+      }
 
       await sleep(jitteredDelay);
     }

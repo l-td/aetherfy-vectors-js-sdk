@@ -613,6 +613,7 @@ const ENTRY_POINTS: EntryPoint[] = [
     id: 'retryWithBackoff()#1',
     label: 'retryWithBackoff',
     where: { owner: 'retryWithBackoff', param: 1 },
+    required: { retryClass: 'repeatable' },
     setup: () => {
       const fn = jest.fn().mockResolvedValue('ok');
       return {

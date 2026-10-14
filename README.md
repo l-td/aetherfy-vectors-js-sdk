@@ -1098,15 +1098,19 @@ for (const batch of batches) {
 ### Retry Logic
 
 ```typescript
-import { retryWithBackoff } from 'aetherfy-vectors';
+import { retryWithBackoff, REPEATABLE } from 'aetherfy-vectors';
 
+// The client already retries under the rule ("When a request is retried").
+// To retry more, say whether repeating the operation gives the same result:
+// REPEATABLE (a read, a write keyed by id) or ONCE (a create, a delete). Which
+// failures are retried follows the same rule; a 4xx never is.
 const results = await retryWithBackoff(
   () => client.search('collection', vector),
   {
+    retryClass: REPEATABLE,
     maxRetries: 3,
     baseDelay: 1000,
     backoffFactor: 2,
-    retryCondition: error => error.name === 'ServiceUnavailableError',
   }
 );
 ```

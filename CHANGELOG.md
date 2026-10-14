@@ -76,6 +76,22 @@ described here.
   `createCollection`, `upsert` and `search` retried, and (see Fixed) never
   on a 503.
 
+- **BREAKING: `retryWithBackoff` needs the operation's class.** Its options
+  take `retryClass` (`REPEATABLE` or `ONCE`, exported from the root,
+  required) and decide which failures to retry through the same rule as the
+  client; `retryCondition` is gone, and so is its default, which retried
+  every error, 4xx included. New optional `deadline` / `now`.
+- **A connect that never completed is now known to be one.** Under real
+  Node, axios reports it with its own timeout code (`ECONNABORTED`), the
+  same as a timeout waiting for the answer, so it read as ambiguous. The
+  SDK's agents (now always used in Node; keep-alive only with connection
+  pooling) watch each socket's `connect`, and a transport failure on a
+  socket that never connected carries `requestSent: false`: retried for
+  every operation. Proven against TEST-NET-1, a `.invalid` host and a
+  refused local port (`tests/unit/retry-real-network.test.ts`).
+- `createFieldIndex`: each attempt, retries included, gets only the time
+  left before its deadline (it reused the first attempt's timeout).
+
 ### Added
 
 - **`NotFoundError`** (exported from the package root): the parent of

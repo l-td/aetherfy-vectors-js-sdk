@@ -7,6 +7,11 @@ import {
 import axios, { AxiosInstance, AxiosError as AxiosErrorType } from 'axios';
 import http from 'http';
 import https from 'https';
+import type net from 'net';
+
+// Marks on the sockets the SDK's agents create (HttpClient.watchingAgent).
+const WATCHED = Symbol('aetherfy.watchedSocket');
+const CONNECTED = Symbol('aetherfy.connectedSocket');
 
 import { SDK_VERSION } from '../version';
 import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
@@ -81,6 +86,31 @@ export class HttpClient {
   /**
    * Create axios instance with persistent HTTP connection pooling
    */
+  /**
+   * An agent of `Base` whose sockets record whether they ever connected.
+   * axios reports a connect that never completed with its own timeout code
+   * (ECONNABORTED), the same as a timeout waiting for the answer; only the
+   * socket knows the request never left (retry-policy.ts).
+   */
+  private static watchingAgent<A extends typeof http.Agent>(
+    Base: A,
+    options: http.AgentOptions
+  ): InstanceType<A> {
+    const agent = new Base(options) as InstanceType<A> & {
+      createConnection: (...args: unknown[]) => net.Socket;
+    };
+    const create = agent.createConnection.bind(agent);
+    agent.createConnection = (...args: unknown[]) => {
+      const socket = create(...args) as net.Socket & Record<symbol, boolean>;
+      socket[WATCHED] = true;
+      socket.once('connect', () => {
+        socket[CONNECTED] = true;
+      });
+      return socket;
+    };
+    return agent;
+  }
+
   private createAxiosInstance(): AxiosInstance {
     const config: Record<string, unknown> = {
       timeout: this.timeout,
@@ -103,27 +133,23 @@ export class HttpClient {
     // both builtins into the bundle, the browser build stubs them via
     // rollup-plugin-polyfill-node, and neither is TOUCHED outside this
     // Node-only branch.
+    // Node always gets the SDK's own agents, so a failed request's socket can
+    // tell whether it ever connected (watchingAgent); keep-alive only with
+    // connection pooling.
     if (typeof process !== 'undefined' && process.versions?.node) {
-      if (this.enableConnectionPooling) {
-        this.httpAgent = new http.Agent({
-          keepAlive: true,
-          maxSockets: 50,
-          maxFreeSockets: 10,
-          timeout: 60000,
-          keepAliveMsecs: 1000,
-        });
-
-        this.httpsAgent = new https.Agent({
-          keepAlive: true,
-          maxSockets: 50,
-          maxFreeSockets: 10,
-          timeout: 60000,
-          keepAliveMsecs: 1000,
-        });
-
-        config.httpAgent = this.httpAgent;
-        config.httpsAgent = this.httpsAgent;
-      }
+      const options: http.AgentOptions = this.enableConnectionPooling
+        ? {
+            keepAlive: true,
+            maxSockets: 50,
+            maxFreeSockets: 10,
+            timeout: 60000,
+            keepAliveMsecs: 1000,
+          }
+        : { keepAlive: false };
+      this.httpAgent = HttpClient.watchingAgent(http.Agent, options);
+      this.httpsAgent = HttpClient.watchingAgent(https.Agent, options);
+      config.httpAgent = this.httpAgent;
+      config.httpsAgent = this.httpsAgent;
     }
 
     return axios.create(config);
@@ -214,7 +240,12 @@ export class HttpClient {
           message?: string;
           syscall?: string;
           cause?: { syscall?: string };
+          request?: { socket?: Record<symbol, boolean> };
         };
+        // A socket of ours that never connected: the request never left.
+        const socket = errorObj.request?.socket;
+        const neverConnected =
+          socket?.[WATCHED] === true && socket[CONNECTED] !== true;
         const message = errorObj.message || `Network error: ${errorObj.code}`;
         const networkError = new Error(
           message.includes('Network error')
@@ -227,6 +258,7 @@ export class HttpClient {
           code: errorObj.code,
           // axios keeps Node's error, and its syscall, as `cause`.
           syscall: errorObj.syscall ?? errorObj.cause?.syscall,
+          ...(neverConnected ? { requestSent: false } : {}),
         });
         throw networkError;
       }

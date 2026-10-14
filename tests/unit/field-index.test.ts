@@ -578,3 +578,32 @@ describe('createFieldIndex keeps its time on the monotonic clock', () => {
     expect(route.attempts.length).toBeLessThan(15);
   });
 });
+
+describe('a retry inside createFieldIndex is bounded by the time left', () => {
+  it("each attempt's timeout is the time left before the deadline", async () => {
+    const clock = fakeClock();
+    const route = indexRoute(clock, [COMPLETED], 10);
+    const timeouts: number[] = [];
+    const real = route.request.getMockImplementation();
+    if (real === undefined) throw new Error('indexRoute has no implementation');
+    let first = true;
+    route.request.mockImplementation(async config => {
+      timeouts.push(config.timeout);
+      if (first) {
+        // Refused after 4 s: nothing ran, so it is retried at once.
+        first = false;
+        clock.now += 4000;
+        throw Object.assign(new Error('Network error: connect ECONNREFUSED'), {
+          code: 'ECONNREFUSED',
+        });
+      }
+      return real(config);
+    });
+
+    await onRoute(route).createFieldIndex('articles', 'ts', 'integer', {
+      timeout: 5000,
+    });
+
+    expect(timeouts).toEqual([5000, 1000]);
+  });
+});

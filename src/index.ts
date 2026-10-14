@@ -146,6 +146,10 @@ export {
   throttle,
 } from './utils';
 
+// The retry rule's operation classes, for retryWithBackoff (retry-policy.ts).
+export { REPEATABLE, ONCE } from './retry-policy';
+export type { RetryClass } from './retry-policy';
+
 // HTTP client types (for advanced usage)
 export type {
   RequestConfig,

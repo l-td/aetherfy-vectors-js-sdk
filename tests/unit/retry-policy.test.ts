@@ -9,7 +9,12 @@ import { join } from 'path';
 import nock from 'nock';
 import { AetherfyVectorsClient } from '../../src/client';
 import { DistanceMetric } from '../../src/models';
-import { ONCE, OPERATIONS, REPEATABLE } from '../../src/retry-policy';
+import {
+  ONCE,
+  OPERATIONS,
+  REPEATABLE,
+  REPEATABLE_DESPITE_ITS_NAME,
+} from '../../src/retry-policy';
 
 const BASE = 'https://vectors.aetherfy.com';
 const WS = '/api/v1/workspaces/w';
@@ -244,4 +249,52 @@ it('setSchema is repeatable only while it sends no If-Match', async () => {
   await client().setSchema('docs', { fields: {} });
 
   expect(OPERATIONS.setSchema).toBe(ifMatch === undefined ? REPEATABLE : ONCE);
+});
+
+describe('the wrong-class guard', () => {
+  /** {operation: HTTP methods}, read from client.ts's send() call sites. */
+  function httpMethodOfEachOperation(): Map<string, Set<string>> {
+    const source = readFileSync(
+      join(__dirname, '..', '..', 'src', 'client.ts'),
+      'utf8'
+    );
+    const methods = new Map<string, Set<string>>();
+    const sites = [...source.matchAll(/this\.send\(\s*'([a-zA-Z]+)'/g)];
+    sites.forEach((site, i) => {
+      const end = i + 1 < sites.length ? sites[i + 1].index : source.length;
+      const body = source.slice(site.index, end);
+      const call = body.match(
+        /this\.httpClient\.(get|post|put|delete|patch|request)/
+      );
+      let verb = call ? call[1].toUpperCase() : '?';
+      if (verb === 'REQUEST') {
+        verb = body.match(/method:\s*'([A-Z]+)'/)?.[1] ?? '?';
+      }
+      const set = methods.get(site[1]) ?? new Set<string>();
+      set.add(verb);
+      methods.set(site[1], set);
+    });
+    return methods;
+  }
+
+  it('a delete or a create is ONCE unless listed with a reason', () => {
+    const methods = httpMethodOfEachOperation();
+    expect([...methods.keys()].sort()).toEqual(Object.keys(OPERATIONS).sort());
+    for (const [op, verbs] of methods) {
+      const risky =
+        verbs.has('DELETE') ||
+        op.startsWith('delete') ||
+        op.startsWith('create');
+      if (risky && !(op in REPEATABLE_DESPITE_ITS_NAME)) {
+        expect([op, OPERATIONS[op as keyof typeof OPERATIONS]]).toEqual([
+          op,
+          ONCE,
+        ]);
+      }
+    }
+    for (const [op, reason] of Object.entries(REPEATABLE_DESPITE_ITS_NAME)) {
+      expect(OPERATIONS[op as keyof typeof OPERATIONS]).toBe(REPEATABLE);
+      expect(reason?.trim()).toBeTruthy();
+    }
+  });
 });

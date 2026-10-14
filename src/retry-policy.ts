@@ -45,6 +45,14 @@
  * | deleteFieldIndex   | ONCE       | a repeat finds no index                      |
  */
 
+import {
+  AetherfyVectorsError,
+  NetworkError,
+  RateLimitExceededError,
+  RequestTimeoutError,
+  ServiceUnavailableError,
+} from './exceptions';
+
 export const REPEATABLE = 'repeatable';
 export const ONCE = 'once';
 export type RetryClass = typeof REPEATABLE | typeof ONCE;
@@ -79,6 +87,20 @@ export const OPERATIONS = {
 
 export type Operation = keyof typeof OPERATIONS;
 
+/**
+ * The "wrong class" guard (tests/unit/retry-policy.test.ts): an operation
+ * that sends DELETE, or whose name starts with delete/create, is ONCE unless
+ * listed here, with the reason its repeat gives the same result.
+ */
+export const REPEATABLE_DESPITE_ITS_NAME: Readonly<
+  Partial<Record<Operation, string>>
+> = {
+  deletePayload:
+    'removes keys from points; removing them again changes nothing',
+  createFieldIndex:
+    're-creating an existing index with the same schema returns at once',
+};
+
 /** 503s the server answers at its edge, before running anything. */
 export const REFUSED_BEFORE_ANYTHING_CODES: ReadonlySet<string> = new Set([
   'WORKSPACE_LOOKUP_UNAVAILABLE',
@@ -99,6 +121,7 @@ interface FailureShape {
   code?: unknown;
   syscall?: unknown;
   message?: unknown;
+  requestSent?: unknown;
 }
 
 function shapeOf(error: unknown): FailureShape {
@@ -122,8 +145,20 @@ function isTransport(e: FailureShape): boolean {
   );
 }
 
-/** Kind 1: nothing ran, so any operation may be repeated. */
+/**
+ * Kind 1: nothing ran, so any operation may be repeated. Reads both shapes:
+ * HttpClient's raw error (the client's own retries), and the typed error a
+ * client method throws (retryWithBackoff around a client call). A typed
+ * transport error no longer carries Node's code, so it reads as ambiguous.
+ */
 export function refusedBeforeAnything(error: unknown): boolean {
+  if (error instanceof ServiceUnavailableError) {
+    return REFUSED_BEFORE_ANYTHING_CODES.has(error.code ?? '');
+  }
+  if (error instanceof RateLimitExceededError) {
+    return error.retryAfter !== undefined;
+  }
+  if (error instanceof AetherfyVectorsError) return false;
   const e = shapeOf(error);
   if (e.status === 503) {
     return REFUSED_BEFORE_ANYTHING_CODES.has(serverCode(e) ?? '');
@@ -132,10 +167,12 @@ export function refusedBeforeAnything(error: unknown): boolean {
     const retryAfter = e.responseData?.retryAfter;
     return retryAfter !== undefined && retryAfter !== null;
   }
-  if (isTransport(e) && typeof e.code === 'string') {
+  if (isTransport(e)) {
+    if (e.requestSent === false) return true; // HttpClient saw no connect
     return (
-      NEVER_CONNECTED_CODES.has(e.code) ||
-      (e.code === 'ETIMEDOUT' && e.syscall === 'connect')
+      typeof e.code === 'string' &&
+      (NEVER_CONNECTED_CODES.has(e.code) ||
+        (e.code === 'ETIMEDOUT' && e.syscall === 'connect'))
     );
   }
   return false;
@@ -143,14 +180,32 @@ export function refusedBeforeAnything(error: unknown): boolean {
 
 /** Kind 2: the request may have run (a timeout, a reset, another 5xx). */
 export function ambiguous(error: unknown): boolean {
-  const e = shapeOf(error);
   if (refusedBeforeAnything(error)) return false;
+  if (
+    error instanceof ServiceUnavailableError ||
+    error instanceof NetworkError ||
+    error instanceof RequestTimeoutError
+  ) {
+    return true;
+  }
+  if (error instanceof AetherfyVectorsError) {
+    return (error.statusCode ?? 0) >= 500;
+  }
+  const e = shapeOf(error);
   if (typeof e.status === 'number') return e.status >= 500;
   return isTransport(e);
 }
 
-/** The rule. */
-export function shouldRetry(operation: Operation, error: unknown): boolean {
+/** The rule, for an operation of `retryClass`. */
+export function shouldRetryClass(
+  retryClass: RetryClass,
+  error: unknown
+): boolean {
   if (refusedBeforeAnything(error)) return true;
-  return OPERATIONS[operation] === REPEATABLE && ambiguous(error);
+  return retryClass === REPEATABLE && ambiguous(error);
+}
+
+/** The rule, for one of the client's operations. */
+export function shouldRetry(operation: Operation, error: unknown): boolean {
+  return shouldRetryClass(OPERATIONS[operation], error);
 }

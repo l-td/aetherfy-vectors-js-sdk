@@ -14,6 +14,7 @@ import {
   ConflictError,
   isRetryableError,
 } from '../../src/exceptions';
+import { REPEATABLE } from '../../src/retry-policy';
 
 describe('Retry Logic with HTTP Errors', () => {
   describe('Retryable Errors', () => {
@@ -28,7 +29,7 @@ describe('Retry Logic with HTTP Errors', () => {
       const promise = retryWithBackoff(fn, {
         maxRetries: 3,
         baseDelay: 1000,
-        retryCondition: isRetryableError,
+        retryClass: REPEATABLE,
       });
 
       await jest.runOnlyPendingTimersAsync();
@@ -53,7 +54,7 @@ describe('Retry Logic with HTTP Errors', () => {
       const promise = retryWithBackoff(fn, {
         maxRetries: 3,
         baseDelay: 1000,
-        retryCondition: isRetryableError,
+        retryClass: REPEATABLE,
       });
 
       await jest.runOnlyPendingTimersAsync();
@@ -76,7 +77,7 @@ describe('Retry Logic with HTTP Errors', () => {
       const promise = retryWithBackoff(fn, {
         maxRetries: 3,
         baseDelay: 1000,
-        retryCondition: isRetryableError,
+        retryClass: REPEATABLE,
       });
 
       await jest.runOnlyPendingTimersAsync();
@@ -99,7 +100,7 @@ describe('Retry Logic with HTTP Errors', () => {
       const promise = retryWithBackoff(fn, {
         maxRetries: 3,
         baseDelay: 1000,
-        retryCondition: isRetryableError,
+        retryClass: REPEATABLE,
       });
 
       await jest.runOnlyPendingTimersAsync();
@@ -122,7 +123,7 @@ describe('Retry Logic with HTTP Errors', () => {
       const promise = retryWithBackoff(fn, {
         maxRetries: 3,
         baseDelay: 1000,
-        retryCondition: isRetryableError,
+        retryClass: REPEATABLE,
       });
 
       await jest.runOnlyPendingTimersAsync();
@@ -147,7 +148,7 @@ describe('Retry Logic with HTTP Errors', () => {
       const promise = retryWithBackoff(fn, {
         maxRetries: 3,
         baseDelay: 1000,
-        retryCondition: isRetryableError,
+        retryClass: REPEATABLE,
       });
 
       await jest.runOnlyPendingTimersAsync();
@@ -168,7 +169,7 @@ describe('Retry Logic with HTTP Errors', () => {
         retryWithBackoff(fn, {
           maxRetries: 2,
           baseDelay: 1,
-          retryCondition: isRetryableError,
+          retryClass: REPEATABLE,
         })
       ).rejects.toThrow('Service Unavailable');
 
@@ -186,7 +187,7 @@ describe('Retry Logic with HTTP Errors', () => {
         retryWithBackoff(fn, {
           maxRetries: 3,
           baseDelay: 1,
-          retryCondition: isRetryableError,
+          retryClass: REPEATABLE,
         })
       ).rejects.toThrow('Invalid request parameters');
 
@@ -205,7 +206,7 @@ describe('Retry Logic with HTTP Errors', () => {
         retryWithBackoff(fn, {
           maxRetries: 3,
           baseDelay: 1,
-          retryCondition: isRetryableError,
+          retryClass: REPEATABLE,
         })
       ).rejects.toThrow('Invalid or missing API key');
 
@@ -221,7 +222,7 @@ describe('Retry Logic with HTTP Errors', () => {
         retryWithBackoff(fn, {
           maxRetries: 3,
           baseDelay: 1,
-          retryCondition: isRetryableError,
+          retryClass: REPEATABLE,
         })
       ).rejects.toThrow("Collection 'test-collection' not found");
 
@@ -237,7 +238,7 @@ describe('Retry Logic with HTTP Errors', () => {
         retryWithBackoff(fn, {
           maxRetries: 3,
           baseDelay: 1,
-          retryCondition: isRetryableError,
+          retryClass: REPEATABLE,
         })
       ).rejects.toThrow('Resource already exists');
 
@@ -253,7 +254,7 @@ describe('Retry Logic with HTTP Errors', () => {
         retryWithBackoff(fn, {
           maxRetries: 3,
           baseDelay: 1,
-          retryCondition: isRetryableError,
+          retryClass: REPEATABLE,
         })
       ).rejects.toThrow('Rate limit exceeded');
 
