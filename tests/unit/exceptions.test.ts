@@ -119,7 +119,7 @@ describe('Custom Exceptions', () => {
         name: 'CollectionNotFoundError',
         message: "Collection 'test-collection' not found",
         requestId: undefined,
-        statusCode: undefined,
+        statusCode: 404, // every not-found error is a NotFoundError
         details: undefined,
         collectionName: 'test-collection',
       });
@@ -142,7 +142,7 @@ describe('Custom Exceptions', () => {
         name: 'PointNotFoundError',
         message: "Point 'point-1' not found in collection 'test-collection'",
         requestId: undefined,
-        statusCode: undefined,
+        statusCode: 404, // every not-found error is a NotFoundError
         details: undefined,
         pointId: 'point-1',
         collectionName: 'test-collection',
@@ -278,7 +278,7 @@ describe('Custom Exceptions', () => {
         name: 'SchemaNotFoundError',
         message: "No schema defined for collection 'products'",
         requestId: undefined,
-        statusCode: undefined,
+        statusCode: 404, // every not-found error is a NotFoundError
         details: undefined,
         collectionName: 'products',
       });

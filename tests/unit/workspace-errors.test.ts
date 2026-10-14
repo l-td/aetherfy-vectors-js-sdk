@@ -18,10 +18,14 @@ import {
   PointNotFoundError,
   SchemaNotFoundError,
   ServiceUnavailableError,
+  NotFoundError,
   ValidationError,
   WorkspaceNotFoundError,
 } from '../../src/exceptions';
-import { WorkspaceNotFoundError as Exported } from '../../src';
+import {
+  NotFoundError as ExportedNotFound,
+  WorkspaceNotFoundError as Exported,
+} from '../../src';
 import { MemoryClient, NamespaceNotFoundError } from '../../src/memory';
 import { Namespace } from '../../src/memory/namespace';
 import { DistanceMetric } from '../../src/models';
@@ -452,5 +456,40 @@ describe('memory', () => {
         .reply(404, POINT_MISSING);
       await expect(call()).rejects.toBeInstanceOf(PointNotFoundError);
     });
+  });
+});
+
+// ===========================================================================
+// NotFoundError: the parent of every not-found error, and the 404 fallback
+// ===========================================================================
+
+describe('NotFoundError', () => {
+  it.each([
+    ['COLLECTION_NOT_FOUND', COLLECTION_NOT_FOUND],
+    ['WORKSPACE_NOT_FOUND', WORKSPACE_NOT_FOUND_BY_NAME],
+    ['SCHEMA_NOT_DEFINED', body('SCHEMA_NOT_DEFINED')],
+    [
+      'POINT_NOT_FOUND',
+      body('POINT_NOT_FOUND', { point_id: '1', collection_name: 'docs' }),
+    ],
+  ])('%s is a NotFoundError', (_label, payload) => {
+    expect(createErrorFromResponse(payload, 404, 'x')).toBeInstanceOf(
+      NotFoundError
+    );
+  });
+
+  it('a 404 with an unknown code is a typed NotFoundError carrying it', () => {
+    const err = createErrorFromResponse(
+      body('ALIAS_NOT_FOUND', { alias_name: 'live' }),
+      404,
+      'x'
+    );
+    expect(err.constructor).toBe(NotFoundError);
+    expect(err.code).toBe('ALIAS_NOT_FOUND');
+    expect(err.statusCode).toBe(404);
+  });
+
+  it('is exported from the package', () => {
+    expect(ExportedNotFound).toBe(NotFoundError);
   });
 });

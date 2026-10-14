@@ -1020,8 +1020,10 @@ import {
   AuthenticationError,
   RateLimitExceededError,
   ValidationError,
+  NotFoundError, // parent of every not-found error
   CollectionNotFoundError,
   PointNotFoundError,
+  WorkspaceNotFoundError,
   ServiceUnavailableError,
   RequestTimeoutError,
   NetworkError,

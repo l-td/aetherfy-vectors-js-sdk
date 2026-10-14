@@ -126,9 +126,28 @@ export class ValidationError extends AetherfyVectorsError {
 }
 
 /**
+ * Something the request named does not exist (HTTP 404). The parent of every
+ * not-found error (collection, point, schema, workspace), and what a 404
+ * whose `code` this SDK does not know arrives as, with that code. Catch it to
+ * handle any of them.
+ */
+export class NotFoundError extends AetherfyVectorsError {
+  constructor(
+    message: string,
+    requestId?: string,
+    statusCode: number = 404,
+    details?: Record<string, unknown>
+  ) {
+    super(message, requestId, statusCode, details);
+    this.name = 'NotFoundError';
+    Object.setPrototypeOf(this, NotFoundError.prototype);
+  }
+}
+
+/**
  * Collection not found errors (404)
  */
-export class CollectionNotFoundError extends AetherfyVectorsError {
+export class CollectionNotFoundError extends NotFoundError {
   public readonly collectionName: string;
 
   constructor(collectionName: string) {
@@ -149,7 +168,7 @@ export class CollectionNotFoundError extends AetherfyVectorsError {
 /**
  * Point not found errors (404)
  */
-export class PointNotFoundError extends AetherfyVectorsError {
+export class PointNotFoundError extends NotFoundError {
   public readonly pointId: string | number;
   public readonly collectionName: string;
 
@@ -325,7 +344,7 @@ export class AgentWorkspaceForbiddenError extends AetherfyVectorsError {
  * the id as sent. Not retryable: create the workspace, or fix the name. A
  * workspace of another account answers the same way, by design.
  */
-export class WorkspaceNotFoundError extends AetherfyVectorsError {
+export class WorkspaceNotFoundError extends NotFoundError {
   public readonly workspace: string | null;
   public readonly workspaceId: string | null;
 
@@ -416,7 +435,7 @@ export class CollectionInUseError extends AetherfyVectorsError {
 /**
  * Schema not found errors - when no schema is defined for a collection
  */
-export class SchemaNotFoundError extends AetherfyVectorsError {
+export class SchemaNotFoundError extends NotFoundError {
   public readonly collectionName: string;
 
   constructor(collectionName: string) {
@@ -659,8 +678,9 @@ export function createErrorFromResponse(
           new SchemaNotFoundError(str('collection_name') ?? 'unknown')
         );
       }
+      // A 404 whose code this SDK does not know: still a typed not-found.
       return stamp(
-        new AetherfyVectorsError(
+        new NotFoundError(
           message,
           requestId,
           status,

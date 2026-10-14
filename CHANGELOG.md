@@ -63,6 +63,11 @@ described here.
 
 ### Added
 
+- **`NotFoundError`** (exported from the package root): the parent of
+  `CollectionNotFoundError`, `PointNotFoundError`, `SchemaNotFoundError` and
+  `WorkspaceNotFoundError`, and what a 404 whose `code` the SDK does not know
+  arrives as (it was the base `AetherfyVectorsError`), carrying the code.
+  Every not-found error now has `statusCode` 404 (it was undefined).
 - **`WorkspaceNotFoundError`** (exported from the package root): 404
   `WORKSPACE_NOT_FOUND`, with `.workspace` (the name sent) or `.workspaceId`
   (the id sent). Not retryable.
