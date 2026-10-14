@@ -547,7 +547,10 @@ try {
 collection is not in it; an unknown workspace throws. A workspace or collection
 lookup the server cannot complete right now (503
 `WORKSPACE_LOOKUP_UNAVAILABLE`, `COLLECTION_LOOKUP_UNAVAILABLE`,
-`PLACEMENT_UNAVAILABLE`) is retried, then thrown as `ServiceUnavailableError`.
+`PLACEMENT_UNAVAILABLE`) is a `ServiceUnavailableError`, for which
+`isRetryableError()` is true. `createCollection`, `upsert` and `search` retry
+it themselves (3 retries, with backoff); every other call throws it at once,
+for you to retry.
 
 Renaming a collection, and moving one to another workspace, are done from the
 dashboard or the CLI (`afy collections update`), not from the SDK. Code still

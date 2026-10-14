@@ -7,6 +7,8 @@
 import nock from 'nock';
 import { AetherfyVectorsClient } from '../../src/client';
 import { DistanceMetric } from '../../src/models';
+import { MemoryClient } from '../../src/memory';
+import { createClient } from '../../src';
 
 const KEY = 'afy_test_1234567890123456';
 const WS_ID = '0f8e2b9a-7c41-4d2e-9b3a-5e6f7a8b9c0d';
@@ -206,5 +208,61 @@ describe('Workspace Support', () => {
 
       expect(scope.isDone()).toBe(true);
     });
+  });
+});
+
+describe('the workspace is decided before any request', () => {
+  afterEach(() => {
+    nock.cleanAll();
+    delete process.env.AETHERFY_VECTORS_URL;
+  });
+
+  it('create() without a workspace makes no discovery request', async () => {
+    delete process.env.AETHERFY_WORKSPACE_ID;
+    delete process.env.AETHERFY_VECTORS_URL;
+    const discovery = nock(baseUrl)
+      .get('/api/v1/regions')
+      .reply(200, { 'eu-central-1': 'https://eu.example' });
+
+    await expect(
+      AetherfyVectorsClient.create({ apiKey: KEY, apiRegion: 'eu-central-1' })
+    ).rejects.toThrow(/AETHERFY_WORKSPACE_ID/);
+    expect(discovery.isDone()).toBe(false);
+  });
+
+  it('CONTROL: create() with a named workspace runs discovery', async () => {
+    delete process.env.AETHERFY_WORKSPACE_ID;
+    delete process.env.AETHERFY_VECTORS_URL;
+    const discovery = nock(baseUrl)
+      .get('/api/v1/regions')
+      .reply(200, { 'eu-central-1': 'https://eu.example' });
+
+    const client = await AetherfyVectorsClient.create({
+      apiKey: KEY,
+      workspace: 'w',
+      apiRegion: 'eu-central-1',
+    });
+    expect(discovery.isDone()).toBe(true);
+    expect(client.workspace).toBe('w');
+  });
+
+  it('MemoryClient forwards a named workspace, and is refused without one', () => {
+    delete process.env.AETHERFY_WORKSPACE_ID;
+
+    expect(new MemoryClient({ apiKey: KEY, workspace: 'w' }).workspace).toBe(
+      'w'
+    );
+    expect(() => new MemoryClient({ apiKey: KEY })).toThrow(
+      /AETHERFY_WORKSPACE_ID/
+    );
+  });
+
+  it('createClient forwards a named workspace', () => {
+    delete process.env.AETHERFY_WORKSPACE_ID;
+
+    expect(createClient({ apiKey: KEY, workspace: 'w' }).workspace).toBe('w');
+    expect(() => createClient({ apiKey: KEY })).toThrow(
+      /AETHERFY_WORKSPACE_ID/
+    );
   });
 });

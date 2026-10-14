@@ -93,8 +93,10 @@ described here.
 
 - **A 503 was never retried.** The HTTP layer throws a plain error carrying
   the status, and the retry check knew only the typed classes, so
-  `createCollection` and `upsert` gave up after one attempt. A 503 is now
-  retried with backoff (3 retries), then thrown as `ServiceUnavailableError`.
+  `createCollection`, `upsert` and `search`, the calls that retry, gave up
+  after one attempt. A 503 is now retried there with backoff (3 retries),
+  then thrown as `ServiceUnavailableError`. Every other call throws it at
+  once; `isRetryableError()` is true for it.
 - `clearSchemaCache(name)` cleared nothing on a workspaced client: it removed
   the bare name, and the caches are keyed by the workspace-scoped one.
 

@@ -312,26 +312,9 @@ export class AetherfyVectorsClient {
       this.endpoint = AetherfyVectorsClient.DEFAULT_ENDPOINT;
     }
 
-    // The workspace: a name, or (for 'auto', the default) the agent's
-    // workspace id. Exactly one is set; there is no workspaceless client.
-    // undefined is "not given"; null and '' are refused below.
-    const workspace: unknown =
-      config.workspace === undefined ? 'auto' : config.workspace;
-    if (workspace === 'auto') {
-      /* c8 ignore next 4 */
-      const id =
-        typeof process !== 'undefined'
-          ? process.env?.AETHERFY_WORKSPACE_ID
-          : undefined;
-      if (!id) {
-        throw new Error(NO_WORKSPACE_MESSAGE_AUTO);
-      }
-      this.workspaceId = id;
-    } else if (typeof workspace === 'string' && workspace) {
-      this.workspace = workspace;
-    } else {
-      throw new Error(NO_WORKSPACE_MESSAGE);
-    }
+    const resolved = AetherfyVectorsClient.resolveWorkspace(config);
+    this.workspace = resolved.workspace;
+    this.workspaceId = resolved.workspaceId;
 
     this.schemaCache = new Map();
     this.payloadSchemaCache = new Map();
@@ -376,6 +359,8 @@ export class AetherfyVectorsClient {
       CLIENT_CONFIG_KEYS,
       'AetherfyVectorsClient.create'
     );
+    // Refuse a missing workspace before discovery makes a request.
+    AetherfyVectorsClient.resolveWorkspace(config);
 
     // Validate eagerly — same semantics as Python's __init__.
     if (
@@ -449,6 +434,35 @@ export class AetherfyVectorsClient {
       ...config,
       endpoint: cache[config.apiRegion],
     });
+  }
+
+  /**
+   * The workspace: a name, or (for 'auto', the default) the agent's
+   * workspace id. Exactly one is set; there is no workspaceless client.
+   * undefined is "not given"; null and '' are refused. Decided before any
+   * request (create() calls it ahead of region discovery).
+   */
+  private static resolveWorkspace(config: ClientConfig): {
+    workspace?: string;
+    workspaceId?: string;
+  } {
+    const workspace: unknown =
+      config.workspace === undefined ? 'auto' : config.workspace;
+    if (workspace === 'auto') {
+      /* c8 ignore next 4 */
+      const id =
+        typeof process !== 'undefined'
+          ? process.env?.AETHERFY_WORKSPACE_ID
+          : undefined;
+      if (!id) {
+        throw new Error(NO_WORKSPACE_MESSAGE_AUTO);
+      }
+      return { workspaceId: id };
+    }
+    if (typeof workspace === 'string' && workspace) {
+      return { workspace };
+    }
+    throw new Error(NO_WORKSPACE_MESSAGE);
   }
 
   /** Build a fully-qualified API URL from the endpoint host and a path. */
