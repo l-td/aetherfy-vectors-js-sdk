@@ -61,6 +61,21 @@ described here.
   collection (`COLLECTION_SDK_MANAGED`); an agent that moves to another
   workspace leaves its conversations in the old one's `__threads__`.
 
+- **BREAKING: when a request is retried follows one rule, the same as the
+  Python SDK** (`src/retry-policy.ts`, and the README's table). A refusal
+  before anything ran (503 `WORKSPACE_LOOKUP_UNAVAILABLE`,
+  `COLLECTION_LOOKUP_UNAVAILABLE`, `PLACEMENT_UNAVAILABLE`; a connection
+  never made: `ENOTFOUND`, `EAI_AGAIN`, `ECONNREFUSED`, `ETIMEDOUT` on
+  connect; 429 with a Retry-After) is retried for every operation. An
+  ambiguous failure (a timeout waiting for the answer, a reset after
+  sending, any other 5xx) is retried only for reads and writes keyed by id;
+  `createCollection`, `deleteCollection`, `delete`, `deleteSchema` and
+  `deleteFieldIndex` throw it after one attempt. A 4xx is never retried.
+  Up to 3 retries, waiting about 1, 2, then 4 s (jittered), as in Python;
+  `createFieldIndex` stops retrying at its own deadline. Before, only
+  `createCollection`, `upsert` and `search` retried, and (see Fixed) never
+  on a 503.
+
 ### Added
 
 - **`NotFoundError`** (exported from the package root): the parent of
@@ -97,11 +112,9 @@ described here.
 ### Fixed
 
 - **A 503 was never retried.** The HTTP layer throws a plain error carrying
-  the status, and the retry check knew only the typed classes, so
-  `createCollection`, `upsert` and `search`, the calls that retry, gave up
-  after one attempt. A 503 is now retried there with backoff (3 retries),
-  then thrown as `ServiceUnavailableError`. Every other call throws it at
-  once; `isRetryableError()` is true for it.
+  the status, and the retry check knew only the typed classes, so the three
+  calls that retried (`createCollection`, `upsert`, `search`) gave up after
+  one attempt. Retries now follow the rule below.
 - `clearSchemaCache(name)` cleared nothing on a workspaced client: it removed
   the bare name, and the caches are keyed by the workspace-scoped one.
 

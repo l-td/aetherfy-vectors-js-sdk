@@ -36,10 +36,10 @@ import {
   RequestTimeoutError,
   WorkspaceNotFoundError,
   createErrorFromResponse,
-  isRetryableError,
 } from './exceptions';
 import { HttpResponse } from './http/types';
 import { retryWithBackoff, validatePointId } from './utils';
+import { Operation, shouldRetry } from './retry-policy';
 import { assertAllowedOptionKeys, optionKeys } from './utils/options';
 import { serializeFilter } from './utils/filter';
 import { chunkPointsByBytes, MAX_REQUEST_BYTES } from './utils/chunking';
@@ -187,6 +187,11 @@ export const INDEX_RESEND_PAUSE_MAX_MS = 10000;
 export class AetherfyVectorsClient {
   private static readonly DEFAULT_ENDPOINT = 'https://vectors.aetherfy.com';
   private static readonly DEFAULT_TIMEOUT = 30000;
+  /**
+   * The first retry's wait, in ms (then doubled, each jittered to 50-100%).
+   * @internal The unit tests shorten it, as the Python suite patches sleep.
+   */
+  static retryBaseDelayMs = 1000;
   private static readonly VALID_REGIONS: ReadonlySet<string> = new Set([
     'us-east-1',
     'eu-central-1',
@@ -599,7 +604,7 @@ export class AetherfyVectorsClient {
         body.regions = regions;
       }
 
-      const response = await this.executeWithRetry(async () =>
+      const response = await this.send('createCollection', async () =>
         this.httpClient.post<{ regions?: string[] }>(
           this.apiUrl(this.buildCollectionsListPath()),
           body
@@ -643,8 +648,10 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.httpClient.delete(
-        this.apiUrl(this.buildCollectionPath(collectionName))
+      const response = await this.send('deleteCollection', () =>
+        this.httpClient.delete(
+          this.apiUrl(this.buildCollectionPath(collectionName))
+        )
       );
 
       const ok = response.status === 200 || response.status === 204;
@@ -670,8 +677,10 @@ export class AetherfyVectorsClient {
    */
   async getCollections(): Promise<Collection[]> {
     try {
-      const response = await this.httpClient.get<{ collections: Collection[] }>(
-        this.apiUrl(this.buildCollectionsListPath())
+      const response = await this.send('getCollections', () =>
+        this.httpClient.get<{ collections: Collection[] }>(
+          this.apiUrl(this.buildCollectionsListPath())
+        )
       );
 
       // The workspace's list holds only its own collections, with bare
@@ -704,8 +713,10 @@ export class AetherfyVectorsClient {
     }
 
     try {
-      await this.httpClient.get(
-        this.apiUrl(this.buildCollectionPath(collectionName))
+      await this.send('collectionExists', () =>
+        this.httpClient.get(
+          this.apiUrl(this.buildCollectionPath(collectionName))
+        )
       );
       return true;
     } catch (error: unknown) {
@@ -740,8 +751,10 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.httpClient.get<{ result: Collection }>(
-        this.apiUrl(this.buildCollectionPath(collectionName))
+      const response = await this.send('getCollection', () =>
+        this.httpClient.get<{ result: Collection }>(
+          this.apiUrl(this.buildCollectionPath(collectionName))
+        )
       );
 
       // vectordb returns the bare collection name: nothing to unscope.
@@ -952,7 +965,7 @@ export class AetherfyVectorsClient {
         headers['If-Match'] = payloadSchemaData.etag;
       }
 
-      const response = await this.executeWithRetry(async () =>
+      const response = await this.send('upsert', async () =>
         this.httpClient.put(
           this.apiUrl(
             this.buildCollectionPath(originalCollectionName, '/points')
@@ -1022,12 +1035,14 @@ export class AetherfyVectorsClient {
               retryHeaders['If-Match'] = updatedPayloadSchema.etag;
             }
 
-            const response = await this.httpClient.put(
-              this.apiUrl(
-                this.buildCollectionPath(originalCollectionName, '/points')
-              ),
-              { points: chunk },
-              retryHeaders
+            const response = await this.send('upsert', () =>
+              this.httpClient.put(
+                this.apiUrl(
+                  this.buildCollectionPath(originalCollectionName, '/points')
+                ),
+                { points: chunk },
+                retryHeaders
+              )
             );
 
             return response.status === 200;
@@ -1098,9 +1113,13 @@ export class AetherfyVectorsClient {
       : { points: pointsSelector };
 
     try {
-      const response = await this.httpClient.post(
-        this.apiUrl(this.buildCollectionPath(collectionName, '/points/delete')),
-        body
+      const response = await this.send('delete', () =>
+        this.httpClient.post(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/delete')
+          ),
+          body
+        )
       );
 
       return response.status === 200;
@@ -1148,11 +1167,13 @@ export class AetherfyVectorsClient {
     if (options.key !== undefined) body.key = options.key;
 
     try {
-      const response = await this.httpClient.post(
-        this.apiUrl(
-          this.buildCollectionPath(collectionName, '/points/payload')
-        ),
-        body
+      const response = await this.send('setPayload', () =>
+        this.httpClient.post(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/payload')
+          ),
+          body
+        )
       );
       return response.data;
     } catch (error: unknown) {
@@ -1178,11 +1199,13 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.httpClient.put(
-        this.apiUrl(
-          this.buildCollectionPath(collectionName, '/points/payload')
-        ),
-        { payload, points }
+      const response = await this.send('overwritePayload', () =>
+        this.httpClient.put(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/payload')
+          ),
+          { payload, points }
+        )
       );
       return response.data;
     } catch (error: unknown) {
@@ -1209,11 +1232,13 @@ export class AetherfyVectorsClient {
     try {
       // POST /points/payload/delete (not DELETE /points/payload) —
       // matches the underlying wire contract.
-      const response = await this.httpClient.post(
-        this.apiUrl(
-          this.buildCollectionPath(collectionName, '/points/payload/delete')
-        ),
-        { keys, points }
+      const response = await this.send('deletePayload', () =>
+        this.httpClient.post(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/payload/delete')
+          ),
+          { keys, points }
+        )
       );
       return response.data;
     } catch (error: unknown) {
@@ -1333,12 +1358,19 @@ export class AetherfyVectorsClient {
 
       let response: HttpResponse<{ result?: unknown }>;
       try {
-        response = await this.httpClient.request<{ result?: unknown }>({
-          url: this.apiUrl(this.buildCollectionPath(collectionName, '/index')),
-          method: 'PUT',
-          body: { field_name: fieldName, field_schema: fieldSchema },
-          timeout: attemptTimeout,
-        });
+        response = await this.send(
+          'createFieldIndex',
+          () =>
+            this.httpClient.request<{ result?: unknown }>({
+              url: this.apiUrl(
+                this.buildCollectionPath(collectionName, '/index')
+              ),
+              method: 'PUT',
+              body: { field_name: fieldName, field_schema: fieldSchema },
+              timeout: attemptTimeout,
+            }),
+          deadline
+        );
       } catch (error: unknown) {
         // Before the deadline, this is one create outliving its own HTTP
         // timeout, and that error stands. At the deadline, after an
@@ -1414,16 +1446,18 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      await this.httpClient.request({
-        url: this.apiUrl(
-          this.buildCollectionPath(
-            collectionName,
-            `/index/${encodeURIComponent(fieldName)}`
-          )
-        ),
-        method: 'DELETE',
-        timeout: Math.max(this.requestTimeoutMs, INDEX_ATTEMPT_TIMEOUT_MS),
-      });
+      await this.send('deleteFieldIndex', () =>
+        this.httpClient.request({
+          url: this.apiUrl(
+            this.buildCollectionPath(
+              collectionName,
+              `/index/${encodeURIComponent(fieldName)}`
+            )
+          ),
+          method: 'DELETE',
+          timeout: Math.max(this.requestTimeoutMs, INDEX_ATTEMPT_TIMEOUT_MS),
+        })
+      );
       return true;
     } catch (error: unknown) {
       if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
@@ -1533,19 +1567,21 @@ export class AetherfyVectorsClient {
       // previously dual-purpose (upsert vs retrieve, distinguished by
       // body shape). Backend now serves retrieve at /points/retrieve so
       // /points can be unambiguously upsert (and stream-parsed).
-      const response = await this.httpClient.post<{
-        result: Point[];
-      }>(
-        this.apiUrl(
-          this.buildCollectionPath(collectionName, '/points/retrieve')
-        ),
-        {
-          ids,
-          with_payload: options.withPayload ?? true,
-          // Wire field is singular (with_vector); the caller-facing
-          // option name `withVectors` is plural by JS convention.
-          with_vector: options.withVectors ?? false,
-        }
+      const response = await this.send('retrieve', () =>
+        this.httpClient.post<{
+          result: Point[];
+        }>(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/retrieve')
+          ),
+          {
+            ids,
+            with_payload: options.withPayload ?? true,
+            // Wire field is singular (with_vector); the caller-facing
+            // option name `withVectors` is plural by JS convention.
+            with_vector: options.withVectors ?? false,
+          }
+        )
       );
 
       return response.data.result || [];
@@ -1613,7 +1649,7 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.executeWithRetry(async () =>
+      const response = await this.send('search', async () =>
         this.httpClient.post<{ result: { points: SearchResult[] } }>(
           this.apiUrl(
             this.buildCollectionPath(collectionName, '/points/query')
@@ -1671,14 +1707,18 @@ export class AetherfyVectorsClient {
       body.filter = serializeFilter(options.scrollFilter, 'scroll');
 
     try {
-      const response = await this.httpClient.post<{
-        result: {
-          points: ScrollResult['points'];
-          next_page_offset: string | number | null;
-        };
-      }>(
-        this.apiUrl(this.buildCollectionPath(collectionName, '/points/scroll')),
-        body
+      const response = await this.send('scroll', () =>
+        this.httpClient.post<{
+          result: {
+            points: ScrollResult['points'];
+            next_page_offset: string | number | null;
+          };
+        }>(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/scroll')
+          ),
+          body
+        )
       );
 
       const result = response.data.result ?? {
@@ -1792,14 +1832,18 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.httpClient.post<{
-        result: { count: number };
-      }>(
-        this.apiUrl(this.buildCollectionPath(collectionName, '/points/count')),
-        {
-          filter: serializeFilter(options.countFilter, 'count'),
-          exact: options.exact ?? false,
-        }
+      const response = await this.send('count', () =>
+        this.httpClient.post<{
+          result: { count: number };
+        }>(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/count')
+          ),
+          {
+            filter: serializeFilter(options.countFilter, 'count'),
+            exact: options.exact ?? false,
+          }
+        )
       );
 
       return response.data.result.count;
@@ -1838,8 +1882,8 @@ export class AetherfyVectorsClient {
    */
   async getUsageStats(): Promise<UsageStats> {
     try {
-      const response = await this.httpClient.get<UsageStats>(
-        this.apiUrl('/analytics/usage')
+      const response = await this.send('getUsageStats', () =>
+        this.httpClient.get<UsageStats>(this.apiUrl('/analytics/usage'))
       );
 
       return response.data;
@@ -1952,19 +1996,21 @@ export class AetherfyVectorsClient {
     // name (scopeCollection), so same-name collections in different
     // workspaces never share an entry.
     const scopedName = this.scopeCollection(collectionName);
-    const response = await this.httpClient.get<{
-      result: {
-        config: {
-          params: {
-            vectors: {
-              size: number;
-              distance: string;
+    const response = await this.send('getSchema', () =>
+      this.httpClient.get<{
+        result: {
+          config: {
+            params: {
+              vectors: {
+                size: number;
+                distance: string;
+              };
             };
           };
         };
-      };
-      schema_version: string;
-    }>(this.apiUrl(this.buildCollectionPath(collectionName)));
+        schema_version: string;
+      }>(this.apiUrl(this.buildCollectionPath(collectionName)))
+    );
 
     const result = response.data.result;
     const schemaVersion = response.data.schema_version;
@@ -2141,15 +2187,25 @@ export class AetherfyVectorsClient {
     return new AetherfyVectorsError(message);
   }
 
-  private async executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
-    return retryWithBackoff(operation, {
+  /**
+   * Send one request under the retry rule (retry-policy.ts): a refusal
+   * before anything ran is retried for any operation, an ambiguous failure
+   * only for an operation whose repeat gives the same result, a 4xx never.
+   * The raw HttpClient error reaches the caller (the 412 path reads its
+   * `status`). With a `deadline` (on `this.now()`), no retry starts once it
+   * has passed, as the Python SDK's call deadline.
+   */
+  private async send<T>(
+    operation: Operation,
+    request: () => Promise<T>,
+    deadline?: number
+  ): Promise<T> {
+    return retryWithBackoff(request, {
       maxRetries: 3,
-      // HttpClient throws a plain Error carrying `status` and `responseData`;
-      // it is typed only by handleError. Classify the typed form (a 503 is a
-      // ServiceUnavailableError), but let the raw error through to callers,
-      // which read its `status` (the 412 schema-change path does).
+      baseDelay: AetherfyVectorsClient.retryBaseDelayMs,
       retryCondition: error =>
-        isRetryableError(error) || isRetryableError(this.handleError(error)),
+        shouldRetry(operation, error) &&
+        (deadline === undefined || this.now() < deadline),
     });
   }
 
@@ -2175,8 +2231,10 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.httpClient.get(
-        this.apiUrl(this.buildCollectionPath(collectionName, '/schema'))
+      const response = await this.send('getSchema', () =>
+        this.httpClient.get(
+          this.apiUrl(this.buildCollectionPath(collectionName, '/schema'))
+        )
       );
 
       const data = response.data as {
@@ -2257,9 +2315,11 @@ export class AetherfyVectorsClient {
 
     let response;
     try {
-      response = await this.httpClient.put(
-        this.apiUrl(this.buildCollectionPath(collectionName, '/schema')),
-        body
+      response = await this.send('setSchema', () =>
+        this.httpClient.put(
+          this.apiUrl(this.buildCollectionPath(collectionName, '/schema')),
+          body
+        )
       );
     } catch (error: unknown) {
       // A schema PUT on a non-existent collection 404s
@@ -2300,8 +2360,10 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      await this.httpClient.delete(
-        this.apiUrl(this.buildCollectionPath(collectionName, '/schema'))
+      await this.send('deleteSchema', () =>
+        this.httpClient.delete(
+          this.apiUrl(this.buildCollectionPath(collectionName, '/schema'))
+        )
       );
     } catch (error: unknown) {
       // Disambiguate via the backend's error.code:
@@ -2356,11 +2418,13 @@ export class AetherfyVectorsClient {
 
     let response;
     try {
-      response = await this.httpClient.post(
-        this.apiUrl(
-          this.buildCollectionPath(collectionName, '/schema/analyze')
-        ),
-        { sample_size: sampleSize }
+      response = await this.send('analyzeSchema', () =>
+        this.httpClient.post(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/schema/analyze')
+          ),
+          { sample_size: sampleSize }
+        )
       );
     } catch (error: unknown) {
       this.evictCachesIfNotFound(scopedName, error);

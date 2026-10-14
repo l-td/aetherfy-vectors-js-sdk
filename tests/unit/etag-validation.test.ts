@@ -426,6 +426,8 @@ describe('ETag Validation', () => {
       .put(
         '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
       )
+      // upsert is repeatable: the first attempt and 3 retries.
+      .times(4)
       .reply(500, {
         message: 'Internal server error',
         code: 'INTERNAL_ERROR',

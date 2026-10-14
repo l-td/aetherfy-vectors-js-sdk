@@ -1317,6 +1317,8 @@ describe('AetherfyVectorsClient', () => {
         .get(
           '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
         )
+        // An ambiguous failure on a read: the first attempt and 3 retries.
+        .times(4)
         .replyWithError(new Error('Network Error'));
 
       try {
@@ -1338,6 +1340,8 @@ describe('AetherfyVectorsClient', () => {
         .get(
           '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
         )
+        // An ambiguous failure on a read: the first attempt and 3 retries.
+        .times(4)
         .replyWithError(error);
 
       try {
@@ -1359,6 +1363,8 @@ describe('AetherfyVectorsClient', () => {
         .get(
           '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
         )
+        // An ambiguous failure on a read: the first attempt and 3 retries.
+        .times(4)
         .replyWithError(error);
 
       try {
@@ -1380,6 +1386,8 @@ describe('AetherfyVectorsClient', () => {
         .get(
           '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
         )
+        // An ambiguous failure on a read: the first attempt and 3 retries.
+        .times(4)
         .replyWithError(error);
 
       try {
@@ -1401,6 +1409,8 @@ describe('AetherfyVectorsClient', () => {
         .get(
           '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
         )
+        // An ambiguous failure on a read: the first attempt and 3 retries.
+        .times(4)
         .replyWithError(error);
 
       try {

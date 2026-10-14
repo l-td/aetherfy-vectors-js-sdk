@@ -209,14 +209,25 @@ export class HttpClient {
       // failure down the unknown-error branch, which reports it without the one
       // field that says what actually went wrong.
       if (error && typeof error === 'object' && 'code' in error) {
-        const errorObj = error as { code: string; message?: string };
+        const errorObj = error as {
+          code: string;
+          message?: string;
+          syscall?: string;
+          cause?: { syscall?: string };
+        };
         const message = errorObj.message || `Network error: ${errorObj.code}`;
         const networkError = new Error(
           message.includes('Network error')
             ? message
             : `Network error: ${message}`
         );
-        Object.assign(networkError, { code: errorObj.code });
+        // `syscall` tells a connect timeout (the request never left) from a
+        // timeout waiting for the answer: see retry-policy.ts.
+        Object.assign(networkError, {
+          code: errorObj.code,
+          // axios keeps Node's error, and its syscall, as `cause`.
+          syscall: errorObj.syscall ?? errorObj.cause?.syscall,
+        });
         throw networkError;
       }
 

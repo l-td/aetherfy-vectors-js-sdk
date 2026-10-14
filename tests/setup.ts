@@ -15,6 +15,11 @@ beforeEach(() => {
   }
 });
 
+// The retry backoff waits 1 s, 2 s, 4 s; the suite does not. The backoff
+// itself is pinned by retry-http-errors.test.ts through retryWithBackoff.
+import { AetherfyVectorsClient } from '../src/client';
+AetherfyVectorsClient.retryBaseDelayMs = 1;
+
 // Global test setup
 beforeEach(() => {
   jest.clearAllMocks();

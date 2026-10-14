@@ -544,13 +544,27 @@ try {
 ```
 
 `collectionExists()` is false only when the workspace exists and the
-collection is not in it; an unknown workspace throws. A workspace or collection
-lookup the server cannot complete right now (503
-`WORKSPACE_LOOKUP_UNAVAILABLE`, `COLLECTION_LOOKUP_UNAVAILABLE`,
-`PLACEMENT_UNAVAILABLE`) is a `ServiceUnavailableError`, for which
-`isRetryableError()` is true. `createCollection`, `upsert` and `search` retry
-it themselves (3 retries, with backoff); every other call throws it at once,
-for you to retry.
+collection is not in it; an unknown workspace throws.
+
+### When a request is retried
+
+One rule, the same in the Python and JS SDKs (`src/retry-policy.ts`). Up to 3
+retries, waiting about 1 s, 2 s, then 4 s (each jittered to 50-100%), within
+a call's timeout.
+
+| Failure | Retried for |
+|---|---|
+| Refused before anything ran: 503 `WORKSPACE_LOOKUP_UNAVAILABLE`, `COLLECTION_LOOKUP_UNAVAILABLE`, `PLACEMENT_UNAVAILABLE`; a connection never made (DNS, refused, connect timeout); 429 with a Retry-After | every operation |
+| Ambiguous, the request may have run: a read timeout, a reset after sending, any other 5xx | only operations whose repeat gives the same result (below) |
+| Any other 4xx | never |
+
+| Operations | Class |
+|---|---|
+| `getCollections`, `getCollection`, `collectionExists`, `getSchema`, `analyzeSchema`, `search`, `retrieve`, `scroll`, `count`, `getUsageStats` | reads: repeatable |
+| `upsert`, `setPayload`, `overwritePayload`, `deletePayload`, `createFieldIndex`, `setSchema` | writes keyed by id: repeatable |
+| `createCollection`, `deleteCollection`, `delete` (points), `deleteSchema`, `deleteFieldIndex` | once: a repeat after a hidden success reports a false error, so an ambiguous failure is raised after one attempt |
+
+When the retries run out, the last error is raised (`ServiceUnavailableError`, `RequestTimeoutError` or `NetworkError`).
 
 Renaming a collection, and moving one to another workspace, are done from the
 dashboard or the CLI (`afy collections update`), not from the SDK. Code still
