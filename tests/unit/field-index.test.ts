@@ -56,10 +56,13 @@ describe('createFieldIndex', () => {
   it('PUTs field_name and field_schema to the index route', async () => {
     let seen: unknown;
     const scope = nock(HOST)
-      .put('/api/v1/collections/articles/index', body => {
-        seen = body;
-        return true;
-      })
+      .put(
+        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/articles/index',
+        body => {
+          seen = body;
+          return true;
+        }
+      )
       .reply(200, COMPLETED);
 
     await expect(
@@ -76,10 +79,13 @@ describe('createFieldIndex', () => {
   it('forwards the schema verbatim', async () => {
     let seen: Record<string, unknown> = {};
     const scope = nock(HOST)
-      .put('/api/v1/collections/articles/index', body => {
-        seen = body as Record<string, unknown>;
-        return true;
-      })
+      .put(
+        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/articles/index',
+        body => {
+          seen = body as Record<string, unknown>;
+          return true;
+        }
+      )
       .reply(200, COMPLETED);
 
     await newClient().createFieldIndex('articles', 'flag', 'bool');
@@ -90,10 +96,13 @@ describe('createFieldIndex', () => {
   it('forwards a parameterised schema object verbatim', async () => {
     let seen: Record<string, unknown> = {};
     const scope = nock(HOST)
-      .put('/api/v1/collections/articles/index', body => {
-        seen = body as Record<string, unknown>;
-        return true;
-      })
+      .put(
+        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/articles/index',
+        body => {
+          seen = body as Record<string, unknown>;
+          return true;
+        }
+      )
       .reply(200, COMPLETED);
 
     const schema = { type: 'text', tokenizer: 'word', lowercase: true };
@@ -132,7 +141,9 @@ describe('deleteFieldIndex', () => {
 
   it('DELETEs the field-scoped route', async () => {
     const scope = nock(HOST)
-      .delete('/api/v1/collections/articles/index/thread_id')
+      .delete(
+        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/articles/index/thread_id'
+      )
       .reply(200, { result: true });
 
     await expect(
@@ -145,7 +156,9 @@ describe('deleteFieldIndex', () => {
     // The field name is one path segment; a '/' inside it must not become a
     // separator, or the request lands on a path the allowlist rejects.
     const scope = nock(HOST)
-      .delete('/api/v1/collections/articles/index/metadata%2Ftag')
+      .delete(
+        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/articles/index/metadata%2Ftag'
+      )
       .reply(200, { result: true });
 
     await newClient().deleteFieldIndex('articles', 'metadata/tag');
@@ -156,7 +169,9 @@ describe('deleteFieldIndex', () => {
     // The only 404 here is the collection's: a field that was never indexed
     // is answered 200 by the server, and so resolves true above.
     const scope = nock(HOST)
-      .delete('/api/v1/collections/articles/index/thread_id')
+      .delete(
+        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/articles/index/thread_id'
+      )
       .reply(404, {
         error: {
           code: 'COLLECTION_NOT_FOUND',

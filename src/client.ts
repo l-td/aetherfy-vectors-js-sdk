@@ -49,6 +49,17 @@ import { validateVectors } from './schema';
 // without the same change here does not compile. See src/utils/options.ts.
 // CLIENT_CONFIG_KEYS is exported for MemoryClient, which refuses these keys
 // beside a bring-your-own client (not part of the package's exports).
+// Every collection lives in a workspace, so a client without one is refused
+// at construction rather than on its first request.
+const NO_WORKSPACE_MESSAGE =
+  'A workspace is required: every collection lives in one. Pass a workspace ' +
+  "name (workspace: 'my-workspace'), or run inside an Aetherfy agent and keep " +
+  "the default workspace: 'auto'.";
+const NO_WORKSPACE_MESSAGE_AUTO =
+  "workspace: 'auto' reads AETHERFY_WORKSPACE_ID, which is not set: it is set " +
+  'only inside an Aetherfy agent. Pass a workspace name ' +
+  "(workspace: 'my-workspace'), or run inside an Aetherfy agent.";
+
 export const CLIENT_CONFIG_KEYS = optionKeys<ClientConfig>({
   apiKey: true,
   endpoint: true,
@@ -159,13 +170,15 @@ export const INDEX_RESEND_PAUSE_MAX_MS = 10000;
  *   withPayload: true
  * });
  *
- * // Multi-agent workspace usage
+ * // Every collection lives in a workspace. Inside an Aetherfy agent the
+ * // default, workspace: 'auto', is the agent's workspace (by id, from
+ * // AETHERFY_WORKSPACE_ID); anywhere else, name one.
  * const workspaceClient = new AetherfyVectorsClient({
  *   apiKey: 'afy_live_your_api_key_here',
- *   workspace: 'auto'  // Auto-detects from AETHERFY_WORKSPACE env var
+ *   workspace: 'my-workspace'
  * });
  *
- * // All operations are automatically scoped to the workspace
+ * // All operations are scoped to the workspace
  * await workspaceClient.search('documents', queryVector);
  * await workspaceClient.upsert('metadata', points);
  * ```
@@ -196,14 +209,15 @@ export class AetherfyVectorsClient {
   /** The per-attempt request timeout this client was built with, in ms. */
   private readonly requestTimeoutMs: number;
   /**
-   * The active workspace, or `undefined` if workspace scoping is disabled.
-   * Set at construction time (either explicitly or via the
-   * AETHERFY_WORKSPACE env var when `workspace: 'auto'`). Read-only.
-   *
-   * Exposed so higher-level clients (e.g. MemoryClient) can surface the
-   * active workspace without reaching into internals.
+   * The workspace name, or `undefined` when the client addresses its
+   * workspace by id (`workspace: 'auto'`; see `workspaceId`). Read-only.
    */
   readonly workspace?: string;
+  /**
+   * The workspace id (`workspace: 'auto'`, from AETHERFY_WORKSPACE_ID), or
+   * `undefined` when the client was given a workspace name. Read-only.
+   */
+  readonly workspaceId?: string;
   private schemaCache: Map<
     string,
     { size: number; distance: string; etag?: string }
@@ -297,16 +311,25 @@ export class AetherfyVectorsClient {
       this.endpoint = AetherfyVectorsClient.DEFAULT_ENDPOINT;
     }
 
-    // Initialize workspace (auto-detect or explicit)
-    if (config.workspace === 'auto') {
-      // Auto-detect from environment variable (Node.js only)
-      /* c8 ignore next 3 */
-      this.workspace =
+    // The workspace: a name, or (for 'auto', the default) the agent's
+    // workspace id. Exactly one is set; there is no workspaceless client.
+    // undefined is "not given"; null and '' are refused below.
+    const workspace: unknown =
+      config.workspace === undefined ? 'auto' : config.workspace;
+    if (workspace === 'auto') {
+      /* c8 ignore next 4 */
+      const id =
         typeof process !== 'undefined'
-          ? process.env?.AETHERFY_WORKSPACE
+          ? process.env?.AETHERFY_WORKSPACE_ID
           : undefined;
-    } else if (config.workspace) {
-      this.workspace = config.workspace;
+      if (!id) {
+        throw new Error(NO_WORKSPACE_MESSAGE_AUTO);
+      }
+      this.workspaceId = id;
+    } else if (typeof workspace === 'string' && workspace) {
+      this.workspace = workspace;
+    } else {
+      throw new Error(NO_WORKSPACE_MESSAGE);
     }
 
     this.schemaCache = new Map();
@@ -440,17 +463,24 @@ export class AetherfyVectorsClient {
   }
 
   /**
-   * Local cache-key for a collection name, including workspace prefix when set.
-   * NOT used on the wire anymore — kept as a stable, unique key for
-   * schemaCache lookups (avoids collisions between same-name collections
-   * in different workspaces).
+   * The local cache-key prefix of this client's workspace: `name/`, or
+   * `id:<uuid>/` for 'auto'. Never sent on the wire.
+   * @private
+   */
+  private scopePrefix(): string {
+    return this.workspaceId !== undefined
+      ? `id:${this.workspaceId}/`
+      : `${this.workspace}/`;
+  }
+
+  /**
+   * Local cache-key for a collection name, never sent on the wire. The
+   * prefix keeps same-name collections in different workspaces, and the
+   * two ways of addressing a workspace, from ever sharing a cache entry.
    * @private
    */
   private scopeCollection(collection: string): string {
-    if (this.workspace) {
-      return `${this.workspace}/${collection}`;
-    }
-    return collection;
+    return `${this.scopePrefix()}${collection}`;
   }
 
   /**
@@ -458,19 +488,26 @@ export class AetherfyVectorsClient {
    * @private
    */
   private unscopeCollection(scopedName: string): string {
-    if (this.workspace && scopedName.startsWith(`${this.workspace}/`)) {
-      return scopedName.substring(this.workspace.length + 1);
-    }
-    return scopedName;
+    const prefix = this.scopePrefix();
+    return scopedName.startsWith(prefix)
+      ? scopedName.substring(prefix.length)
+      : scopedName;
   }
 
   /**
-   * Build the canonical URL path for a collection. Workspaced operations
-   * use the nested URL form `/workspaces/{ws}/collections/{name}` instead
-   * of the old slash-in-name encoding. Workspaceless calls continue to
-   * use the flat form.
+   * `/workspace-ids/{id}` for 'auto', else `/workspaces/{name}`.
+   * @private
+   */
+  private workspacePath(): string {
+    return this.workspaceId !== undefined
+      ? `/workspace-ids/${encodeURIComponent(this.workspaceId)}`
+      : `/workspaces/${encodeURIComponent(this.workspace ?? '')}`;
+  }
+
+  /**
+   * The URL path of a collection in this client's workspace.
    *
-   * @param collectionName Bare (unscoped) collection name from the caller.
+   * @param collectionName Bare collection name from the caller.
    * @param suffix         Optional path suffix appended after the
    *                       collection segment (e.g. `/points/query`).
    *                       Must already begin with `/` when non-empty.
@@ -481,23 +518,15 @@ export class AetherfyVectorsClient {
     suffix: string = ''
   ): string {
     const enc = encodeURIComponent(collectionName);
-    if (this.workspace) {
-      return `/workspaces/${encodeURIComponent(this.workspace)}/collections/${enc}${suffix}`;
-    }
-    return `/collections/${enc}${suffix}`;
+    return `${this.workspacePath()}/collections/${enc}${suffix}`;
   }
 
   /**
-   * Build the canonical vectordb URL path for the collections list/create
-   * endpoint. Workspaced requests use `/workspaces/{ws}/collections`,
-   * workspaceless use `/collections`.
+   * The list/create endpoint of this client's workspace.
    * @private
    */
   private buildCollectionsListPath(): string {
-    if (this.workspace) {
-      return `/workspaces/${encodeURIComponent(this.workspace)}/collections`;
-    }
-    return '/collections';
+    return `${this.workspacePath()}/collections`;
   }
 
   // Collection Management
@@ -539,8 +568,8 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      // Post-A/B: workspace lives in the URL, body name is bare. vectordb
-      // rejects any "/" in the body name.
+      // The workspace is in the URL; the body name is bare (vectordb
+      // rejects any "/" in it).
       const body: Record<string, unknown> = {
         name: collectionName,
         vectors: config,
@@ -630,11 +659,8 @@ export class AetherfyVectorsClient {
         this.apiUrl(this.buildCollectionsListPath())
       );
 
-      // Post-A/B: vectordb's GET /workspaces/{ws}/collections already
-      // returns only THIS workspace's collections, with bare names in
-      // PG (workspace_id is the join key, name has no slash). No
-      // client-side filtering or unscoping needed — names come back
-      // bare in both shapes.
+      // The workspace's list holds only its own collections, with bare
+      // names: nothing to filter or unscope.
       return response.data.collections || [];
     } catch (error: unknown) {
       throw this.handleError(error);
@@ -702,9 +728,7 @@ export class AetherfyVectorsClient {
         this.apiUrl(this.buildCollectionPath(collectionName))
       );
 
-      // vectordb returns the bare collection name (PG stores name without
-      // workspace prefix). The pre-A/B `unscopeCollection` shim is no longer
-      // needed but kept above as a stable schemaCache key — no-op here.
+      // vectordb returns the bare collection name: nothing to unscope.
       return response.data.result;
     } catch (error: unknown) {
       this.evictCachesIfNotFound(scopedName, error);
@@ -938,7 +962,7 @@ export class AetherfyVectorsClient {
 
         // Handle 412 Precondition Failed (schema changed)
         if (httpError.status === 412) {
-          this.clearSchemaCache(scopedName);
+          this.schemaCache.delete(scopedName);
           this.payloadSchemaCache.delete(scopedName);
 
           // Fetch updated schemas and re-validate
@@ -1844,8 +1868,10 @@ export class AetherfyVectorsClient {
    */
   clearSchemaCache(collectionName?: string): void {
     if (collectionName) {
-      this.schemaCache.delete(collectionName);
-      this.payloadSchemaCache.delete(collectionName);
+      // The caches are keyed by the workspace-scoped name.
+      const scopedName = this.scopeCollection(collectionName);
+      this.schemaCache.delete(scopedName);
+      this.payloadSchemaCache.delete(scopedName);
     } else {
       this.schemaCache.clear();
       this.payloadSchemaCache.clear();
@@ -1864,7 +1890,7 @@ export class AetherfyVectorsClient {
    * before rethrowing is enough: the next call goes back to the network
    * and gets the truth.
    *
-   * Don't call this on /schema/<name> 404s — there, 404 also covers the
+   * Don't call this on schema-read 404s — there, 404 also covers the
    * legitimate "no payload schema set" state on an existing collection.
    */
   private evictCachesIfNotFound(scopedName: string, error: unknown): void {
@@ -1891,7 +1917,7 @@ export class AetherfyVectorsClient {
    * shapes are checked here so SDK code can read the code without
    * caring which one the backend produced for a given path.
    *
-   * Used to disambiguate /schema/<name> 404s where the same status
+   * Used to disambiguate schema-read 404s where the same status
    * covers two cases (collection gone vs. no schema set).
    */
   private errorCodeOf(error: unknown): string | undefined {
@@ -2138,7 +2164,7 @@ export class AetherfyVectorsClient {
 
     try {
       const response = await this.httpClient.get(
-        this.apiUrl(`/schema/${encodeURIComponent(scopedName)}`)
+        this.apiUrl(this.buildCollectionPath(collectionName, '/schema'))
       );
 
       const data = response.data as {
@@ -2226,11 +2252,11 @@ export class AetherfyVectorsClient {
     let response;
     try {
       response = await this.httpClient.put(
-        this.apiUrl(`/schema/${encodeURIComponent(scopedName)}`),
+        this.apiUrl(this.buildCollectionPath(collectionName, '/schema')),
         body
       );
     } catch (error: unknown) {
-      // PUT /schema/<name> on a non-existent collection 404s
+      // A schema PUT on a non-existent collection 404s
       // unambiguously (the schema endpoint requires the collection),
       // so a 404 here means the collection is gone — self-heal.
       this.evictCachesIfNotFound(scopedName, error);
@@ -2269,7 +2295,7 @@ export class AetherfyVectorsClient {
 
     try {
       await this.httpClient.delete(
-        this.apiUrl(`/schema/${encodeURIComponent(scopedName)}`)
+        this.apiUrl(this.buildCollectionPath(collectionName, '/schema'))
       );
     } catch (error: unknown) {
       if (
@@ -2327,7 +2353,9 @@ export class AetherfyVectorsClient {
     let response;
     try {
       response = await this.httpClient.post(
-        this.apiUrl(`/schema/${encodeURIComponent(scopedName)}/analyze`),
+        this.apiUrl(
+          this.buildCollectionPath(collectionName, '/schema/analyze')
+        ),
         { sample_size: sampleSize }
       );
     } catch (error: unknown) {

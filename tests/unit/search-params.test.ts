@@ -24,7 +24,8 @@ import { AetherfyVectorsClient } from '../../src/client';
 import { SearchOptions } from '../../src/models';
 
 const BASE = 'https://vectors.aetherfy.com';
-const PATH = '/api/v1/collections/test-collection/points/query';
+const PATH =
+  '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/query';
 const QUERY_VECTOR = [0.1, 0.2, 0.3];
 
 /**

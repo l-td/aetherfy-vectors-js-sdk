@@ -147,7 +147,7 @@ describe('Filter clause vocabulary — wire contract', () => {
   describe('call sites', () => {
     it('search sends must_not on the wire', async () => {
       const raw = await captureBody(
-        '/api/v1/collections/test-collection/points/query',
+        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/query',
         c =>
           c.search('test-collection', QUERY_VECTOR, {
             queryFilter: { must: MUST, mustNot: MUST_NOT, should: SHOULD },
@@ -162,7 +162,7 @@ describe('Filter clause vocabulary — wire contract', () => {
 
     it('scroll sends must_not on the wire', async () => {
       const raw = await captureBody(
-        '/api/v1/collections/test-collection/points/scroll',
+        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/scroll',
         c =>
           c.scroll('test-collection', {
             scrollFilter: { mustNot: MUST_NOT },
@@ -174,7 +174,7 @@ describe('Filter clause vocabulary — wire contract', () => {
 
     it('count sends must_not on the wire', async () => {
       const raw = await captureBody(
-        '/api/v1/collections/test-collection/points/count',
+        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/count',
         c => c.count('test-collection', { countFilter: { mustNot: MUST_NOT } }),
         { result: { count: 0 } }
       );
@@ -183,7 +183,7 @@ describe('Filter clause vocabulary — wire contract', () => {
 
     it('delete-by-filter sends must_not on the wire', async () => {
       const raw = await captureBody(
-        '/api/v1/collections/test-collection/points/delete',
+        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/delete',
         c => c.delete('test-collection', { mustNot: MUST_NOT }),
         { result: true }
       );
@@ -192,7 +192,7 @@ describe('Filter clause vocabulary — wire contract', () => {
 
     it('a filterless search body is unchanged', async () => {
       const raw = await captureBody(
-        '/api/v1/collections/test-collection/points/query',
+        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/query',
         c => c.search('test-collection', QUERY_VECTOR)
       );
       expect(raw).toBe(
@@ -209,7 +209,9 @@ describe('Filter clause vocabulary — wire contract', () => {
     it('a typo reaching search throws instead of shipping a dropped clause', async () => {
       const client = makeClient();
       const scope = nock(BASE)
-        .post('/api/v1/collections/test-collection/points/query')
+        .post(
+          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/query'
+        )
         .reply(200, { result: { points: [] } });
 
       await expect(
