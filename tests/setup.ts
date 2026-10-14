@@ -9,7 +9,10 @@
 // one. Tests of that refusal unset the variable themselves.
 export const TEST_WORKSPACE_ID = '11111111-2222-4333-8444-555555555555';
 beforeEach(() => {
-  process.env.AETHERFY_WORKSPACE_ID = TEST_WORKSPACE_ID;
+  // The browser project runs without a `process` global.
+  if (typeof process !== 'undefined') {
+    process.env.AETHERFY_WORKSPACE_ID = TEST_WORKSPACE_ID;
+  }
 });
 
 // Global test setup
