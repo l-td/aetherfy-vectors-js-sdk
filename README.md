@@ -1073,7 +1073,9 @@ try {
       `Quota '${error.quotaType}' exceeded: ${error.current}/${error.limit}`
     );
   } else if (isAetherfyVectorsError(error) && isRetryableError(error)) {
-    // Retry with backoff…
+    // Already retried under the rule ("When a request is retried"). Calling
+    // again is safe only for a repeatable operation: an ambiguous failure of
+    // a delete or a create may have succeeded.
   }
 }
 ```

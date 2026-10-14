@@ -3,6 +3,7 @@
  */
 
 import nock from 'nock';
+import { TEST_WORKSPACE_ID } from '../setup';
 
 /** The two internals these tests reach: the cache key and the cache. */
 type CacheInternals = {
@@ -110,7 +111,7 @@ describe('AetherfyVectorsClient', () => {
     it('should create collection successfully', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => body.name === 'test-collection'
         )
         .reply(201, { success: true });
@@ -130,7 +131,7 @@ describe('AetherfyVectorsClient', () => {
     it('should create collection with description', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => {
             return (
               body.name === 'test-collection' &&
@@ -157,7 +158,7 @@ describe('AetherfyVectorsClient', () => {
     it('should create collection without description sends null', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => {
             return body.name === 'test-collection' && body.description === null;
           }
@@ -179,7 +180,7 @@ describe('AetherfyVectorsClient', () => {
       // Collection.regions reflects whatever the server echoes back.
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => {
             return body.name === 'no-regions' && !('regions' in body);
           }
@@ -207,7 +208,7 @@ describe('AetherfyVectorsClient', () => {
       // the pinned list, which the returned Collection surfaces.
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => {
             return (
               body.name === 'subset-regions' &&
@@ -234,7 +235,7 @@ describe('AetherfyVectorsClient', () => {
       // "all regions". Response body may omit regions.
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => {
             return (
               body.name === 'empty-regions' &&
@@ -280,9 +281,7 @@ describe('AetherfyVectorsClient', () => {
       ];
 
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         .reply(200, { collections: mockCollections });
 
       const collections = await client.getCollections();
@@ -293,7 +292,7 @@ describe('AetherfyVectorsClient', () => {
     it('should check if collection exists', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, { name: 'test-collection' });
 
@@ -304,7 +303,7 @@ describe('AetherfyVectorsClient', () => {
     it('should return false for non-existent collection', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/non-existent'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/non-existent`
         )
         .reply(404, {
           error: {
@@ -320,7 +319,7 @@ describe('AetherfyVectorsClient', () => {
     it('should delete collection', async () => {
       nock('https://vectors.aetherfy.com')
         .delete(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(204);
 
@@ -335,9 +334,7 @@ describe('AetherfyVectorsClient', () => {
       // a 2xx create can briefly return 4xx. Cache prepopulation
       // routes the next collectionExists/upsert through local state.
       nock('https://vectors.aetherfy.com')
-        .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .post(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         .reply(201, { success: true });
 
       await client.createCollection('fresh-coll', {
@@ -355,9 +352,7 @@ describe('AetherfyVectorsClient', () => {
     it('deleteCollection clears the schemaCache (subsequent exists hits the network)', async () => {
       // Seed the cache via create...
       nock('https://vectors.aetherfy.com')
-        .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .post(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         .reply(201, { success: true });
       await client.createCollection('doomed', {
         size: 128,
@@ -368,18 +363,14 @@ describe('AetherfyVectorsClient', () => {
       // actually hits the wire (otherwise a recreate-with-different-shape
       // would silently use stale size/distance/etag).
       nock('https://vectors.aetherfy.com')
-        .delete(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/doomed'
-        )
+        .delete(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/doomed`)
         .reply(204);
       await client.deleteCollection('doomed');
 
       // Now collectionExists *must* make the GET. We mock it to return
       // 404 so the call is observable AND the result is correct.
       const scope = nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/doomed'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/doomed`)
         .reply(404, {
           error: {
             code: 'COLLECTION_NOT_FOUND',
@@ -425,7 +416,7 @@ describe('AetherfyVectorsClient', () => {
       // so subsequent calls go back to the network.
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/ghost/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/ghost/points`
         )
         .reply(404, {
           error: {
@@ -457,9 +448,7 @@ describe('AetherfyVectorsClient', () => {
       });
 
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/ghost'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/ghost`)
         .reply(404, {
           error: {
             code: 'COLLECTION_NOT_FOUND',
@@ -476,7 +465,7 @@ describe('AetherfyVectorsClient', () => {
     it('non-404 errors do NOT evict caches (transient failures preserve cache)', async () => {
       // 503 is transient — the collection is still upstream. Wiping the
       // cache here would force a needless round trip on the next call.
-      // The SDK retries 503 (executeWithRetry, maxRetries=3 + exponential
+      // The SDK retries 503 (the retry rule, maxRetries=3 + exponential
       // backoff) so the mock must cover initial + 3 retry attempts; fake
       // timers fast-forward the backoff waits to keep the test under the
       // jest default timeout. Same pattern as `should handle createCollection
@@ -493,7 +482,7 @@ describe('AetherfyVectorsClient', () => {
 
         nock('https://vectors.aetherfy.com')
           .put(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/intact/points'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/intact/points`
           )
           .times(4)
           .reply(503, { message: 'Service Unavailable' });
@@ -523,7 +512,7 @@ describe('AetherfyVectorsClient', () => {
 
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, { result: mockCollection });
 
@@ -585,7 +574,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as lowercase string "cosine"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => {
             return body.name === 'test' && body.vectors.distance === 'Cosine';
           }
@@ -605,7 +594,7 @@ describe('AetherfyVectorsClient', () => {
       // VALIDATION_ERROR, field "vectors").
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => body.name === 'test' && body.vectors.distance === 'Euclid'
         )
         .reply(201, { success: true });
@@ -621,7 +610,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as lowercase string "euclidean"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => {
             return body.name === 'test' && body.vectors.distance === 'Euclid';
           }
@@ -639,7 +628,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as lowercase string "euclid" (alias)', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => {
             return body.name === 'test' && body.vectors.distance === 'Euclid';
           }
@@ -657,7 +646,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as lowercase string "dot"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => {
             return body.name === 'test' && body.vectors.distance === 'Dot';
           }
@@ -675,7 +664,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as lowercase string "manhattan"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => {
             return (
               body.name === 'test' && body.vectors.distance === 'Manhattan'
@@ -695,7 +684,7 @@ describe('AetherfyVectorsClient', () => {
     it('should accept distance metric as exact enum string "Cosine"', async () => {
       const scope = nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`,
           body => {
             return body.name === 'test' && body.vectors.distance === 'Cosine';
           }
@@ -758,7 +747,7 @@ describe('AetherfyVectorsClient', () => {
     it('should upsert points successfully', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -776,13 +765,13 @@ describe('AetherfyVectorsClient', () => {
 
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(404, { error: { code: 'SCHEMA_NOT_DEFINED', message: 'x' } });
 
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(200, { success: true });
 
@@ -801,7 +790,7 @@ describe('AetherfyVectorsClient', () => {
     it('should validate point data', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -854,7 +843,7 @@ describe('AetherfyVectorsClient', () => {
 
       nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/query'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/query`
         )
         .reply(200, { result: { points: mockResults } });
 
@@ -905,7 +894,7 @@ describe('AetherfyVectorsClient', () => {
     it('should validate point has vector array', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -936,7 +925,7 @@ describe('AetherfyVectorsClient', () => {
     it('should delete points by IDs', async () => {
       nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/delete'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/delete`
         )
         .reply(200, { success: true });
 
@@ -948,7 +937,7 @@ describe('AetherfyVectorsClient', () => {
     it('should delete points by filter', async () => {
       nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/delete'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/delete`
         )
         .reply(200, { success: true });
 
@@ -979,7 +968,7 @@ describe('AetherfyVectorsClient', () => {
       // streaming upsert path on the backend.
       nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/retrieve'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/retrieve`
         )
         .reply(200, { result: mockPoints });
 
@@ -995,7 +984,7 @@ describe('AetherfyVectorsClient', () => {
       // a typo'd plural silently dropped vectors from the response.
       nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/retrieve',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/retrieve`,
           body => {
             return (
               Array.isArray(body.ids) &&
@@ -1022,7 +1011,7 @@ describe('AetherfyVectorsClient', () => {
     it('should count points in collection', async () => {
       nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/count'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/count`
         )
         .reply(200, { result: { count: 42 } });
 
@@ -1034,7 +1023,7 @@ describe('AetherfyVectorsClient', () => {
     it('should count points with filter and exact option', async () => {
       nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/count'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/count`
         )
         .reply(200, { result: { count: 10 } });
 
@@ -1092,9 +1081,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should test connection successfully', async () => {
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         .reply(200, { collections: [] });
 
       const connected = await client.testConnection();
@@ -1103,9 +1090,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should return false on connection failure', async () => {
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         .replyWithError(new Error('Network Error'));
 
       const connected = await client.testConnection();
@@ -1129,9 +1114,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle HTTP errors with proper status codes', async () => {
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         .reply(
           401,
           {
@@ -1149,7 +1132,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle errors in deleteCollection', async () => {
       nock('https://vectors.aetherfy.com')
         .delete(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(500, {
           message: 'Internal server error',
@@ -1163,7 +1146,7 @@ describe('AetherfyVectorsClient', () => {
     it('should throw CollectionInUseError when deleting a collection in use', async () => {
       nock('https://vectors.aetherfy.com')
         .delete(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(409, {
           error: {
@@ -1195,7 +1178,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle non-404 errors in collectionExists', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(500, {
           message: 'Internal server error',
@@ -1209,7 +1192,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle non-retryable HTTP errors in upsert', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -1227,7 +1210,7 @@ describe('AetherfyVectorsClient', () => {
 
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(400, {
           message: 'Bad request',
@@ -1248,7 +1231,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle non-retryable HTTP errors in search', async () => {
       nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/query'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/query`
         )
         .reply(404, {
           message: 'Collection not found',
@@ -1263,7 +1246,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle errors in delete operation', async () => {
       nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/delete'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/delete`
         )
         .reply(500, {
           message: 'Server error',
@@ -1276,7 +1259,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle errors in retrieve operation', async () => {
       nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/retrieve'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/retrieve`
         )
         .reply(503, {
           message: 'Service unavailable',
@@ -1289,7 +1272,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle errors in count operation', async () => {
       nock('https://vectors.aetherfy.com')
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points/count'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/count`
         )
         .reply(403, {
           message: 'Forbidden',
@@ -1302,7 +1285,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle errors in getCollection operation', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/non-existent'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/non-existent`
         )
         .reply(404, {
           message: 'Collection not found',
@@ -1314,9 +1297,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should convert generic network error to NetworkError', async () => {
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         // An ambiguous failure on a read: the first attempt and 3 retries.
         .times(4)
         .replyWithError(new Error('Network Error'));
@@ -1337,9 +1318,7 @@ describe('AetherfyVectorsClient', () => {
       Object.assign(error, { code: 'ECONNABORTED' });
 
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         // An ambiguous failure on a read: the first attempt and 3 retries.
         .times(4)
         .replyWithError(error);
@@ -1360,9 +1339,7 @@ describe('AetherfyVectorsClient', () => {
       Object.assign(error, { code: 'ECONNRESET' });
 
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         // An ambiguous failure on a read: the first attempt and 3 retries.
         .times(4)
         .replyWithError(error);
@@ -1383,9 +1360,7 @@ describe('AetherfyVectorsClient', () => {
       Object.assign(error, { code: 'ETIMEDOUT' });
 
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         // An ambiguous failure on a read: the first attempt and 3 retries.
         .times(4)
         .replyWithError(error);
@@ -1406,9 +1381,7 @@ describe('AetherfyVectorsClient', () => {
       Object.assign(error, { code: 'ECONNABORTED' });
 
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         // An ambiguous failure on a read: the first attempt and 3 retries.
         .times(4)
         .replyWithError(error);
@@ -1448,9 +1421,7 @@ describe('AetherfyVectorsClient', () => {
 
       try {
         nock('https://vectors.aetherfy.com')
-          .post(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-          )
+          .post(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
           .times(4)
           .replyWithError(new Error('Connection failed'));
 
@@ -1470,7 +1441,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle invalid collection schema from server', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/invalid-schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/invalid-schema`
         )
         .reply(200, {
           result: {
@@ -1493,7 +1464,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle points without vector array', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -1524,7 +1495,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle points with null vector', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -1556,7 +1527,7 @@ describe('AetherfyVectorsClient', () => {
     it('should handle points with non-array vector', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -1588,7 +1559,7 @@ describe('AetherfyVectorsClient', () => {
     it('should pass through AetherfyVectorsError unchanged', async () => {
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(500, {
           message: 'Server error',
@@ -1605,9 +1576,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle AetherfyVectorsError passthrough', async () => {
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         .reply(500, {
           message: 'Server error',
         });
@@ -1619,9 +1588,7 @@ describe('AetherfyVectorsClient', () => {
 
     it('should handle generic network errors', async () => {
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         .replyWithError(new Error('Connection failed'));
 
       await expect(client.getCollections()).rejects.toThrow(NetworkError);
@@ -1631,9 +1598,7 @@ describe('AetherfyVectorsClient', () => {
       const error = new Error('Connection ECONNABORTED');
 
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         .replyWithError(error);
 
       await expect(client.getCollections()).rejects.toThrow(NetworkError);
@@ -1643,9 +1608,7 @@ describe('AetherfyVectorsClient', () => {
       const error = new Error('Request timeout');
 
       nock('https://vectors.aetherfy.com')
-        .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections'
-        )
+        .get(`/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections`)
         .replyWithError(error);
 
       await expect(client.getCollections()).rejects.toThrow(NetworkError);
@@ -1656,7 +1619,7 @@ describe('AetherfyVectorsClient', () => {
       // so the upsert under fake timers only exercises the PUT retry path.
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -1673,14 +1636,14 @@ describe('AetherfyVectorsClient', () => {
         });
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(404, {
           error: { code: 'SCHEMA_NOT_DEFINED', message: 'Schema not found' },
         });
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(200, { status: 'ok' });
 
@@ -1693,7 +1656,7 @@ describe('AetherfyVectorsClient', () => {
       try {
         nock('https://vectors.aetherfy.com')
           .put(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
           )
           .times(4)
           .replyWithError(new Error('Database connection failed'));
@@ -1725,7 +1688,7 @@ describe('AetherfyVectorsClient', () => {
       it('should fetch schema successfully', async () => {
         nock('https://vectors.aetherfy.com')
           .get(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(200, {
             schema: {
@@ -1750,7 +1713,7 @@ describe('AetherfyVectorsClient', () => {
       it('should return null when schema not found', async () => {
         nock('https://vectors.aetherfy.com')
           .get(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(404, {
             error: { code: 'SCHEMA_NOT_DEFINED', message: 'Schema not found' },
@@ -1773,12 +1736,12 @@ describe('AetherfyVectorsClient', () => {
         // Two calls require two nock intercepts — always fetches from server
         nock('https://vectors.aetherfy.com')
           .get(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(200, schemaReply);
         nock('https://vectors.aetherfy.com')
           .get(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(200, schemaReply);
 
@@ -1794,7 +1757,7 @@ describe('AetherfyVectorsClient', () => {
       it('should set schema successfully', async () => {
         nock('https://vectors.aetherfy.com')
           .put(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema',
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`,
             {
               schema: {
                 fields: {
@@ -1822,7 +1785,7 @@ describe('AetherfyVectorsClient', () => {
       it('should default to off enforcement mode', async () => {
         const scope = nock('https://vectors.aetherfy.com')
           .put(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema',
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`,
             body => {
               return body.enforcement_mode === 'off';
             }
@@ -1841,7 +1804,7 @@ describe('AetherfyVectorsClient', () => {
       it('should delete schema successfully', async () => {
         nock('https://vectors.aetherfy.com')
           .delete(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(200, { success: true });
 
@@ -1852,7 +1815,7 @@ describe('AetherfyVectorsClient', () => {
       it('should throw SchemaNotFoundError when schema does not exist', async () => {
         nock('https://vectors.aetherfy.com')
           .delete(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(404, {
             error: { code: 'SCHEMA_NOT_DEFINED', message: 'Schema not found' },
@@ -1866,7 +1829,7 @@ describe('AetherfyVectorsClient', () => {
       it('should propagate non-404 errors from the server', async () => {
         nock('https://vectors.aetherfy.com')
           .delete(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(500, { error: { message: 'Internal server error' } });
 
@@ -1879,7 +1842,7 @@ describe('AetherfyVectorsClient', () => {
         // First set a schema (which caches it)
         nock('https://vectors.aetherfy.com')
           .put(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(200, { etag: 'abc' });
 
@@ -1890,7 +1853,7 @@ describe('AetherfyVectorsClient', () => {
         // Delete it
         nock('https://vectors.aetherfy.com')
           .delete(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(200, { success: true });
 
@@ -1899,7 +1862,7 @@ describe('AetherfyVectorsClient', () => {
         // Try to get it - should fetch from server (cache cleared)
         nock('https://vectors.aetherfy.com')
           .get(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(404, { error: { code: 'SCHEMA_NOT_DEFINED', message: 'x' } });
 
@@ -1912,7 +1875,7 @@ describe('AetherfyVectorsClient', () => {
       it('should analyze schema successfully', async () => {
         nock('https://vectors.aetherfy.com')
           .post(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema/analyze',
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema/analyze`,
             {
               sample_size: 1000,
             }
@@ -1946,7 +1909,7 @@ describe('AetherfyVectorsClient', () => {
       it('should use default sample size', async () => {
         const scope = nock('https://vectors.aetherfy.com')
           .post(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema/analyze',
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema/analyze`,
             body => {
               return body.sample_size === 1000;
             }
@@ -1993,7 +1956,7 @@ describe('AetherfyVectorsClient', () => {
 
         nock('https://vectors.aetherfy.com')
           .post(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema/analyze'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema/analyze`
           )
           .reply(404, {
             error: {
@@ -2036,7 +1999,7 @@ describe('AetherfyVectorsClient', () => {
 
         nock('https://vectors.aetherfy.com')
           .put(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(404, {
             error: {
@@ -2079,7 +2042,7 @@ describe('AetherfyVectorsClient', () => {
 
         nock('https://vectors.aetherfy.com')
           .get(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(404, {
             error: { code: 'COLLECTION_NOT_FOUND', message: 'gone' },
@@ -2112,7 +2075,7 @@ describe('AetherfyVectorsClient', () => {
 
         nock('https://vectors.aetherfy.com')
           .get(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(404, {
             error: { code: 'SCHEMA_NOT_DEFINED', message: 'no schema set' },
@@ -2145,7 +2108,7 @@ describe('AetherfyVectorsClient', () => {
 
         nock('https://vectors.aetherfy.com')
           .delete(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(404, {
             error: { code: 'COLLECTION_NOT_FOUND', message: 'gone' },
@@ -2178,7 +2141,7 @@ describe('AetherfyVectorsClient', () => {
 
         nock('https://vectors.aetherfy.com')
           .delete(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(404, {
             error: { code: 'SCHEMA_NOT_DEFINED', message: 'no schema set' },
@@ -2206,7 +2169,7 @@ describe('AetherfyVectorsClient', () => {
         // forcing nock to error the GET with a non-HTTP failure.
         nock('https://vectors.aetherfy.com')
           .get(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
           )
           .replyWithError('socket hang up');
 
@@ -2223,7 +2186,7 @@ describe('AetherfyVectorsClient', () => {
         // First upsert — populates schemaCache (vector) and payloadSchemaCache (payload)
         nock('https://vectors.aetherfy.com')
           .get(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
           )
           .reply(200, {
             result: {
@@ -2233,7 +2196,7 @@ describe('AetherfyVectorsClient', () => {
           });
         nock('https://vectors.aetherfy.com')
           .get(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(200, {
             schema: { fields: { old: { type: 'string', required: false } } },
@@ -2243,7 +2206,7 @@ describe('AetherfyVectorsClient', () => {
           });
         nock('https://vectors.aetherfy.com')
           .put(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
           )
           .reply(200, { status: 'ok' });
 
@@ -2254,7 +2217,7 @@ describe('AetherfyVectorsClient', () => {
         // refreshSchema clears payloadSchemaCache and re-populates it with the new schema
         nock('https://vectors.aetherfy.com')
           .get(
-            '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+            `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
           )
           .reply(200, {
             schema: {

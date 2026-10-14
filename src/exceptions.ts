@@ -774,7 +774,11 @@ export function isAetherfyVectorsError(
 }
 
 /**
- * Type guard to check if an error is retryable
+ * True when the error's KIND may be retried: a 5xx, a timeout, a network
+ * failure, or a 429 with a Retry-After. The client has already retried it
+ * under the retry rule (retry-policy.ts) before throwing. Retrying again is
+ * safe only for an operation the rule classes repeatable: an ambiguous
+ * failure of a delete or a create may have succeeded.
  */
 export function isRetryableError(error: unknown): boolean {
   if (

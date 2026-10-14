@@ -8,6 +8,7 @@
  */
 
 import nock from 'nock';
+import { TEST_WORKSPACE_ID } from '../setup';
 import { AetherfyVectorsClient } from '../../src/client';
 import { PointNotFoundError } from '../../src/exceptions';
 
@@ -39,7 +40,7 @@ describe('AetherfyVectorsClient payload methods', () => {
 
       nock(ENDPOINT)
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/col/points/payload',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload`,
           expectedBody
         )
         .reply(200, { result: { status: 'ok' } });
@@ -71,7 +72,7 @@ describe('AetherfyVectorsClient payload methods', () => {
 
       nock(ENDPOINT)
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/col/points/payload'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload`
         )
         .reply(429, {
           error: { code: 'RATE_LIMIT_EXCEEDED', message: 'slow down' },
@@ -87,7 +88,7 @@ describe('AetherfyVectorsClient payload methods', () => {
 
       nock(ENDPOINT)
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/col/points/payload',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload`,
           {
             payload: { only: 'this' },
             points: [P1],
@@ -104,7 +105,7 @@ describe('AetherfyVectorsClient payload methods', () => {
 
       nock(ENDPOINT)
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/col/points/payload'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload`
         )
         .reply(503, {
           error: { code: 'SERVICE_UNAVAILABLE', message: 'try later' },
@@ -122,7 +123,7 @@ describe('AetherfyVectorsClient payload methods', () => {
 
       nock(ENDPOINT)
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/col/points/payload/delete',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload/delete`,
           {
             keys: ['old_tag', 'old_meta'],
             points: [P1, P2],
@@ -150,7 +151,7 @@ describe('AetherfyVectorsClient payload methods', () => {
 
       nock(ENDPOINT)
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/col/points/payload/delete'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload/delete`
         )
         .reply(500, { error: { code: 'INTERNAL_ERROR', message: 'oops' } });
 
@@ -163,7 +164,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
       nock(ENDPOINT)
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/col/points/payload',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload`,
           {
             payload: { a: 1 },
             points: [P1],
@@ -179,7 +180,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
       nock(ENDPOINT)
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/col/points/payload',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload`,
           body => !('key' in body)
         )
         .reply(200, { result: { status: 'ok' } });
@@ -193,7 +194,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
       nock(ENDPOINT)
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/col/points/payload',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload`,
           {
             payload: { tag: 'x' },
             points: [P1],
@@ -222,7 +223,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
       nock(ENDPOINT)
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/col/points/payload'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload`
         )
         .reply(404, { message: 'No point with id missing found' });
 
@@ -237,7 +238,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
       nock(ENDPOINT)
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/col/points/payload/delete',
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload/delete`,
           {
             keys: ['metadata.k1', 'metadata.k2'],
             points: [P1],
@@ -265,7 +266,7 @@ describe('AetherfyVectorsClient payload methods', () => {
       const client = makeClient();
       nock(ENDPOINT)
         .post(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/col/points/payload/delete'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload/delete`
         )
         .reply(404, { message: 'No point with id missing found' });
 

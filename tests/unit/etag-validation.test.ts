@@ -5,6 +5,7 @@
 /// <reference path="../global.d.ts" />
 
 import nock from 'nock';
+import { TEST_WORKSPACE_ID } from '../setup';
 import { AetherfyVectorsClient } from '../../src/client';
 import { ValidationError, AetherfyVectorsError } from '../../src/exceptions';
 
@@ -23,7 +24,7 @@ describe('ETag Validation', () => {
     // Mock GET collection response
     const getScope = nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
       )
       .reply(200, {
         result: {
@@ -42,14 +43,14 @@ describe('ETag Validation', () => {
     // Mock GET schema response (404 = no payload schema defined)
     const schemaScope = nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
       )
       .reply(404, {});
 
     // Mock PUT upsert response
     const putScope = nock('http://localhost:3000')
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
       )
       .reply(200, { success: true });
 
@@ -67,7 +68,7 @@ describe('ETag Validation', () => {
     // Mock GET collection response (only once — second upsert uses cache)
     const getScope = nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
       )
       .reply(200, {
         result: {
@@ -86,14 +87,14 @@ describe('ETag Validation', () => {
     // Mock GET payload schema response (only once — second upsert uses cache)
     const schemaScope = nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
       )
       .reply(404, {});
 
     // Mock PUT upsert responses (two times)
     const putScope = nock('http://localhost:3000')
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
       )
       .times(2)
       .reply(200, { success: true });
@@ -115,7 +116,7 @@ describe('ETag Validation', () => {
     // Mock GET collection response
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
       )
       .reply(200, {
         result: {
@@ -134,14 +135,14 @@ describe('ETag Validation', () => {
     // Mock GET payload schema (no schema defined)
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
       )
       .reply(404, {});
 
     // Mock PUT upsert response
     const putScope = nock('http://localhost:3000')
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
       )
       .matchHeader('If-Match', 'abc12345')
       .reply(200, { success: true });
@@ -157,7 +158,7 @@ describe('ETag Validation', () => {
     // Mock GET collection response
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
       )
       .reply(200, {
         result: {
@@ -196,7 +197,7 @@ describe('ETag Validation', () => {
     // Mock GET collection response
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
       )
       .reply(200, {
         result: {
@@ -235,7 +236,7 @@ describe('ETag Validation', () => {
     // First upsert - populate cache
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
       )
       .reply(200, {
         result: {
@@ -254,13 +255,13 @@ describe('ETag Validation', () => {
     // Mock GET payload schema (no schema defined)
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
       )
       .reply(404, {});
 
     nock('http://localhost:3000')
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
       )
       .reply(200, { success: true });
 
@@ -277,7 +278,7 @@ describe('ETag Validation', () => {
     //   4. Retry: PUT → 200 (success)
     nock('http://localhost:3000')
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
       )
       .reply(412, {
         message: 'Collection schema has changed',
@@ -286,13 +287,13 @@ describe('ETag Validation', () => {
 
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
       )
       .reply(404, {});
 
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
       )
       .reply(200, {
         result: {
@@ -310,7 +311,7 @@ describe('ETag Validation', () => {
 
     nock('http://localhost:3000')
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
       )
       .reply(200, { success: true });
 
@@ -321,7 +322,7 @@ describe('ETag Validation', () => {
     // Verify the new schema_version is cached: next upsert sends new If-Match
     const putScope = nock('http://localhost:3000')
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
       )
       .matchHeader('If-Match', 'new-version')
       .reply(200, { success: true });
@@ -350,7 +351,7 @@ describe('ETag Validation', () => {
     // Mock GET collection response
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
       )
       .reply(200, {
         result: {
@@ -369,14 +370,14 @@ describe('ETag Validation', () => {
     // Mock GET payload schema (no schema defined)
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
       )
       .reply(404, {});
 
     // Mock PUT with 400 response
     nock('http://localhost:3000')
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
       )
       .reply(400, {
         message: 'Vector dimension mismatch: expected 768, got 384',
@@ -398,7 +399,7 @@ describe('ETag Validation', () => {
     // Mock GET collection response
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
       )
       .reply(200, {
         result: {
@@ -417,14 +418,14 @@ describe('ETag Validation', () => {
     // Mock GET payload schema (no schema defined)
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
       )
       .reply(404, {});
 
     // Mock PUT with 500 response
     nock('http://localhost:3000')
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
       )
       // upsert is repeatable: the first attempt and 3 retries.
       .times(4)
@@ -447,7 +448,7 @@ describe('ETag Validation', () => {
   });
 
   it('should handle 503 server error, after retrying it', async () => {
-    // A 503 is retried (executeWithRetry, 3 retries): skip the backoff
+    // A 503 is retried (the retry rule, 3 retries): skip the backoff
     // sleeps, keep the request timeout's real timer.
     const real = global.setTimeout;
     const timeout = jest.spyOn(global, 'setTimeout').mockImplementation(((
@@ -465,7 +466,7 @@ describe('ETag Validation', () => {
     // Mock GET collection response
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
       )
       .reply(200, {
         result: {
@@ -484,14 +485,14 @@ describe('ETag Validation', () => {
     // Mock GET payload schema (no schema defined)
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
       )
       .reply(404, {});
 
     // Mock PUT with 503 response (Service Unavailable)
     nock('http://localhost:3000')
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
       )
       .times(4)
       .reply(503, {
@@ -518,7 +519,7 @@ describe('ETag Validation', () => {
     // Mock GET collection response
     nock('http://localhost:3000')
       .get(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
       )
       .reply(200, {
         result: {

@@ -7,11 +7,11 @@
  * reading of the query response (result.points, not result).
  */
 import nock from 'nock';
+import { TEST_WORKSPACE_ID } from '../setup';
 import { AetherfyVectorsClient } from '../../src/client';
 
 const BASE = 'https://vectors.aetherfy.com';
-const QUERY_PATH =
-  '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/docs/points/query';
+const QUERY_PATH = `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/docs/points/query`;
 const VECTOR = [0.1, 0.2, 0.3];
 
 function makeClient(): AetherfyVectorsClient {
@@ -85,7 +85,7 @@ describe('search() sends POST /points/query', () => {
   it('never calls the retired /points/search', async () => {
     const retired = nock(BASE)
       .post(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/docs/points/search'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/docs/points/search`
       )
       .reply(410, {
         error: { code: 'ROUTE_RETIRED', message: 'retired' },

@@ -13,6 +13,7 @@
  */
 
 import nock from 'nock';
+import { TEST_WORKSPACE_ID } from '../setup';
 import {
   AetherfyVectorsClient,
   INDEX_ATTEMPT_TIMEOUT_MS,
@@ -57,7 +58,7 @@ describe('createFieldIndex', () => {
     let seen: unknown;
     const scope = nock(HOST)
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/articles/index',
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/articles/index`,
         body => {
           seen = body;
           return true;
@@ -80,7 +81,7 @@ describe('createFieldIndex', () => {
     let seen: Record<string, unknown> = {};
     const scope = nock(HOST)
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/articles/index',
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/articles/index`,
         body => {
           seen = body as Record<string, unknown>;
           return true;
@@ -97,7 +98,7 @@ describe('createFieldIndex', () => {
     let seen: Record<string, unknown> = {};
     const scope = nock(HOST)
       .put(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/articles/index',
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/articles/index`,
         body => {
           seen = body as Record<string, unknown>;
           return true;
@@ -142,7 +143,7 @@ describe('deleteFieldIndex', () => {
   it('DELETEs the field-scoped route', async () => {
     const scope = nock(HOST)
       .delete(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/articles/index/thread_id'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/articles/index/thread_id`
       )
       .reply(200, { result: true });
 
@@ -157,7 +158,7 @@ describe('deleteFieldIndex', () => {
     // separator, or the request lands on a path the allowlist rejects.
     const scope = nock(HOST)
       .delete(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/articles/index/metadata%2Ftag'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/articles/index/metadata%2Ftag`
       )
       .reply(200, { result: true });
 
@@ -170,7 +171,7 @@ describe('deleteFieldIndex', () => {
     // is answered 200 by the server, and so resolves true above.
     const scope = nock(HOST)
       .delete(
-        '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/articles/index/thread_id'
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/articles/index/thread_id`
       )
       .reply(404, {
         error: {

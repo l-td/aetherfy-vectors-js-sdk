@@ -776,8 +776,8 @@ export class AetherfyVectorsClient {
    * in one chunk; the chunker is transparent for small/medium upserts.
    *
    * Failure behaviour:
-   *   - Transient errors (network blips, 5xx, 429) are auto-retried per
-   *     chunk with exponential backoff inside `executeWithRetry`.
+   *   - Transient errors are retried per chunk under the retry rule
+   *     (retry-policy.ts; upsert is repeatable), with exponential backoff.
    *   - Permanent errors on a chunk after retries: if there's only one
    *     chunk, the specific error (Validation, ServiceUnavailable, etc.)
    *     is thrown directly — same as pre-chunking behaviour.
@@ -939,8 +939,8 @@ export class AetherfyVectorsClient {
 
   /**
    * Per-chunk upload. Mirrors the pre-chunking single-PUT logic exactly:
-   * If-Match headers from schema ETags, executeWithRetry for transient
-   * failures, per-status handling (412 schema-change retry, 400, 500+),
+   * If-Match headers from schema ETags, send() (the retry rule) for
+   * transient failures, per-status handling (412 schema-change retry, 400, 500+),
    * 404 cache self-heal. Returns true on 200; throws otherwise.
    *
    * Extracted so the multi-chunk loop can call it per-chunk and aggregate

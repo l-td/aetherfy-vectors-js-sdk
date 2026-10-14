@@ -3,6 +3,7 @@
  */
 
 import nock from 'nock';
+import { TEST_WORKSPACE_ID } from '../setup';
 import { AetherfyVectorsClient } from '../../src/client';
 import { SchemaValidationError } from '../../src/exceptions';
 import { Point } from '../../src/models';
@@ -26,7 +27,7 @@ describe('Schema Validation Integration', () => {
       // Mock GET /collections (vector config)
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -42,7 +43,7 @@ describe('Schema Validation Integration', () => {
       // Mock GET /api/v1/schema (payload schema)
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(200, {
           schema: {
@@ -58,7 +59,7 @@ describe('Schema Validation Integration', () => {
       // Mock PUT /collections/test-collection/points (upsert)
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(200, { status: 'ok' });
 
@@ -83,7 +84,7 @@ describe('Schema Validation Integration', () => {
       // Mock GET /collections
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -99,7 +100,7 @@ describe('Schema Validation Integration', () => {
       // Mock GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(200, {
           schema: {
@@ -128,7 +129,7 @@ describe('Schema Validation Integration', () => {
       // Mock GET /collections
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -144,7 +145,7 @@ describe('Schema Validation Integration', () => {
       // Mock GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(200, {
           schema: {
@@ -188,7 +189,7 @@ describe('Schema Validation Integration', () => {
       // Mock GET /collections
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -204,7 +205,7 @@ describe('Schema Validation Integration', () => {
       // Mock GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(200, {
           schema: {
@@ -219,7 +220,7 @@ describe('Schema Validation Integration', () => {
       // Mock PUT /collections/test-collection/points
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(200, { status: 'ok' });
 
@@ -241,7 +242,7 @@ describe('Schema Validation Integration', () => {
       // Mock GET /collections
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -257,7 +258,7 @@ describe('Schema Validation Integration', () => {
       // Mock GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(200, {
           schema: {
@@ -272,7 +273,7 @@ describe('Schema Validation Integration', () => {
       // Mock PUT /collections/test-collection/points
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(200, { status: 'ok' });
 
@@ -294,7 +295,7 @@ describe('Schema Validation Integration', () => {
       // Mock GET /collections
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -310,14 +311,14 @@ describe('Schema Validation Integration', () => {
       // Mock GET /api/v1/schema (404 - no schema)
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(404, { error: { message: 'Schema not found' } });
 
       // Mock PUT /collections/test-collection/points
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(200, { status: 'ok' });
 
@@ -339,7 +340,7 @@ describe('Schema Validation Integration', () => {
       // First attempt: GET /collections
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -355,7 +356,7 @@ describe('Schema Validation Integration', () => {
       // First attempt: GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(200, {
           schema: {
@@ -370,7 +371,7 @@ describe('Schema Validation Integration', () => {
       // First attempt: PUT returns 412
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(412, {
           error: {
@@ -382,7 +383,7 @@ describe('Schema Validation Integration', () => {
       // Retry: GET /api/v1/schema (fetch updated schema)
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(200, {
           schema: {
@@ -398,7 +399,7 @@ describe('Schema Validation Integration', () => {
       // Retry: GET /collections (refetch vector config)
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -414,7 +415,7 @@ describe('Schema Validation Integration', () => {
       // Retry: PUT succeeds
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(200, { status: 'ok' });
 
@@ -434,7 +435,7 @@ describe('Schema Validation Integration', () => {
       // First attempt: GET /collections
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -450,7 +451,7 @@ describe('Schema Validation Integration', () => {
       // First attempt: GET /api/v1/schema (old schema: price optional)
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(200, {
           schema: {
@@ -465,7 +466,7 @@ describe('Schema Validation Integration', () => {
       // First attempt: PUT returns 412
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(412, {
           error: { message: 'Schema changed' },
@@ -474,7 +475,7 @@ describe('Schema Validation Integration', () => {
       // Retry: GET /api/v1/schema (new schema: price required)
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(200, {
           schema: {
@@ -505,7 +506,7 @@ describe('Schema Validation Integration', () => {
       // First upsert: GET /collections
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -521,7 +522,7 @@ describe('Schema Validation Integration', () => {
       // First upsert: GET /api/v1/schema
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(200, {
           schema: {
@@ -536,7 +537,7 @@ describe('Schema Validation Integration', () => {
       // First upsert: PUT
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(200, { status: 'ok' });
 
@@ -550,7 +551,7 @@ describe('Schema Validation Integration', () => {
       // Only PUT is mocked
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(200, { status: 'ok' });
 
@@ -562,7 +563,7 @@ describe('Schema Validation Integration', () => {
       // First upsert: GET /collections
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
         )
         .reply(200, {
           result: {
@@ -578,14 +579,14 @@ describe('Schema Validation Integration', () => {
       // First upsert: GET /api/v1/schema (404)
       nock('https://vectors.aetherfy.com')
         .get(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
         )
         .reply(404, {});
 
       // First upsert: PUT
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(200, { status: 'ok' });
 
@@ -597,7 +598,7 @@ describe('Schema Validation Integration', () => {
       // Only PUT is mocked
       nock('https://vectors.aetherfy.com')
         .put(
-          '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
         )
         .reply(200, { status: 'ok' });
 
