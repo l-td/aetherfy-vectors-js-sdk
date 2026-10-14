@@ -91,6 +91,7 @@ export {
   CollectionInUseError,
   CollectionInOtherRegionError,
   AgentWorkspaceForbiddenError,
+  WorkspaceNotFoundError,
   QuotaExceededError,
   SchemaNotFoundError,
   SchemaValidationError,

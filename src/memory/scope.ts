@@ -19,6 +19,7 @@ import {
   AetherfyVectorsError,
   CollectionNotFoundError,
   PointNotFoundError,
+  WorkspaceNotFoundError,
 } from '../exceptions';
 import {
   EnforcementMode,
@@ -301,7 +302,8 @@ export class Scope {
       error instanceof AetherfyVectorsError &&
       error.statusCode === 404 &&
       !(error instanceof PointNotFoundError) &&
-      !(error instanceof CollectionNotFoundError)
+      !(error instanceof CollectionNotFoundError) &&
+      !(error instanceof WorkspaceNotFoundError)
     ) {
       return new PointNotFoundError(String(id), this.collection);
     }

@@ -34,6 +34,7 @@ import {
   SchemaValidationError,
   PartialUpsertError,
   RequestTimeoutError,
+  WorkspaceNotFoundError,
   createErrorFromResponse,
   isRetryableError,
 } from './exceptions';
@@ -699,11 +700,12 @@ export class AetherfyVectorsClient {
         typeof error === 'object' &&
         ('status' in error || 'statusCode' in error)
       ) {
-        const httpError = error as { status?: number; statusCode?: number };
-        if (httpError.status === 404 || httpError.statusCode === 404) {
+        // Only "this collection is not in the workspace" is a false; an
+        // unknown workspace (WORKSPACE_NOT_FOUND) or a refusal is thrown.
+        if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
           // No-op when cache is already empty (we got past the
           // fast-path check above), but the call keeps the contract
-          // "collection-scoped 404 → caches dropped" uniform.
+          // "collection gone → caches dropped" uniform.
           this.evictCachesIfNotFound(scopedName, error);
           return false;
         }
@@ -1410,12 +1412,7 @@ export class AetherfyVectorsClient {
       });
       return true;
     } catch (error: unknown) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'status' in error &&
-        error.status === 404
-      ) {
+      if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
         this.evictCachesIfNotFound(scopedName, error);
         return false;
       }
@@ -1486,7 +1483,8 @@ export class AetherfyVectorsClient {
       error instanceof AetherfyVectorsError &&
       error.statusCode === 404 &&
       !(error instanceof PointNotFoundError) &&
-      !(error instanceof CollectionNotFoundError)
+      !(error instanceof CollectionNotFoundError) &&
+      !(error instanceof WorkspaceNotFoundError)
     ) {
       return new PointNotFoundError(String(pointId), collectionName);
     }
@@ -1894,16 +1892,11 @@ export class AetherfyVectorsClient {
    * legitimate "no payload schema set" state on an existing collection.
    */
   private evictCachesIfNotFound(scopedName: string, error: unknown): void {
-    if (
-      error &&
-      typeof error === 'object' &&
-      ('status' in error || 'statusCode' in error)
-    ) {
-      const httpError = error as { status?: number; statusCode?: number };
-      if (httpError.status === 404 || httpError.statusCode === 404) {
-        this.schemaCache.delete(scopedName);
-        this.payloadSchemaCache.delete(scopedName);
-      }
+    // Only when the COLLECTION is gone: an unknown workspace says nothing
+    // about it.
+    if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
+      this.schemaCache.delete(scopedName);
+      this.payloadSchemaCache.delete(scopedName);
     }
   }
 
@@ -2137,7 +2130,12 @@ export class AetherfyVectorsClient {
   private async executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
     return retryWithBackoff(operation, {
       maxRetries: 3,
-      retryCondition: error => isRetryableError(error),
+      // HttpClient throws a plain Error carrying `status` and `responseData`;
+      // it is typed only by handleError. Classify the typed form (a 503 is a
+      // ServiceUnavailableError), but let the raw error through to callers,
+      // which read its `status` (the 412 schema-change path does).
+      retryCondition: error =>
+        isRetryableError(error) || isRetryableError(this.handleError(error)),
     });
   }
 
@@ -2190,23 +2188,17 @@ export class AetherfyVectorsClient {
 
       return schema;
     } catch (error: unknown) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'status' in error &&
-        error.status === 404
-      ) {
-        // Backend disambiguates the two 404 cases via error.code:
-        //   COLLECTION_NOT_FOUND → collection is gone, evict caches
-        //   SCHEMA_NOT_DEFINED → collection exists but no schema (legit)
-        // Without the code (older backend or unstructured body) we
-        // treat 404 as "no schema set" without evicting, matching the
-        // pre-disambiguation behavior. Eviction only fires when the
-        // backend explicitly tells us the collection is gone.
-        if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
-          this.schemaCache.delete(scopedName);
-          this.payloadSchemaCache.delete(scopedName);
-        }
+      // Two 404s mean "no schema", told apart by error.code:
+      //   COLLECTION_NOT_FOUND → the collection is gone: evict caches
+      //   SCHEMA_NOT_DEFINED → the collection has no schema (legit)
+      // Any other 404 (an unknown workspace) is thrown.
+      const code = this.errorCodeOf(error);
+      if (code === 'COLLECTION_NOT_FOUND') {
+        this.schemaCache.delete(scopedName);
+        this.payloadSchemaCache.delete(scopedName);
+        return null;
+      }
+      if (code === 'SCHEMA_NOT_DEFINED') {
         return null;
       }
       throw this.handleError(error);
@@ -2298,21 +2290,19 @@ export class AetherfyVectorsClient {
         this.apiUrl(this.buildCollectionPath(collectionName, '/schema'))
       );
     } catch (error: unknown) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'status' in error &&
-        error.status === 404
-      ) {
-        // Disambiguate via backend's error.code:
-        //   COLLECTION_NOT_FOUND → collection is gone, evict caches.
-        //   SCHEMA_NOT_DEFINED → collection exists, no schema set.
-        // Both surface as SchemaNotFoundError to the caller — the
-        // difference is whether we self-heal the local caches.
-        if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
-          this.schemaCache.delete(scopedName);
-          this.payloadSchemaCache.delete(scopedName);
-        }
+      // Disambiguate via the backend's error.code:
+      //   COLLECTION_NOT_FOUND → collection is gone, evict caches.
+      //   SCHEMA_NOT_DEFINED → collection exists, no schema set.
+      // Both surface as SchemaNotFoundError to the caller — the
+      // difference is whether we self-heal the local caches. Any other
+      // 404 (an unknown workspace) is thrown as it is.
+      const code = this.errorCodeOf(error);
+      if (code === 'COLLECTION_NOT_FOUND') {
+        this.schemaCache.delete(scopedName);
+        this.payloadSchemaCache.delete(scopedName);
+        throw new SchemaNotFoundError(collectionName);
+      }
+      if (code === 'SCHEMA_NOT_DEFINED') {
         throw new SchemaNotFoundError(collectionName);
       }
       throw this.handleError(error);

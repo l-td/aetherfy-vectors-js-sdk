@@ -300,7 +300,12 @@ describe('AetherfyVectorsClient', () => {
         .get(
           '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/non-existent'
         )
-        .reply(404, { message: 'Collection not found' });
+        .reply(404, {
+          error: {
+            code: 'COLLECTION_NOT_FOUND',
+            message: 'Collection not found',
+          },
+        });
 
       const exists = await client.collectionExists('non-existent');
       expect(exists).toBe(false);
@@ -369,7 +374,12 @@ describe('AetherfyVectorsClient', () => {
         .get(
           '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/doomed'
         )
-        .reply(404, { message: 'Collection not found' });
+        .reply(404, {
+          error: {
+            code: 'COLLECTION_NOT_FOUND',
+            message: 'Collection not found',
+          },
+        });
       const exists = await client.collectionExists('doomed');
 
       expect(exists).toBe(false);
@@ -414,7 +424,12 @@ describe('AetherfyVectorsClient', () => {
         .put(
           '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/ghost/points'
         )
-        .reply(404, { message: 'Collection not found' });
+        .reply(404, {
+          error: {
+            code: 'COLLECTION_NOT_FOUND',
+            message: 'Collection not found',
+          },
+        });
 
       await expect(
         client.upsert('ghost', [{ id: 1, vector: [0.1, 0.2, 0.3, 0.4] }])
@@ -442,7 +457,12 @@ describe('AetherfyVectorsClient', () => {
         .get(
           '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/ghost'
         )
-        .reply(404, { message: 'Collection not found' });
+        .reply(404, {
+          error: {
+            code: 'COLLECTION_NOT_FOUND',
+            message: 'Collection not found',
+          },
+        });
 
       await expect(client.getCollection('ghost')).rejects.toThrow();
 
@@ -755,7 +775,7 @@ describe('AetherfyVectorsClient', () => {
         .get(
           '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
         )
-        .reply(404, {});
+        .reply(404, { error: { code: 'SCHEMA_NOT_DEFINED', message: 'x' } });
 
       nock('https://vectors.aetherfy.com')
         .put(
@@ -1642,7 +1662,9 @@ describe('AetherfyVectorsClient', () => {
         .get(
           '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
         )
-        .reply(404, { error: { message: 'Schema not found' } });
+        .reply(404, {
+          error: { code: 'SCHEMA_NOT_DEFINED', message: 'Schema not found' },
+        });
       nock('https://vectors.aetherfy.com')
         .put(
           '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
@@ -1717,7 +1739,9 @@ describe('AetherfyVectorsClient', () => {
           .get(
             '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
           )
-          .reply(404, { error: { message: 'Schema not found' } });
+          .reply(404, {
+            error: { code: 'SCHEMA_NOT_DEFINED', message: 'Schema not found' },
+          });
 
         const schema = await client.getSchema('test-collection');
         expect(schema).toBeNull();
@@ -1817,7 +1841,9 @@ describe('AetherfyVectorsClient', () => {
           .delete(
             '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
           )
-          .reply(404, { error: { message: 'Schema not found' } });
+          .reply(404, {
+            error: { code: 'SCHEMA_NOT_DEFINED', message: 'Schema not found' },
+          });
 
         await expect(client.deleteSchema('test-collection')).rejects.toThrow(
           SchemaNotFoundError
@@ -1862,7 +1888,7 @@ describe('AetherfyVectorsClient', () => {
           .get(
             '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
           )
-          .reply(404, {});
+          .reply(404, { error: { code: 'SCHEMA_NOT_DEFINED', message: 'x' } });
 
         const schema = await client.getSchema('test-collection');
         expect(schema).toBeNull();
@@ -1956,7 +1982,12 @@ describe('AetherfyVectorsClient', () => {
           .post(
             '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema/analyze'
           )
-          .reply(404, { message: 'Collection not found' });
+          .reply(404, {
+            error: {
+              code: 'COLLECTION_NOT_FOUND',
+              message: 'Collection not found',
+            },
+          });
 
         await expect(
           client.analyzeSchema('test-collection', 1000)
@@ -1994,7 +2025,12 @@ describe('AetherfyVectorsClient', () => {
           .put(
             '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/schema'
           )
-          .reply(404, { message: 'Collection not found' });
+          .reply(404, {
+            error: {
+              code: 'COLLECTION_NOT_FOUND',
+              message: 'Collection not found',
+            },
+          });
 
         await expect(
           client.setSchema(

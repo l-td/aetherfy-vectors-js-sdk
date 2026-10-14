@@ -444,7 +444,22 @@ describe('ETag Validation', () => {
     }
   });
 
-  it('should handle 503 server error', async () => {
+  it('should handle 503 server error, after retrying it', async () => {
+    // A 503 is retried (executeWithRetry, 3 retries): skip the backoff
+    // sleeps, keep the request timeout's real timer.
+    const real = global.setTimeout;
+    const timeout = jest.spyOn(global, 'setTimeout').mockImplementation(((
+      fn: () => void,
+      ms?: number,
+      ...rest: unknown[]
+    ) => {
+      if ((ms ?? 0) < 10_000) {
+        fn();
+        return 0;
+      }
+      return real(fn, ms, ...rest);
+    }) as unknown as typeof setTimeout);
+
     // Mock GET collection response
     nock('http://localhost:3000')
       .get(
@@ -476,6 +491,7 @@ describe('ETag Validation', () => {
       .put(
         '/api/v1/workspace-ids/11111111-2222-4333-8444-555555555555/collections/test-collection/points'
       )
+      .times(4)
       .reply(503, {
         message: 'Service temporarily unavailable',
         code: 'SERVICE_UNAVAILABLE',
@@ -490,7 +506,10 @@ describe('ETag Validation', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(AetherfyVectorsError);
       expect((error as Error).message).toMatch(/server error/i);
+    } finally {
+      timeout.mockRestore();
     }
+    expect(nock.isDone()).toBe(true); // all four attempts were made
   });
 
   it('should validate vector array exists', async () => {

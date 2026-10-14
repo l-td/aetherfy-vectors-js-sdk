@@ -286,20 +286,18 @@ export class CollectionInOtherRegionError extends AetherfyVectorsError {
  * An agent's API key addressed a workspace it has not been granted (403
  * AGENT_KEY_WORKSPACE_FORBIDDEN). The key Aetherfy injects into a deployed
  * agent reaches its own workspace plus the workspaces the account owner
- * granted it; any other is refused whether or not the collection exists
- * there. `workspace` names it, or is null for the collections in no
- * workspace. Not retryable: the owner grants access on the agent's page in
- * the dashboard, or with `afy access <agent> --add <workspace>`, and it takes
- * effect within 60 seconds.
+ * granted it; any other is refused whether or not it exists. `workspace`
+ * names it, or is null when it was addressed by id. Not retryable: the owner
+ * grants access on the agent's page in the dashboard, or with
+ * `afy access <agent> --add <workspace>`, and it takes effect within 60
+ * seconds.
  */
 export class AgentWorkspaceForbiddenError extends AetherfyVectorsError {
   public readonly workspace: string | null;
 
   constructor(workspace: string | null, message?: string) {
-    const where = workspace
-      ? `workspace '${workspace}'`
-      : 'the collections in no workspace';
-    const add = workspace ? workspace : '""';
+    const where = workspace ? `workspace '${workspace}'` : 'this workspace';
+    const add = workspace ? workspace : '<workspace>';
     super(
       (message || `This agent's API key cannot use ${where}.`) +
         ` Ask the account owner to grant this agent access to ${where}: ` +
@@ -317,6 +315,43 @@ export class AgentWorkspaceForbiddenError extends AetherfyVectorsError {
     return {
       ...super.toJSON(),
       workspace: this.workspace,
+    };
+  }
+}
+
+/**
+ * No such workspace in this account (404 WORKSPACE_NOT_FOUND). `workspace` is
+ * the name as sent, or null when it was addressed by id; `workspaceId` is then
+ * the id as sent. Not retryable: create the workspace, or fix the name. A
+ * workspace of another account answers the same way, by design.
+ */
+export class WorkspaceNotFoundError extends AetherfyVectorsError {
+  public readonly workspace: string | null;
+  public readonly workspaceId: string | null;
+
+  constructor(
+    workspace: string | null,
+    workspaceId: string | null = null,
+    message?: string
+  ) {
+    const where = workspace
+      ? `Workspace '${workspace}'`
+      : `Workspace id '${workspaceId}'`;
+    super(message || `${where} not found in this account.`, undefined, 404, {
+      workspace,
+      workspace_id: workspaceId,
+    });
+    this.name = 'WorkspaceNotFoundError';
+    this.workspace = workspace;
+    this.workspaceId = workspaceId;
+    Object.setPrototypeOf(this, WorkspaceNotFoundError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      workspace: this.workspace,
+      workspaceId: this.workspaceId,
     };
   }
 }
@@ -592,33 +627,37 @@ export function createErrorFromResponse(
     case 401:
       return stamp(new AuthenticationError(message));
 
-    case 404:
-      // Check for both pointId and collectionName first (more specific case)
-      if (responseData?.pointId && responseData?.collectionName) {
+    case 404: {
+      const str = (key: string): string | null =>
+        typeof nestedError?.[key] === 'string'
+          ? (nestedError[key] as string)
+          : null;
+      if (errorCode === 'COLLECTION_NOT_FOUND') {
+        return stamp(
+          new CollectionNotFoundError(str('collection_name') ?? 'unknown')
+        );
+      }
+      if (errorCode === 'POINT_NOT_FOUND') {
         return stamp(
           new PointNotFoundError(
-            responseData.pointId as string | number,
-            String(responseData.collectionName)
+            str('point_id') ?? 'unknown',
+            str('collection_name') ?? 'unknown'
           )
         );
       }
-      // Then check for just collectionName
-      if (responseData?.collectionName) {
+      if (errorCode === 'WORKSPACE_NOT_FOUND') {
         return stamp(
-          new CollectionNotFoundError(String(responseData.collectionName))
+          new WorkspaceNotFoundError(
+            str('workspace'),
+            str('workspace_id'),
+            message
+          )
         );
       }
-      // Handle Qdrant-style: {"status": {"error": "Not found: Collection `name` doesn't exist!"}}
-      {
-        const statusError = (responseData?.status as Record<string, unknown>)
-          ?.error;
-        if (typeof statusError === 'string') {
-          const match = statusError.match(/Collection `([^`]+)` doesn't exist/);
-          if (match) {
-            return stamp(new CollectionNotFoundError(match[1]));
-          }
-          message = statusError;
-        }
+      if (errorCode === 'SCHEMA_NOT_DEFINED') {
+        return stamp(
+          new SchemaNotFoundError(str('collection_name') ?? 'unknown')
+        );
       }
       return stamp(
         new AetherfyVectorsError(
@@ -626,6 +665,17 @@ export function createErrorFromResponse(
           requestId,
           status,
           details as Record<string, unknown> | undefined
+        )
+      );
+    }
+
+    case 422:
+      // Unprocessable: VALIDATION_ERROR, COLLECTION_SDK_MANAGED, ...
+      return stamp(
+        new ValidationError(
+          message,
+          nestedError?.field as string | undefined,
+          nestedError?.violations as string[] | undefined
         )
       );
 

@@ -330,7 +330,13 @@ describe('Custom Exceptions', () => {
 
     it('should create CollectionNotFoundError for 404 with collection', () => {
       const error = createErrorFromResponse(
-        { collectionName: 'missing-collection' },
+        {
+          error: {
+            code: 'COLLECTION_NOT_FOUND',
+            message: "Collection 'missing-collection' not found",
+            collection_name: 'missing-collection',
+          },
+        },
         404,
         'Not Found'
       );
@@ -396,7 +402,14 @@ describe('Custom Exceptions', () => {
 
     it('should create PointNotFoundError for 404 with pointId and collection', () => {
       const error = createErrorFromResponse(
-        { pointId: 'point-123', collectionName: 'test-collection' },
+        {
+          error: {
+            code: 'POINT_NOT_FOUND',
+            message: 'Point not found',
+            point_id: 'point-123',
+            collection_name: 'test-collection',
+          },
+        },
         404,
         'Not Found'
       );
