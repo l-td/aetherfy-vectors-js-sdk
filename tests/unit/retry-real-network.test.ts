@@ -8,6 +8,9 @@
 import net from 'net';
 import nock from 'nock';
 import { AetherfyVectorsClient } from '../../src/client';
+import { NetworkError } from '../../src/exceptions';
+import { ONCE } from '../../src/retry-policy';
+import { retryWithBackoff } from '../../src/utils';
 
 type Counted = { request: jest.Mock };
 
@@ -86,4 +89,19 @@ it('CONTROL: a connection that was made, then timed out, is not retried for a ON
     accepted.forEach(socket => socket.destroy());
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
+});
+
+it('retryWithBackoff around a client call retries a never-made connection for a ONCE operation', async () => {
+  const { client, attempts } = realClient('http://192.0.2.1', 300);
+
+  const err = await retryWithBackoff(() => client.deleteCollection('docs'), {
+    retryClass: ONCE,
+    maxRetries: 1,
+    baseDelay: 1,
+  }).catch((e: unknown) => e);
+
+  // The typed error carries the never-connected fact the client saw.
+  expect(err).toBeInstanceOf(NetworkError);
+  expect((err as NetworkError).requestSent).toBe(false);
+  expect(attempts()).toBe(8); // the client's 4 attempts, twice
 });

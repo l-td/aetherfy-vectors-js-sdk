@@ -7,8 +7,13 @@
  * 1. REFUSED BEFORE ANYTHING HAPPENED. Retried for EVERY operation.
  *    - 503 WORKSPACE_LOOKUP_UNAVAILABLE, COLLECTION_LOOKUP_UNAVAILABLE,
  *      PLACEMENT_UNAVAILABLE: the server refused at its edge; nothing ran.
- *    - A connection never made: DNS (ENOTFOUND, EAI_AGAIN), connection
- *      refused (ECONNREFUSED), connect timeout (ETIMEDOUT on `connect`).
+ *    - A connection never made: DNS, connection refused, or a connect that
+ *      never completed. Under real Node axios reports the last with its own
+ *      timeout code (ECONNABORTED), like a timeout waiting for the answer, so
+ *      the SDK's agents record whether each socket ever connected
+ *      (http/client.ts watchingAgent) and HttpClient marks the failure
+ *      `requestSent: false`. The codes ENOTFOUND, EAI_AGAIN, ECONNREFUSED
+ *      and ETIMEDOUT-on-connect are read too, for errors without a socket.
  *    - 429 with a Retry-After: refused, nothing ran (as before this rule).
  * 2. AMBIGUOUS: a timeout waiting for the answer, a reset after sending, any
  *    other 5xx. The request may have run. Retried only for an operation whose
@@ -148,8 +153,8 @@ function isTransport(e: FailureShape): boolean {
 /**
  * Kind 1: nothing ran, so any operation may be repeated. Reads both shapes:
  * HttpClient's raw error (the client's own retries), and the typed error a
- * client method throws (retryWithBackoff around a client call). A typed
- * transport error no longer carries Node's code, so it reads as ambiguous.
+ * client method throws (retryWithBackoff around a client call), whose
+ * NetworkError carries the same never-connected fact (`requestSent`).
  */
 export function refusedBeforeAnything(error: unknown): boolean {
   if (error instanceof ServiceUnavailableError) {
@@ -158,6 +163,7 @@ export function refusedBeforeAnything(error: unknown): boolean {
   if (error instanceof RateLimitExceededError) {
     return error.retryAfter !== undefined;
   }
+  if (error instanceof NetworkError) return error.requestSent === false;
   if (error instanceof AetherfyVectorsError) return false;
   const e = shapeOf(error);
   if (e.status === 503) {

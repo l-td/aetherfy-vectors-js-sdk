@@ -65,8 +65,9 @@ described here.
   Python SDK** (`src/retry-policy.ts`, and the README's table). A refusal
   before anything ran (503 `WORKSPACE_LOOKUP_UNAVAILABLE`,
   `COLLECTION_LOOKUP_UNAVAILABLE`, `PLACEMENT_UNAVAILABLE`; a connection
-  never made: `ENOTFOUND`, `EAI_AGAIN`, `ECONNREFUSED`, `ETIMEDOUT` on
-  connect; 429 with a Retry-After) is retried for every operation. An
+  never made: DNS, refused, or a connect that never completed, known from
+  whether the socket ever connected (see below: axios reports a connect
+  timeout as `ECONNABORTED`, like a read timeout); 429 with a Retry-After) is retried for every operation. An
   ambiguous failure (a timeout waiting for the answer, a reset after
   sending, any other 5xx) is retried only for reads and writes keyed by id;
   `createCollection`, `deleteCollection`, `delete`, `deleteSchema` and
@@ -86,8 +87,9 @@ described here.
   same as a timeout waiting for the answer, so it read as ambiguous. The
   SDK's agents (now always used in Node; keep-alive only with connection
   pooling) watch each socket's `connect`, and a transport failure on a
-  socket that never connected carries `requestSent: false`: retried for
-  every operation. Proven against TEST-NET-1, a `.invalid` host and a
+  socket that never connected carries `requestSent: false`, and so does the
+  typed `NetworkError` a client call throws (`retryWithBackoff` around it
+  reads it too): retried for every operation. Proven against TEST-NET-1, a `.invalid` host and a
   refused local port (`tests/unit/retry-real-network.test.ts`).
 - `createFieldIndex`: each attempt, retries included, gets only the time
   left before its deadline (it reused the first attempt's timeout).

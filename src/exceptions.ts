@@ -218,11 +218,22 @@ export class RequestTimeoutError extends AetherfyVectorsError {
  */
 export class NetworkError extends AetherfyVectorsError {
   public readonly cause?: Error;
+  /**
+   * `false` when the connection was never made (DNS, refused, a connect that
+   * never completed): the request never left, so any operation may be
+   * retried (retry-policy.ts). Undefined when it may have been sent.
+   */
+  public readonly requestSent?: false;
 
-  constructor(message: string = 'Network error occurred', cause?: Error) {
+  constructor(
+    message: string = 'Network error occurred',
+    cause?: Error,
+    requestSent?: false
+  ) {
     super(message);
     this.name = 'NetworkError';
     this.cause = cause;
+    this.requestSent = requestSent;
     Object.setPrototypeOf(this, NetworkError.prototype);
   }
 
@@ -230,6 +241,7 @@ export class NetworkError extends AetherfyVectorsError {
     return {
       ...super.toJSON(),
       cause: this.cause?.message,
+      requestSent: this.requestSent,
     };
   }
 }

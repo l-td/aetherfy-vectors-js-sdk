@@ -2175,7 +2175,16 @@ export class AetherfyVectorsClient {
     if (error instanceof Error) {
       const message = error.message;
       if (message.includes('Network error')) {
-        return new NetworkError(message);
+        // HttpClient marks a socket that never connected (requestSent:
+        // false); the typed error carries it, so retryWithBackoff around a
+        // client call reads it as the client's own retries do.
+        const neverConnected =
+          (error as { requestSent?: unknown }).requestSent === false;
+        return new NetworkError(
+          message,
+          error,
+          neverConnected ? false : undefined
+        );
       }
     }
 
