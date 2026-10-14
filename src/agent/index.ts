@@ -459,7 +459,7 @@ export async function spawn(
       child_agent_id: stringOf(record.child_agent_id),
       region: stringOf(record.region),
       status: stringOf(record.status),
-      workspace: typeof record.workspace === 'string' ? record.workspace : null,
+      workspace: stringOf(record.workspace),
       estimated_start:
         typeof record.estimated_start === 'string'
           ? record.estimated_start
