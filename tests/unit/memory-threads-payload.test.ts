@@ -22,8 +22,7 @@ import {
   Thread,
   THREAD_ID_KEY,
   THREAD_MARKER_KEY,
-  THREADS_COLLECTION_PREFIX,
-  threadsCollectionName,
+  THREADS_COLLECTION,
   ThreadAlreadyExistsError,
   ThreadNotFoundError,
   ThreadVectorSizeMismatchError,
@@ -33,7 +32,7 @@ import { FakeVectorsClient, unitVector } from './fake-vectors-store';
 
 const DIM = 4;
 // FakeVectorsClient is in workspace "my-bot" unless told otherwise.
-const THREADS = threadsCollectionName('my-bot');
+const THREADS = THREADS_COLLECTION;
 
 function build(): { store: FakeVectorsClient; memory: MemoryClient } {
   const store = new FakeVectorsClient();
@@ -65,16 +64,10 @@ async function msgs(thread: Thread, n: number, prefix = 'm') {
 // The defect this change removes
 // ---------------------------------------------------------------------------
 
-describe('one threads collection per workspace, named for it', () => {
-  // Collection names are unique per ACCOUNT, so a single `__threads__` in
-  // every workspace could exist in one workspace only: the server answered
-  // the second workspace's create 409 COLLECTION_NAME_TAKEN.
-  it('is __threads__ outside a workspace and __threads__<workspace> in one', () => {
-    expect(threadsCollectionName(undefined)).toBe('__threads__');
-    expect(threadsCollectionName('my-bot')).toBe('__threads__my-bot');
-  });
-
-  it('two workspaces of one account get two collections', async () => {
+describe('one plain __threads__ in each workspace', () => {
+  // Collection names are unique per workspace, so each workspace holds its
+  // own `__threads__`; the name carries no workspace suffix.
+  it('every workspace gets its own plain threads collection', async () => {
     const a = new FakeVectorsClient('support');
     const b = new FakeVectorsClient('sales');
     await new MemoryClient({
@@ -83,33 +76,19 @@ describe('one threads collection per workspace, named for it', () => {
     await new MemoryClient({
       client: b as unknown as AetherfyVectorsClient,
     }).createThread('conv-1');
-    expect([...a.collections.keys()]).toEqual(['__threads__support']);
-    expect([...b.collections.keys()]).toEqual(['__threads__sales']);
+    expect([...a.collections.keys()]).toEqual(['__threads__']);
+    expect([...b.collections.keys()]).toEqual(['__threads__']);
   });
 
-  it('outside any workspace it is the bare prefix', async () => {
-    const store = new FakeVectorsClient(null);
-    await new MemoryClient({
-      client: store as unknown as AetherfyVectorsClient,
-    }).createThread('conv-1');
-    expect([...store.collections.keys()]).toEqual(['__threads__']);
+  it('the name fits the server rule', () => {
+    expect(THREADS_COLLECTION).toMatch(/^[a-zA-Z0-9_-]{1,100}$/);
   });
 
-  it('every workspace name the product accepts fits the server rule', () => {
-    // Workspace names are ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$, 3 to 63 characters
-    // (control plane api/routes/workspaces.py): at most 74 with the prefix,
-    // inside vectordb's [a-zA-Z0-9_-]{1,100}.
-    for (const ws of ['abc', 'a'.repeat(63), 'my-bot-2', '0'.repeat(63)]) {
-      expect(threadsCollectionName(ws)).toMatch(/^[a-zA-Z0-9_-]{1,100}$/);
-    }
-  });
-
-  it("another workspace's threads collection is never opened", async () => {
-    // Derived from the client's own workspace on every use: a `__threads__`
-    // of another scope (or the bare one from before this rule) is never read
-    // or written as this workspace's.
+  it('a suffixed threads collection is not adopted', async () => {
+    // `__threads__<workspace>` (the name before every collection lived in a
+    // workspace) is neither read nor written: threads go to `__threads__`.
     const store = new FakeVectorsClient('support');
-    await store.createCollection('__threads__', {
+    await store.createCollection('__threads__support', {
       size: DEFAULT_VECTOR_SIZE,
       distance: DistanceMetric.COSINE,
     });
@@ -120,7 +99,7 @@ describe('one threads collection per workspace, named for it', () => {
       '__threads__',
       '__threads__support',
     ]);
-    expect(store.collections.get('__threads__')!.points.size).toBe(0);
+    expect(store.collections.get('__threads__support')!.points.size).toBe(0);
   });
 });
 
@@ -130,10 +109,10 @@ describe('the cross-repo pin', () => {
     // literal should be a literal there, so a rename is caught rather than
     // followed. This is the other half of that pin. Without it a rename goes
     // green here and reds in a repo that cannot explain why — so the gate
-    // lives where the rename would happen. The control plane's SDK-managed
-    // prefix (which it refuses to move) is held equal to it by an e2e pair
-    // test.
-    expect(THREADS_COLLECTION_PREFIX).toBe('__threads__');
+    // lives where the rename would happen. The server's SDK-managed name
+    // (which it refuses to move or rename) is held equal to it by an e2e
+    // pair test.
+    expect(THREADS_COLLECTION).toBe('__threads__');
     expect(THREAD_ID_KEY).toBe('thread_id');
     expect(THREAD_MARKER_KEY).toBe('thread_marker');
   });

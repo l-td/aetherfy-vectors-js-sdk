@@ -33,7 +33,7 @@ import {
   generateId,
   THREAD_ID_KEY,
   THREAD_MARKER_KEY,
-  threadsCollectionName,
+  THREADS_COLLECTION,
 } from './models';
 import { Namespace } from './namespace';
 import { Thread } from './thread';
@@ -173,13 +173,11 @@ export class MemoryClient {
   }
 
   /**
-   * This workspace's threads collection (models.threadsCollectionName).
-   * Derived from this client's own workspace every time, so it can only ever
-   * name this workspace's collection: a threads collection of another
-   * workspace is never opened or adopted.
+   * This workspace's threads collection: `__threads__`, addressed in this
+   * client's own workspace, so another workspace's is never opened.
    */
   private get threads(): string {
-    return threadsCollectionName(this.workspace);
+    return THREADS_COLLECTION;
   }
 
   /**
