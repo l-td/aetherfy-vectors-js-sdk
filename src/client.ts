@@ -26,7 +26,6 @@ import {
 } from './models';
 import {
   AetherfyVectorsError,
-  CollectionNotFoundError,
   PointNotFoundError,
   ValidationError,
   NetworkError,
@@ -34,7 +33,6 @@ import {
   SchemaValidationError,
   PartialUpsertError,
   RequestTimeoutError,
-  WorkspaceNotFoundError,
   createErrorFromResponse,
 } from './exceptions';
 import { HttpResponse } from './http/types';
@@ -1177,8 +1175,7 @@ export class AetherfyVectorsClient {
       );
       return response.data;
     } catch (error: unknown) {
-      this.evictCachesIfNotFound(scopedName, error);
-      throw this.handleError(error);
+      throw this.payloadError(error, scopedName, collectionName, points);
     }
   }
 
@@ -1209,8 +1206,7 @@ export class AetherfyVectorsClient {
       );
       return response.data;
     } catch (error: unknown) {
-      this.evictCachesIfNotFound(scopedName, error);
-      throw this.handleError(error);
+      throw this.payloadError(error, scopedName, collectionName, points);
     }
   }
 
@@ -1242,8 +1238,7 @@ export class AetherfyVectorsClient {
       );
       return response.data;
     } catch (error: unknown) {
-      this.evictCachesIfNotFound(scopedName, error);
-      throw this.handleError(error);
+      throw this.payloadError(error, scopedName, collectionName, points);
     }
   }
 
@@ -1493,13 +1488,9 @@ export class AetherfyVectorsClient {
     ) {
       throw new TypeError('partial must be a plain object');
     }
-    try {
-      return await this.setPayload(collectionName, partial, [pointId], {
-        key: 'metadata',
-      });
-    } catch (error: unknown) {
-      throw this.translatePointNotFound(error, collectionName, pointId);
-    }
+    return this.setPayload(collectionName, partial, [pointId], {
+      key: 'metadata',
+    });
   }
 
   /**
@@ -1517,28 +1508,32 @@ export class AetherfyVectorsClient {
       throw new TypeError('keys must be an array of strings');
     }
     const dotted = keys.map(k => `metadata.${k}`);
-    try {
-      return await this.deletePayload(collectionName, dotted, [pointId]);
-    } catch (error: unknown) {
-      throw this.translatePointNotFound(error, collectionName, pointId);
-    }
+    return this.deletePayload(collectionName, dotted, [pointId]);
   }
 
-  private translatePointNotFound(
+  /**
+   * A payload route's error, typed. vectordb re-wraps Qdrant's own 404 (a
+   * point that does not exist) as code NOT_FOUND; on these routes that is
+   * the point, so it is a PointNotFoundError. Every other error keeps its
+   * own type (COLLECTION_NOT_FOUND, WORKSPACE_NOT_FOUND, ...).
+   */
+  private payloadError(
     error: unknown,
+    scopedName: string,
     collectionName: string,
-    pointId: string | number
-  ): unknown {
-    if (
-      error instanceof AetherfyVectorsError &&
-      error.statusCode === 404 &&
-      !(error instanceof PointNotFoundError) &&
-      !(error instanceof CollectionNotFoundError) &&
-      !(error instanceof WorkspaceNotFoundError)
-    ) {
-      return new PointNotFoundError(String(pointId), collectionName);
+    points: Array<string | number>
+  ): AetherfyVectorsError {
+    this.evictCachesIfNotFound(scopedName, error);
+    const typed = this.handleError(error);
+    if (typed.statusCode === 404 && typed.code === 'NOT_FOUND') {
+      const missing = new PointNotFoundError(
+        points.map(String).join(', '),
+        collectionName
+      );
+      missing.code = typed.code;
+      return missing;
     }
-    return error;
+    return typed;
   }
 
   /**

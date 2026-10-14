@@ -92,6 +92,15 @@ described here.
 - `createFieldIndex`: each attempt, retries included, gets only the time
   left before its deadline (it reused the first attempt's timeout).
 
+- **BREAKING: a missing point on the payload routes is `PointNotFoundError`
+  by code.** vectordb re-wraps Qdrant's own 404 (a point that does not
+  exist) as `NOT_FOUND`; `setPayload`, `overwritePayload` and
+  `deletePayload` throw it as `PointNotFoundError` (carrying the code), and
+  so `mergeMetadata` / `deleteMetadataKeys` and the memory layer's do.
+  Before, any 404 without a known type on the metadata calls was turned
+  into `PointNotFoundError`; a 404 without a code is now the
+  `NotFoundError` fallback like anywhere else.
+
 ### Added
 
 - **`NotFoundError`** (exported from the package root): the parent of

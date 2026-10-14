@@ -219,13 +219,18 @@ describe('AetherfyVectorsClient payload methods', () => {
       ).rejects.toBeInstanceOf(TypeError);
     });
 
-    it('translates a generic 404 into PointNotFoundError', async () => {
+    it('raises a NOT_FOUND 404 as PointNotFoundError', async () => {
       const client = makeClient();
       nock(ENDPOINT)
         .post(
           `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload`
         )
-        .reply(404, { message: 'No point with id missing found' });
+        .reply(404, {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'No point with id missing found',
+          },
+        });
 
       await expect(
         client.mergeMetadata('col', MISSING, { a: 1 })
@@ -262,13 +267,18 @@ describe('AetherfyVectorsClient payload methods', () => {
       ).rejects.toBeInstanceOf(TypeError);
     });
 
-    it('translates a generic 404 into PointNotFoundError', async () => {
+    it('raises a NOT_FOUND 404 as PointNotFoundError', async () => {
       const client = makeClient();
       nock(ENDPOINT)
         .post(
           `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/col/points/payload/delete`
         )
-        .reply(404, { message: 'No point with id missing found' });
+        .reply(404, {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'No point with id missing found',
+          },
+        });
 
       await expect(
         client.deleteMetadataKeys('col', MISSING, ['k1'])

@@ -54,7 +54,10 @@ const COLLECTION_NOT_FOUND = body('COLLECTION_NOT_FOUND', {
   message: "Collection 'docs' not found",
   collection_name: 'docs',
 });
-const POINT_MISSING = { status: { error: 'No point with id 1 found' } };
+// Qdrant's own 404 (a missing point), as vectordb re-wraps it.
+const POINT_MISSING = body('NOT_FOUND', {
+  message: 'No point with id 1 found',
+});
 
 function client(): AetherfyVectorsClient {
   return new AetherfyVectorsClient({
@@ -499,5 +502,46 @@ describe('NotFoundError', () => {
 
   it('is exported from the package', () => {
     expect(ExportedNotFound).toBe(NotFoundError);
+  });
+});
+
+// ===========================================================================
+// A missing point on the payload routes: NOT_FOUND, by code
+// ===========================================================================
+
+describe('a payload route NOT_FOUND is a missing point', () => {
+  it.each([
+    ['setPayload', 'payload', 'post'],
+    ['overwritePayload', 'payload', 'put'],
+    ['deletePayload', 'payload/delete', 'post'],
+  ] as const)('%s', async (op, route, verb) => {
+    const scope = nock(BASE);
+    scope[verb](`${WS_PATH}/collections/docs/points/${route}`).reply(
+      404,
+      POINT_MISSING
+    );
+    const c = client() as unknown as Record<
+      string,
+      (n: string, a: unknown, p: number[]) => Promise<unknown>
+    >;
+    const err = await c[op](
+      'docs',
+      op === 'deletePayload' ? ['a'] : { a: 1 },
+      [1]
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PointNotFoundError);
+    expect((err as PointNotFoundError).code).toBe('NOT_FOUND');
+    expect((err as PointNotFoundError).pointId).toBe('1');
+  });
+
+  it('CONTROL: a 404 without a code is the NotFoundError fallback, not a point', async () => {
+    nock(BASE)
+      .post(`${WS_PATH}/collections/docs/points/payload`)
+      .reply(404, { status: { error: 'No point with id 1 found' } });
+    const err = await client()
+      .setPayload('docs', { a: 1 }, [1])
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err).not.toBeInstanceOf(PointNotFoundError);
   });
 });

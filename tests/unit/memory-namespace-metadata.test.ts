@@ -8,7 +8,7 @@ import { THREAD_ID_KEY, THREADS_COLLECTION } from '../../src/memory/models';
 import { Namespace } from '../../src/memory/namespace';
 import { Thread } from '../../src/memory/thread';
 import type { AetherfyVectorsClient } from '../../src/client';
-import { AetherfyVectorsError, PointNotFoundError } from '../../src/exceptions';
+import { PointNotFoundError } from '../../src/exceptions';
 
 // Point-id fixtures — valid ids (UUID strings). Arbitrary labels like 'p1'
 // would be rejected by validatePointId on a real setPayload/deletePayload
@@ -207,11 +207,11 @@ describe('Namespace.mergeMetadata', () => {
     expect(client.setPayload).toHaveBeenCalled();
   });
 
-  it('translates a generic 404 into PointNotFoundError', async () => {
+  it("passes the client's PointNotFoundError through", async () => {
+    // The client raises it for a missing point (NOT_FOUND on the payload
+    // routes); the memory layer adds no translation of its own.
     const { ns, client } = makeNamespace();
-    client.setPayload.mockRejectedValue(
-      new AetherfyVectorsError('Not found', undefined, 404)
-    );
+    client.setPayload.mockRejectedValue(new PointNotFoundError(MISSING, 'kb'));
     await expect(ns.mergeMetadata(MISSING, { k: 1 })).rejects.toBeInstanceOf(
       PointNotFoundError
     );
@@ -261,10 +261,12 @@ describe('Namespace.deleteMetadataKeys', () => {
     }
   });
 
-  it('translates a generic 404 into PointNotFoundError', async () => {
+  it("passes the client's PointNotFoundError through", async () => {
+    // The client raises it for a missing point (NOT_FOUND on the payload
+    // routes); the memory layer adds no translation of its own.
     const { ns, client } = makeNamespace();
     client.deletePayload.mockRejectedValue(
-      new AetherfyVectorsError('Not found', undefined, 404)
+      new PointNotFoundError(MISSING, 'kb')
     );
     await expect(ns.deleteMetadataKeys(MISSING, ['k1'])).rejects.toBeInstanceOf(
       PointNotFoundError
