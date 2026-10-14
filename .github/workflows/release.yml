@@ -31,6 +31,14 @@ jobs:
           # happens to share the name cannot be picked up instead.
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
 
+      # Before anything is built, packed or published: the tag (v1.2.1) must
+      # be package.json's version. scripts/check-tag-version.js, tested by
+      # tests/unit/tag-version.test.ts.
+      - name: The tag is the package version
+        run: node scripts/check-tag-version.js "$TAG"
+        env:
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
