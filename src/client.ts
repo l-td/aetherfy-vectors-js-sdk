@@ -1933,10 +1933,10 @@ export class AetherfyVectorsClient {
   private async fetchAndCacheSchema(
     collectionName: string
   ): Promise<{ size: number; distance: string; etag: string }> {
-    // Caller passes the BARE collection name (no workspace slash).
-    // The wire URL uses the nested form when workspaced; the local
-    // schemaCache key uses the slash-form scopedName for collision-free
-    // lookups across workspaces with same-name collections.
+    // Caller passes the BARE collection name. The wire URL comes from
+    // buildCollectionPath; the local schemaCache key is the workspace-scoped
+    // name (scopeCollection), so same-name collections in different
+    // workspaces never share an entry.
     const scopedName = this.scopeCollection(collectionName);
     const response = await this.httpClient.get<{
       result: {

@@ -23,6 +23,7 @@ class VectorSearchApp {
     try {
       this.client = new AetherfyVectorsClient({
         apiKey: 'afy_test_demo_key_only', // Replace with your TEST key only
+        workspace: 'default', // a browser has no agent workspace: name one
         endpoint: 'https://vectors.aetherfy.com',
       });
 

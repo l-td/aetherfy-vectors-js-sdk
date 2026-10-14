@@ -182,6 +182,8 @@ const EXPECTED_CLAIMS: string[] = [
   'TooManyRunsInFlight.inFlightCount',
   'TooManyRunsInFlight.maxInFlightRuns',
   'ValidationError.message',
+  'WorkspaceNotFoundError.workspace',
+  'WorkspaceNotFoundError.workspaceId',
 ];
 
 const FENCE_RE = /^```(\w+)\n([\s\S]*?)^```/gm;

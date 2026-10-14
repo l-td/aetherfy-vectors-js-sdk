@@ -256,7 +256,7 @@ export class CollectionInOtherRegionError extends AetherfyVectorsError {
     super(
       message ||
         `Collection '${collectionName}' already exists in region ${existingRegions.join(', ')}. ` +
-          `Collection names are unique per account; pick a different name or use the existing one.`,
+          `Collection names are unique per workspace; pick a different name or use the existing one.`,
       undefined,
       409,
       {
