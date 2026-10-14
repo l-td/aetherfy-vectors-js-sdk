@@ -3,6 +3,12 @@
  */
 
 import nock from 'nock';
+
+/** The two internals these tests reach: the cache key and the cache. */
+type CacheInternals = {
+  scopeCollection(name: string): string;
+  schemaCache: Map<string, { size: number; distance: string; etag?: string }>;
+};
 import { AetherfyVectorsClient } from '../../src/client';
 import { DistanceMetric, VectorConfig, Point } from '../../src/models';
 import {
@@ -389,14 +395,11 @@ describe('AetherfyVectorsClient', () => {
     it('collectionExists fast-path returns true with no HTTP when cached', async () => {
       // Direct cache seed — isolates the fast path from create_collection.
       // node-setup's disableNetConnect ensures any HTTP attempt would throw.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (client as any).schemaCache.set(
-        (client as any).scopeCollection('already-known'),
-        {
-          size: 128,
-          distance: 'Cosine',
-        }
-      );
+      const internals = client as unknown as CacheInternals;
+      internals.schemaCache.set(internals.scopeCollection('already-known'), {
+        size: 128,
+        distance: 'Cosine',
+      });
 
       const exists = await client.collectionExists('already-known');
       expect(exists).toBe(true);

@@ -5,6 +5,12 @@
  */
 
 import nock from 'nock';
+
+/** The two internals these tests reach: the cache key and the cache. */
+type CacheInternals = {
+  scopeCollection(name: string): string;
+  schemaCache: Map<string, { size: number; distance: string; etag?: string }>;
+};
 import { AetherfyVectorsClient } from '../../src/client';
 import { DistanceMetric } from '../../src/models';
 import { MemoryClient } from '../../src/memory';
@@ -91,7 +97,7 @@ describe('Workspace Support', () => {
         make(),
         make({ workspace: WS_ID }),
         make({ workspace: 'other' }),
-      ] as any[];
+      ].map(c => c as unknown as CacheInternals);
 
       const keys = new Set(clients.map(c => c.scopeCollection('documents')));
       expect(keys.size).toBe(3);
@@ -102,11 +108,12 @@ describe('Workspace Support', () => {
     });
 
     it('clearSchemaCache takes the bare name', () => {
-      const c = make({ workspace: 'my-workspace' }) as any;
+      const real = make({ workspace: 'my-workspace' });
+      const c = real as unknown as CacheInternals;
       const key = c.scopeCollection('documents');
       c.schemaCache.set(key, { size: 3, distance: 'Cosine' });
 
-      c.clearSchemaCache('documents');
+      real.clearSchemaCache('documents');
 
       expect(c.schemaCache.has(key)).toBe(false);
     });

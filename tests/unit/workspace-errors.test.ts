@@ -7,6 +7,12 @@
  * through that method: an unknown workspace must never read as "not there".
  */
 import nock from 'nock';
+
+/** The two internals these tests reach: the cache key and the cache. */
+type CacheInternals = {
+  scopeCollection(name: string): string;
+  schemaCache: Map<string, { size: number; distance: string; etag?: string }>;
+};
 import { AetherfyVectorsClient } from '../../src/client';
 import {
   AetherfyVectorsError,
@@ -355,28 +361,30 @@ describe('an unknown workspace never reads as "not there"', () => {
   });
 
   it('does not evict the schema cache', async () => {
-    const c = client() as any;
+    const real = client();
+    const c = real as unknown as CacheInternals;
     const key = c.scopeCollection('docs');
     c.schemaCache.set(key, { size: 3, distance: 'Cosine' });
     nock(BASE)
       .get(`${WS_PATH}/collections/docs`)
       .reply(404, WORKSPACE_NOT_FOUND_BY_NAME);
 
-    await expect(c.getCollection('docs')).rejects.toBeInstanceOf(
+    await expect(real.getCollection('docs')).rejects.toBeInstanceOf(
       WorkspaceNotFoundError
     );
     expect(c.schemaCache.has(key)).toBe(true);
   });
 
   it('CONTROL: COLLECTION_NOT_FOUND evicts the schema cache', async () => {
-    const c = client() as any;
+    const real = client();
+    const c = real as unknown as CacheInternals;
     const key = c.scopeCollection('docs');
     c.schemaCache.set(key, { size: 3, distance: 'Cosine' });
     nock(BASE)
       .get(`${WS_PATH}/collections/docs`)
       .reply(404, COLLECTION_NOT_FOUND);
 
-    await expect(c.getCollection('docs')).rejects.toBeInstanceOf(
+    await expect(real.getCollection('docs')).rejects.toBeInstanceOf(
       CollectionNotFoundError
     );
     expect(c.schemaCache.has(key)).toBe(false);
