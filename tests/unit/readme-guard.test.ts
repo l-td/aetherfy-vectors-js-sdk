@@ -724,9 +724,11 @@ describe('README links', () => {
     // filter fails GREEN: no run, no red, no signal. So the trigger is
     // asserted here, where a red is visible.
     //
-    // CI now runs BY DEFAULT: push and pull_request carry `paths-ignore` (what
-    // provably cannot change the build or tests), never `paths` (an allow-list
-    // that silently stops covering the next input someone adds).
+    // CI now runs BY DEFAULT: push carries `paths-ignore` (what provably cannot
+    // change the build or tests), never `paths` (an allow-list that silently
+    // stops covering the next input someone adds). It runs on pushes only
+    // (owner ruling 2026-10-13): there is no pull_request trigger, and one
+    // coming back is refused below.
     //
     // The ignore list is pinned to an EXACT set rather than checked with a
     // glob matcher: GitHub's filter globs need a matcher, and this repo has
@@ -750,13 +752,11 @@ describe('README links', () => {
       '.github/workflows/pin-guard.yml',
       '.github/workflows/release.yml',
     ];
-    for (const event of ['push', 'pull_request']) {
-      expect({ event, ...triggers[event] }).toEqual({
-        event,
-        paths: undefined,
-        pathsIgnore: expected,
-      });
-    }
+    expect(triggers).not.toHaveProperty('pull_request');
+    expect({ ...triggers.push }).toEqual({
+      paths: undefined,
+      pathsIgnore: expected,
+    });
     expect(expected).not.toContain('README.md');
   });
 
