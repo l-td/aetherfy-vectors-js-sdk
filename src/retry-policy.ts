@@ -37,7 +37,7 @@
  * | overwritePayload   | REPEATABLE | write keyed by point id                      |
  * | deletePayload      | REPEATABLE | removing the same keys again changes nothing |
  * | createFieldIndex   | REPEATABLE | creating the same index again changes nothing |
- * | setSchema          | REPEATABLE | sent without If-Match: the same schema again |
+ * | setSchema          | REPEATABLE | BECAUSE it is sent without If-Match (below) |
  * | createCollection   | ONCE       | a repeat finds the collection it just made   |
  * | deleteCollection   | ONCE       | a repeat finds nothing to delete             |
  * | delete             | ONCE       | deleting points; a repeat reports a false error |
@@ -65,6 +65,10 @@ export const OPERATIONS = {
   overwritePayload: REPEATABLE,
   deletePayload: REPEATABLE,
   createFieldIndex: REPEATABLE,
+  // Repeatable BECAUSE setSchema is sent without If-Match: a repeat writes the
+  // same schema again. If it ever sends If-Match, a repeat after a hidden
+  // success gets a false 412, and it must move to ONCE
+  // (tests/unit/retry-policy.test.ts holds the two together).
   setSchema: REPEATABLE,
   createCollection: ONCE,
   deleteCollection: ONCE,

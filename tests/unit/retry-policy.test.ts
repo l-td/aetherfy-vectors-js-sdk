@@ -229,3 +229,19 @@ describe('the table is the call sites', () => {
     }
   });
 });
+
+it('setSchema is repeatable only while it sends no If-Match', async () => {
+  // A repeat of an If-Match write after a hidden success gets a false 412:
+  // if setSchema ever sends If-Match, it must be classed ONCE.
+  let ifMatch: unknown;
+  nock(BASE)
+    .put(`${WS}/collections/docs/schema`)
+    .reply(function () {
+      ifMatch = this.req.headers['if-match'];
+      return [200, { etag: 'v1' }];
+    });
+
+  await client().setSchema('docs', { fields: {} });
+
+  expect(OPERATIONS.setSchema).toBe(ifMatch === undefined ? REPEATABLE : ONCE);
+});
