@@ -19,7 +19,6 @@ import {
   SchemaValidationError,
   createErrorFromResponse,
   isAetherfyVectorsError,
-  isRetryableError,
 } from '../../src/exceptions';
 
 describe('Custom Exceptions', () => {
@@ -556,34 +555,6 @@ describe('Custom Exceptions', () => {
 
       expect(isAetherfyVectorsError(aetherfyError)).toBe(true);
       expect(isAetherfyVectorsError(regularError)).toBe(false);
-    });
-
-    it('should identify retryable errors', () => {
-      const retryableErrors = [
-        new ServiceUnavailableError(),
-        new RequestTimeoutError(),
-        new NetworkError(),
-        new RateLimitExceededError('Limited', 60),
-      ];
-
-      const nonRetryableErrors = [
-        new ValidationError(),
-        new AuthenticationError(),
-        new CollectionNotFoundError('test'),
-        new CollectionInUseError('test', ['agent-a']),
-      ];
-
-      retryableErrors.forEach(error => {
-        expect(isRetryableError(error)).toBe(true);
-      });
-
-      nonRetryableErrors.forEach(error => {
-        expect(isRetryableError(error)).toBe(false);
-      });
-
-      // Rate limit without retry info should not be retryable
-      const rateLimitNoRetry = new RateLimitExceededError('Limited');
-      expect(isRetryableError(rateLimitNoRetry)).toBe(false);
     });
   });
 

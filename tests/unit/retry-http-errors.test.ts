@@ -12,9 +12,8 @@ import {
   AuthenticationError,
   CollectionNotFoundError,
   ConflictError,
-  isRetryableError,
 } from '../../src/exceptions';
-import { REPEATABLE } from '../../src/retry-policy';
+import { REPEATABLE, shouldRetryClass } from '../../src/retry-policy';
 
 describe('Retry Logic with HTTP Errors', () => {
   describe('Retryable Errors', () => {
@@ -263,45 +262,59 @@ describe('Retry Logic with HTTP Errors', () => {
     }, 10000);
   });
 
-  describe('isRetryableError Type Guard', () => {
+  describe('the rule, for a repeatable operation', () => {
     it('should identify ServiceUnavailableError as retryable', () => {
-      expect(isRetryableError(new ServiceUnavailableError())).toBe(true);
+      expect(shouldRetryClass(REPEATABLE, new ServiceUnavailableError())).toBe(
+        true
+      );
     });
 
     it('should identify RequestTimeoutError as retryable', () => {
-      expect(isRetryableError(new RequestTimeoutError())).toBe(true);
+      expect(shouldRetryClass(REPEATABLE, new RequestTimeoutError())).toBe(
+        true
+      );
     });
 
     it('should identify NetworkError as retryable', () => {
-      expect(isRetryableError(new NetworkError())).toBe(true);
+      expect(shouldRetryClass(REPEATABLE, new NetworkError())).toBe(true);
     });
 
     it('should identify RateLimitExceededError with retryAfter as retryable', () => {
-      expect(isRetryableError(new RateLimitExceededError('', 2))).toBe(true);
+      expect(
+        shouldRetryClass(REPEATABLE, new RateLimitExceededError('', 2))
+      ).toBe(true);
     });
 
     it('should identify RateLimitExceededError without retryAfter as NOT retryable', () => {
-      expect(isRetryableError(new RateLimitExceededError())).toBe(false);
+      expect(shouldRetryClass(REPEATABLE, new RateLimitExceededError())).toBe(
+        false
+      );
     });
 
     it('should identify ValidationError as NOT retryable', () => {
-      expect(isRetryableError(new ValidationError())).toBe(false);
+      expect(shouldRetryClass(REPEATABLE, new ValidationError())).toBe(false);
     });
 
     it('should identify AuthenticationError as NOT retryable', () => {
-      expect(isRetryableError(new AuthenticationError())).toBe(false);
+      expect(shouldRetryClass(REPEATABLE, new AuthenticationError())).toBe(
+        false
+      );
     });
 
     it('should identify CollectionNotFoundError as NOT retryable', () => {
-      expect(isRetryableError(new CollectionNotFoundError('test'))).toBe(false);
+      expect(
+        shouldRetryClass(REPEATABLE, new CollectionNotFoundError('test'))
+      ).toBe(false);
     });
 
     it('should identify ConflictError as NOT retryable', () => {
-      expect(isRetryableError(new ConflictError())).toBe(false);
+      expect(shouldRetryClass(REPEATABLE, new ConflictError())).toBe(false);
     });
 
     it('should identify generic Error as NOT retryable', () => {
-      expect(isRetryableError(new Error('generic error'))).toBe(false);
+      expect(shouldRetryClass(REPEATABLE, new Error('generic error'))).toBe(
+        false
+      );
     });
   });
 });

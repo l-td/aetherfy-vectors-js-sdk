@@ -82,6 +82,12 @@ described here.
   required) and decide which failures to retry through the same rule as the
   client; `retryCondition` is gone, and so is its default, which retried
   every error, 4xx included. New optional `deadline` / `now`.
+- **BREAKING: `isRetryableError` is removed** (from the root and from
+  `exceptions`), as Python removed `is_retryable_error`. Whether to retry
+  depends on the operation's class and on `requestSent`; a yes/no on the
+  error alone contradicts the rule. `retryWithBackoff` and the classes it
+  takes (`REPEATABLE`, `ONCE`) are the public surface, with the same
+  example in both READMEs.
 - **A connect that never completed is now known to be one.** Under real
   Node, axios reports it with its own timeout code (`ECONNABORTED`), the
   same as a timeout waiting for the answer, so it read as ambiguous. The

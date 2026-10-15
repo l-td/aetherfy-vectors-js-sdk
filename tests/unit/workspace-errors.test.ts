@@ -20,7 +20,6 @@ import {
   CollectionNotFoundError,
   ConflictError,
   createErrorFromResponse,
-  isRetryableError,
   PointNotFoundError,
   SchemaNotFoundError,
   ServiceUnavailableError,
@@ -35,6 +34,7 @@ import {
 import { MemoryClient, NamespaceNotFoundError } from '../../src/memory';
 import { Namespace } from '../../src/memory/namespace';
 import { DistanceMetric } from '../../src/models';
+import { REPEATABLE, shouldRetryClass } from '../../src/retry-policy';
 
 const BASE = 'https://vectors.aetherfy.com';
 const WS_PATH = '/api/v1/workspaces/typo';
@@ -141,7 +141,10 @@ describe('retryability', () => {
     'PLACEMENT_UNAVAILABLE',
   ])('%s is retryable', code => {
     expect(
-      isRetryableError(createErrorFromResponse(body(code), 503, 'x'))
+      shouldRetryClass(
+        REPEATABLE,
+        createErrorFromResponse(body(code), 503, 'x')
+      )
     ).toBe(true);
   });
 
@@ -151,7 +154,10 @@ describe('retryability', () => {
     [409, 'ADDRESSED_AN_ALIAS'],
   ])('CONTROL: %i %s is not', (status, code) => {
     expect(
-      isRetryableError(createErrorFromResponse(body(code), status, 'x'))
+      shouldRetryClass(
+        REPEATABLE,
+        createErrorFromResponse(body(code), status, 'x')
+      )
     ).toBe(false);
   });
 });

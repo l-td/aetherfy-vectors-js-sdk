@@ -576,6 +576,24 @@ operations are retried.
 
 When the retries run out, the last error is raised (`ServiceUnavailableError`, `RequestTimeoutError` or `NetworkError`).
 
+The client already retries under this rule. To retry more around your own
+operation, say whether repeating it gives the same result: `REPEATABLE` (a
+read, a write keyed by id) or `ONCE` (a create, a delete). The same failures
+are retried as above; a 4xx never is.
+
+```typescript
+import { retryWithBackoff, REPEATABLE } from 'aetherfy-vectors';
+
+const results = await retryWithBackoff(
+  () => client.search('collection', vector),
+  {
+    retryClass: REPEATABLE,
+    maxRetries: 3,
+    baseDelay: 1000,
+  }
+);
+```
+
 Renaming a collection, and moving one to another workspace, are done from the
 dashboard or the CLI (`afy collections update`), not from the SDK. Code still
 using the old name gets `CollectionNotFoundError`.
@@ -1056,8 +1074,6 @@ import {
   QuotaExceededError,
   SchemaNotFoundError,
   SchemaValidationError,
-  isAetherfyVectorsError,
-  isRetryableError,
 } from 'aetherfy-vectors';
 
 try {
@@ -1078,7 +1094,7 @@ try {
     console.error(
       `Quota '${error.quotaType}' exceeded: ${error.current}/${error.limit}`
     );
-  } else if (isAetherfyVectorsError(error) && isRetryableError(error)) {
+  } else if (error instanceof ServiceUnavailableError) {
     // Already retried under the rule ("When a request is retried"). Calling
     // again is safe only for a repeatable operation: an ambiguous failure of
     // a delete or a create may have succeeded.
@@ -1099,26 +1115,6 @@ for (const batch of batches) {
   await client.upsert('collection', batch);
   console.log(`Processed batch of ${batch.length} points`);
 }
-```
-
-### Retry Logic
-
-```typescript
-import { retryWithBackoff, REPEATABLE } from 'aetherfy-vectors';
-
-// The client already retries under the rule ("When a request is retried").
-// To retry more, say whether repeating the operation gives the same result:
-// REPEATABLE (a read, a write keyed by id) or ONCE (a create, a delete). Which
-// failures are retried follows the same rule; a 4xx never is.
-const results = await retryWithBackoff(
-  () => client.search('collection', vector),
-  {
-    retryClass: REPEATABLE,
-    maxRetries: 3,
-    baseDelay: 1000,
-    backoffFactor: 2,
-  }
-);
 ```
 
 ### Environment Detection

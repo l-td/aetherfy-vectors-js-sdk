@@ -330,6 +330,18 @@ describe('a transport failure with NO socket mark means "may have been sent"', (
   );
 });
 
+describe('the retry surface is public, and only the helper that takes the class', () => {
+  it('the root exports retryWithBackoff and the classes, not a bare isRetryableError', () => {
+    const root = jest.requireActual('../../src') as Record<string, unknown>;
+    expect(typeof root.retryWithBackoff).toBe('function');
+    expect(root.REPEATABLE).toBe(REPEATABLE);
+    expect(root.ONCE).toBe(ONCE);
+    // Whether to retry depends on the operation's class and on requestSent:
+    // a yes/no on the error alone contradicts the rule.
+    expect(Object.keys(root)).not.toContain('isRetryableError');
+  });
+});
+
 describe('the backoff seam is not public', () => {
   it('is on neither the client class nor the package root', () => {
     const root = jest.requireActual('../../src') as Record<string, unknown>;

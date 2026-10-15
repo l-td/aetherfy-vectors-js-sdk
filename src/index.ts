@@ -101,7 +101,6 @@ export {
   // Utility functions
   createErrorFromResponse,
   isAetherfyVectorsError,
-  isRetryableError,
 } from './exceptions';
 
 // Schema validation exports
