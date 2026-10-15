@@ -10,6 +10,7 @@
  *     re-asserted at runtime — see the "as any" note below).
  */
 
+import { defined } from './defined';
 import { AetherfyVectorsClient } from '../../src/client';
 import { ScrollResult } from '../../src/models';
 
@@ -30,7 +31,7 @@ describe('AetherfyVectorsClient.scrollIter', () => {
     ];
     const scrollSpy = jest
       .spyOn(client, 'scroll')
-      .mockImplementation(async () => pages.shift()!);
+      .mockImplementation(async () => defined(pages.shift(), 'the next page'));
 
     const out: Array<string | number> = [];
     for await (const p of client.scrollIter('col', { batchSize: 2 })) {
@@ -77,7 +78,6 @@ describe('AetherfyVectorsClient.scrollIter', () => {
     });
     const flt = { must: [{ key: 'category', match: { value: 'docs' } }] };
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for await (const _ of client.scrollIter('col', {
       batchSize: 128,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -126,7 +126,6 @@ describe('AetherfyVectorsClient.scrollIter', () => {
       nextPageOffset: null,
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for await (const _ of client.scrollIter('col')) {
       /* no-op */
     }

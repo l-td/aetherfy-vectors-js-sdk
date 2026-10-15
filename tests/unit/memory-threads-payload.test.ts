@@ -14,6 +14,7 @@
  * Parity file with the Python SDK's tests/test_memory_threads_payload.py.
  */
 
+import { defined } from './defined';
 import { AetherfyVectorsClient } from '../../src/client';
 import { PointNotFoundError } from '../../src/exceptions';
 import {
@@ -99,7 +100,10 @@ describe('one plain __threads__ in each workspace', () => {
       '__threads__',
       '__threads__support',
     ]);
-    expect(store.collections.get('__threads__support')!.points.size).toBe(0);
+    expect(
+      defined(store.collections.get('__threads__support'), 'the collection')
+        .points.size
+    ).toBe(0);
   });
 });
 
@@ -209,9 +213,16 @@ describe('an empty thread', () => {
   it('the marker carries a unit vector, not a zero vector', async () => {
     const { store, memory } = build();
     await memory.createThread('conv-1');
-    const [marker] = [...store.collections.get(THREADS)!.points.values()];
-    expect(marker!.payload[THREAD_MARKER_KEY]).toBe(true);
-    expect(marker!.vector.reduce((a, b) => a + b * b, 0)).toBeCloseTo(1);
+    const [marker] = [
+      ...defined(
+        store.collections.get(THREADS),
+        'the collection'
+      ).points.values(),
+    ];
+    expect(defined(marker, 'the marker').payload[THREAD_MARKER_KEY]).toBe(true);
+    expect(
+      defined(marker, 'the marker').vector.reduce((a, b) => a + b * b, 0)
+    ).toBeCloseTo(1);
   });
 });
 
@@ -269,15 +280,19 @@ describe('isolation between threads', () => {
     const { a, b } = await twoThreads();
     const [aId] = await msgs(a, 1, 'a');
     const [bId] = await msgs(b, 1, 'b');
-    expect((await a.retrieve([aId!])).map(p => p.id)).toEqual([aId]);
-    await expect(a.retrieve([bId!])).resolves.toEqual([]);
+    expect((await a.retrieve([defined(aId, 'aId')])).map(p => p.id)).toEqual([
+      aId,
+    ]);
+    await expect(a.retrieve([defined(bId, 'bId')])).resolves.toEqual([]);
   });
 
   it('retrieve without payload still scopes and still omits the payload', async () => {
     const { a, b } = await twoThreads();
     const [aId] = await msgs(a, 1, 'a');
     const [bId] = await msgs(b, 1, 'b');
-    const got = await a.retrieve([aId!, bId!], { withPayload: false });
+    const got = await a.retrieve([defined(aId, 'aId'), defined(bId, 'bId')], {
+      withPayload: false,
+    });
     expect(got.map(p => p.id)).toEqual([aId]);
     expect(got[0]).not.toHaveProperty('payload');
   });
@@ -285,7 +300,7 @@ describe('isolation between threads', () => {
   it('delete by id will not reach into a sibling thread', async () => {
     const { a, b } = await twoThreads();
     const [bId] = await msgs(b, 1, 'b');
-    await a.delete([bId!]);
+    await a.delete([defined(bId, 'bId')]);
     await expect(b.count()).resolves.toBe(1);
   });
 
@@ -303,7 +318,7 @@ describe('isolation between threads', () => {
       sent.push(sel);
       return realDelete(name, sel);
     };
-    await a.delete([drop!]);
+    await a.delete([defined(drop, 'drop')]);
 
     expect(sent).toHaveLength(1);
     const selector = sent[0] as { must: unknown[]; mustNot: unknown[] };
@@ -375,15 +390,15 @@ describe('isolation between threads', () => {
   it('metadata writes will not reach into a sibling thread', async () => {
     const { a, b } = await twoThreads();
     const [bId] = await msgs(b, 1, 'b');
-    await expect(a.setMetadata(bId!, { x: 1 })).rejects.toThrow(
+    await expect(a.setMetadata(defined(bId, 'bId'), { x: 1 })).rejects.toThrow(
       PointNotFoundError
     );
-    await expect(a.mergeMetadata(bId!, { x: 1 })).rejects.toThrow(
-      PointNotFoundError
-    );
-    await expect(a.deleteMetadataKeys(bId!, ['x'])).rejects.toThrow(
-      PointNotFoundError
-    );
+    await expect(
+      a.mergeMetadata(defined(bId, 'bId'), { x: 1 })
+    ).rejects.toThrow(PointNotFoundError);
+    await expect(
+      a.deleteMetadataKeys(defined(bId, 'bId'), ['x'])
+    ).rejects.toThrow(PointNotFoundError);
   });
 });
 
@@ -403,7 +418,10 @@ describe('markers never read as messages', () => {
    */
   function failOpenWithAStampedMarker(store: FakeVectorsClient) {
     store.failOpenOnMustNot = true;
-    for (const p of store.collections.get(THREADS)!.points.values()) {
+    for (const p of defined(
+      store.collections.get(THREADS),
+      'the collection'
+    ).points.values()) {
       if (p.payload[THREAD_MARKER_KEY]) p.payload.ts = 99;
     }
   }
@@ -437,7 +455,7 @@ describe('markers never read as messages', () => {
     await msgs(a, 1, 'a');
     const hits = await a.search(v(), { limit: 50 });
     expect(hits).toHaveLength(1);
-    expect(hits[0]!.payload?.content).toBe('a0');
+    expect(defined(hits[0], 'the first hit').payload?.content).toBe('a0');
   });
 
   it('the marker is not counted and not iterated', async () => {
@@ -694,8 +712,8 @@ describe('getThread, namespaces and the schema surface', () => {
       client: store as unknown as AetherfyVectorsClient,
     });
     await m.createThread('a');
-    expect(store.collections.get(THREADS)!.config.size).toBe(
-      DEFAULT_VECTOR_SIZE
-    );
+    expect(
+      defined(store.collections.get(THREADS), 'the collection').config.size
+    ).toBe(DEFAULT_VECTOR_SIZE);
   });
 });

@@ -103,8 +103,12 @@ function runLinting() {
   // TypeScript type checking (equivalent to mypy)
   const typeCheckResult = run('npx tsc --noEmit', 'TypeScript type checking');
 
-  // ESLint (code quality)
-  const lintResult = run('npx eslint src tests --ext .ts', 'ESLint checking');
+  // ESLint (code quality). A warning fails the build, as the dashboard's
+  // lint does: the count stays at zero, or the rule is changed on purpose.
+  const lintResult = run(
+    'npx eslint src tests --ext .ts --max-warnings 0',
+    'ESLint checking'
+  );
 
   return typeCheckResult && lintResult;
 }

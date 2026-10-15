@@ -151,11 +151,17 @@ function interfaceMembers(name: string): Set<string> | null {
 }
 
 /** Constructors a sample may bind a receiver from. */
-const RECEIVER_CLASSES: Record<string, any> = {
-  AetherfyVectorsClient: (sdk as any).AetherfyVectorsClient,
-  MemoryClient: (sdk as any).MemoryClient,
-  Namespace: (sdk as any).Namespace,
-  Thread: (sdk as any).Thread,
+type ClassShape = { prototype?: Record<string, unknown> } & Record<
+  string,
+  unknown
+>;
+const exportsOf = (module: unknown): Record<string, unknown> =>
+  module as Record<string, unknown>;
+const RECEIVER_CLASSES: Record<string, ClassShape> = {
+  AetherfyVectorsClient: exportsOf(sdk).AetherfyVectorsClient as ClassShape,
+  MemoryClient: exportsOf(sdk).MemoryClient as ClassShape,
+  Namespace: exportsOf(sdk).Namespace as ClassShape,
+  Thread: exportsOf(sdk).Thread as ClassShape,
 };
 
 /** MemoryClient factories that hand back another tracked class. */
@@ -249,7 +255,9 @@ export function checkSample(
   );
 
   // A sample that cannot parse cannot be copied.
-  const diagnostics = (src as any).parseDiagnostics ?? [];
+  const diagnostics =
+    (src as unknown as { parseDiagnostics?: ts.Diagnostic[] })
+      .parseDiagnostics ?? [];
   if (diagnostics.length > 0) {
     const d = diagnostics[0];
     problems.push(
@@ -299,11 +307,11 @@ export function checkSample(
       if (entry) {
         const clause = node.importClause;
         const named = clause?.namedBindings;
-        if (named && ts.isNamedImports(named)) {
+        if (clause && named && ts.isNamedImports(named)) {
           for (const el of named.elements) {
             const name = el.name.text;
-            const isTypeOnly = clause!.isTypeOnly || el.isTypeOnly;
-            const existsAtRuntime = name in (entry.module as any);
+            const isTypeOnly = clause.isTypeOnly || el.isTypeOnly;
+            const existsAtRuntime = name in (entry.module as object);
             const existsAsType = typeNames.has(name);
             if (
               isTypeOnly ? !existsAsType : !existsAtRuntime && !existsAsType
@@ -375,7 +383,7 @@ export function checkSample(
                   if (!allowed.has(prop.name.text)) {
                     problems.push(
                       `\`${recv.text}.${method}({ ${prop.name.text}: ... })\` — ` +
-                        `no such option on ${spec!.iface}. Accepted: ` +
+                        `no such option on ${spec?.iface}. Accepted: ` +
                         `${[...allowed].join(', ')}`
                     );
                   }
@@ -527,7 +535,7 @@ describe('README code samples', () => {
 
   it('type-only imports are resolved as types, not runtime exports', () => {
     // ScrollIterOptions is an interface: absent at runtime, present in source.
-    expect((sdk as any).ScrollIterOptions).toBeUndefined();
+    expect(exportsOf(sdk).ScrollIterOptions).toBeUndefined();
     expect(typeNames.has('ScrollIterOptions')).toBe(true);
     const problems = checkSample(
       `import type { ScrollIterOptions } from 'aetherfy-vectors';`,

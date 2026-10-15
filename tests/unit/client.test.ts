@@ -12,6 +12,10 @@ type CacheInternals = {
 };
 import { AetherfyVectorsClient } from '../../src/client';
 import { DistanceMetric, VectorConfig, Point } from '../../src/models';
+
+// A distance that is not a DistanceMetric on purpose: the client normalises
+// (or rejects) what a JS caller may pass.
+const asDistance = (value: unknown): DistanceMetric => value as DistanceMetric;
 import {
   ValidationError,
   NetworkError,
@@ -583,7 +587,7 @@ describe('AetherfyVectorsClient', () => {
 
       await client.createCollection('test', {
         size: 128,
-        distance: 'cosine' as any,
+        distance: asDistance('cosine'),
       });
 
       expect(scope.isDone()).toBe(true);
@@ -619,7 +623,7 @@ describe('AetherfyVectorsClient', () => {
 
       await client.createCollection('test', {
         size: 128,
-        distance: 'euclidean' as any,
+        distance: asDistance('euclidean'),
       });
 
       expect(scope.isDone()).toBe(true);
@@ -637,7 +641,7 @@ describe('AetherfyVectorsClient', () => {
 
       await client.createCollection('test', {
         size: 128,
-        distance: 'euclid' as any,
+        distance: asDistance('euclid'),
       });
 
       expect(scope.isDone()).toBe(true);
@@ -655,7 +659,7 @@ describe('AetherfyVectorsClient', () => {
 
       await client.createCollection('test', {
         size: 128,
-        distance: 'dot' as any,
+        distance: asDistance('dot'),
       });
 
       expect(scope.isDone()).toBe(true);
@@ -675,7 +679,7 @@ describe('AetherfyVectorsClient', () => {
 
       await client.createCollection('test', {
         size: 128,
-        distance: 'manhattan' as any,
+        distance: asDistance('manhattan'),
       });
 
       expect(scope.isDone()).toBe(true);
@@ -693,7 +697,7 @@ describe('AetherfyVectorsClient', () => {
 
       await client.createCollection('test', {
         size: 128,
-        distance: 'Cosine' as any,
+        distance: asDistance('Cosine'),
       });
 
       expect(scope.isDone()).toBe(true);
@@ -703,14 +707,14 @@ describe('AetherfyVectorsClient', () => {
       await expect(
         client.createCollection('test', {
           size: 128,
-          distance: 'invalid-metric' as any,
+          distance: asDistance('invalid-metric'),
         })
       ).rejects.toThrow(ValidationError);
 
       await expect(
         client.createCollection('test', {
           size: 128,
-          distance: 'invalid-metric' as any,
+          distance: asDistance('invalid-metric'),
         })
       ).rejects.toThrow('Invalid distance metric');
     });
@@ -719,14 +723,14 @@ describe('AetherfyVectorsClient', () => {
       await expect(
         client.createCollection('test', {
           size: 128,
-          distance: 123 as any,
+          distance: asDistance(123),
         })
       ).rejects.toThrow(ValidationError);
 
       await expect(
         client.createCollection('test', {
           size: 128,
-          distance: 123 as any,
+          distance: asDistance(123),
         })
       ).rejects.toThrow(
         'Distance metric must be a DistanceMetric enum or valid string'
