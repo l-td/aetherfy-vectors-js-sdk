@@ -15,6 +15,7 @@ import {
   REPEATABLE,
   REPEATABLE_DESPITE_ITS_NAME,
   ambiguous,
+  backoff,
   refusedBeforeAnything,
 } from '../../src/retry-policy';
 
@@ -327,4 +328,18 @@ describe('a transport failure with NO socket mark means "may have been sent"', (
       expect(repeatable.attempts()).toBe(2);
     }
   );
+});
+
+describe('the backoff seam is not public', () => {
+  it('is on neither the client class nor the package root', () => {
+    const root = jest.requireActual('../../src') as Record<string, unknown>;
+    expect('retryBaseDelayMs' in AetherfyVectorsClient).toBe(false);
+    expect(Object.keys(root)).not.toContain('backoff');
+    expect(Object.keys(root)).not.toContain('retryBaseDelayMs');
+  });
+
+  it('is what the client waits by', () => {
+    // setup.ts shortens it to 1 ms for the whole suite.
+    expect(backoff.baseDelayMs).toBe(1);
+  });
 });

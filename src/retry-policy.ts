@@ -60,6 +60,16 @@ import {
   ServiceUnavailableError,
 } from './exceptions';
 
+/**
+ * The first retry's wait, in ms (then doubled, each jittered to 50-100%).
+ *
+ * INTERNAL: a test seam, as Python's suite patches `sleep`. It is not
+ * re-exported by src/index.ts, so it is not part of the package's API; the
+ * unit tests set it to 1 (tests/setup.ts) and
+ * tests/unit/retry-policy.test.ts holds it out of the public surface.
+ */
+export const backoff = { baseDelayMs: 1000 };
+
 export const REPEATABLE = 'repeatable';
 export const ONCE = 'once';
 export type RetryClass = typeof REPEATABLE | typeof ONCE;

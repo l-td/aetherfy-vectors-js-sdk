@@ -37,7 +37,7 @@ import {
 } from './exceptions';
 import { HttpResponse } from './http/types';
 import { retryWithBackoff, validatePointId } from './utils';
-import { OPERATIONS, Operation } from './retry-policy';
+import { OPERATIONS, Operation, backoff } from './retry-policy';
 import { assertAllowedOptionKeys, optionKeys } from './utils/options';
 import { serializeFilter } from './utils/filter';
 import { chunkPointsByBytes, MAX_REQUEST_BYTES } from './utils/chunking';
@@ -185,11 +185,6 @@ export const INDEX_RESEND_PAUSE_MAX_MS = 10000;
 export class AetherfyVectorsClient {
   private static readonly DEFAULT_ENDPOINT = 'https://vectors.aetherfy.com';
   private static readonly DEFAULT_TIMEOUT = 30000;
-  /**
-   * The first retry's wait, in ms (then doubled, each jittered to 50-100%).
-   * @internal The unit tests shorten it, as the Python suite patches sleep.
-   */
-  static retryBaseDelayMs = 1000;
   private static readonly VALID_REGIONS: ReadonlySet<string> = new Set([
     'us-east-1',
     'eu-central-1',
@@ -2209,7 +2204,7 @@ export class AetherfyVectorsClient {
     return retryWithBackoff(request, {
       retryClass: OPERATIONS[operation],
       maxRetries: 3,
-      baseDelay: AetherfyVectorsClient.retryBaseDelayMs,
+      baseDelay: backoff.baseDelayMs,
       deadline,
       now: () => this.now(),
     });
