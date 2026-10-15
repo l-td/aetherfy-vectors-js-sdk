@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.2.1] - not yet released
+## [1.2.1] - 2026-10-15
 
 This release contains changes marked BREAKING below: every collection now
 lives in a workspace. They ship in a patch version, not 2.0.0, because the
