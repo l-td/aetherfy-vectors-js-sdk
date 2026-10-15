@@ -302,3 +302,29 @@ describe('the wrong-class guard', () => {
     }
   });
 });
+
+describe('a transport failure with NO socket mark means "may have been sent"', () => {
+  // Bun, a custom agent or an adapter that gives no socket: the SDK knows a
+  // connection was never made ONLY from the mark HttpClient puts on the error
+  // (requestSent: false). Without it, whatever the code says, the request may
+  // have run: only repeatable operations are retried.
+  it.each([
+    'ECONNREFUSED',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    'ETIMEDOUT',
+    'ECONNABORTED',
+  ])(
+    '%s without the mark: a ONCE operation is not retried, a repeatable one is',
+    async code => {
+      const once = wire(CALLS.deleteCollection, [transport(code)]);
+      await expect(CALLS.deleteCollection.run(client())).rejects.toThrow();
+      expect(once.attempts()).toBe(1);
+      nock.cleanAll();
+
+      const repeatable = wire(CALLS.count, [transport(code)]);
+      await CALLS.count.run(client());
+      expect(repeatable.attempts()).toBe(2);
+    }
+  );
+});

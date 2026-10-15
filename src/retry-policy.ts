@@ -13,7 +13,9 @@
  *      the SDK's agents record whether each socket ever connected
  *      (http/client.ts watchingAgent) and HttpClient marks the failure
  *      `requestSent: false` (DNS failures and refusals included: their
- *      socket never connects either).
+ *      socket never connects either). WITHOUT that mark (a runtime or adapter
+ *      that gives no socket) a transport failure means "may have been sent":
+ *      kind 2 below, never kind 1.
  *    - 429 with a Retry-After: refused, nothing ran (as before this rule).
  * 2. AMBIGUOUS: a timeout waiting for the answer, a reset after sending, any
  *    other 5xx. The request may have run. Retried only for an operation whose

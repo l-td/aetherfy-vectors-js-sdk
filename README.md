@@ -568,6 +568,12 @@ a call's timeout.
 the same schema again. A conditional write would get a false 412 on a repeat
 after a hidden success, so it would be classed once.
 
+A connection "never made" is known from the SDK's own HTTP agents, which watch
+whether each socket ever connected (Node and Bun both give them). Where no
+such information exists (a custom agent, an adapter or runtime that gives no
+socket) a transport failure counts as "may have been sent": only repeatable
+operations are retried.
+
 When the retries run out, the last error is raised (`ServiceUnavailableError`, `RequestTimeoutError` or `NetworkError`).
 
 Renaming a collection, and moving one to another workspace, are done from the
