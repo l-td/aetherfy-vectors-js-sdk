@@ -14,6 +14,8 @@ import {
   OPERATIONS,
   REPEATABLE,
   REPEATABLE_DESPITE_ITS_NAME,
+  ambiguous,
+  refusedBeforeAnything,
 } from '../../src/retry-policy';
 
 const BASE = 'https://vectors.aetherfy.com';
@@ -32,8 +34,8 @@ function client(): AetherfyVectorsClient {
 }
 
 /** A transport failure as Node reports it. */
-function transport(code: string, syscall?: string): Error {
-  return Object.assign(new Error(`${code} (test)`), { code, syscall });
+function transport(code: string): Error {
+  return Object.assign(new Error(`${code} (test)`), { code });
 }
 
 type Call = {
@@ -121,14 +123,16 @@ describe('1. refused before anything ran: every operation', () => {
     expect(w.attempts()).toBe(2);
   });
 
-  it.each([
-    ['ECONNREFUSED', undefined],
-    ['ENOTFOUND', undefined],
-    ['ETIMEDOUT', 'connect'],
-  ])('a DELETE retries a connection never made (%s)', async (code, syscall) => {
-    const w = wire(CALLS.deleteCollection, [transport(code, syscall)]);
-    await CALLS.deleteCollection.run(client());
-    expect(w.attempts()).toBe(2);
+  it('a connection never made (HttpClient: requestSent false) is a refusal', () => {
+    // nock has no socket to watch; the real thing is proven by
+    // retry-real-network.test.ts. Here, the rule on the marked error.
+    const neverSent = Object.assign(new Error('Network error: x'), {
+      requestSent: false,
+    });
+    const maybeSent = new Error('Network error: x');
+    expect(refusedBeforeAnything(neverSent)).toBe(true);
+    expect(refusedBeforeAnything(maybeSent)).toBe(false);
+    expect(ambiguous(maybeSent)).toBe(true);
   });
 });
 

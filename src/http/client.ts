@@ -238,8 +238,6 @@ export class HttpClient {
         const errorObj = error as {
           code: string;
           message?: string;
-          syscall?: string;
-          cause?: { syscall?: string };
           request?: { socket?: Record<symbol, boolean> };
         };
         // A socket of ours that never connected: the request never left.
@@ -252,12 +250,10 @@ export class HttpClient {
             ? message
             : `Network error: ${message}`
         );
-        // `syscall` tells a connect timeout (the request never left) from a
-        // timeout waiting for the answer: see retry-policy.ts.
+        // requestSent: false tells a connection never made from one that
+        // may have carried the request: see retry-policy.ts.
         Object.assign(networkError, {
           code: errorObj.code,
-          // axios keeps Node's error, and its syscall, as `cause`.
-          syscall: errorObj.syscall ?? errorObj.cause?.syscall,
           ...(neverConnected ? { requestSent: false } : {}),
         });
         throw networkError;

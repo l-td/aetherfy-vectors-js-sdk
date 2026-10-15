@@ -12,8 +12,8 @@
  *      timeout code (ECONNABORTED), like a timeout waiting for the answer, so
  *      the SDK's agents record whether each socket ever connected
  *      (http/client.ts watchingAgent) and HttpClient marks the failure
- *      `requestSent: false`. The codes ENOTFOUND, EAI_AGAIN, ECONNREFUSED
- *      and ETIMEDOUT-on-connect are read too, for errors without a socket.
+ *      `requestSent: false` (DNS failures and refusals included: their
+ *      socket never connects either).
  *    - 429 with a Retry-After: refused, nothing ran (as before this rule).
  * 2. AMBIGUOUS: a timeout waiting for the answer, a reset after sending, any
  *    other 5xx. The request may have run. Retried only for an operation whose
@@ -113,18 +113,9 @@ export const REFUSED_BEFORE_ANYTHING_CODES: ReadonlySet<string> = new Set([
   'PLACEMENT_UNAVAILABLE',
 ]);
 
-/** Node error codes of a connection that was never made. */
-const NEVER_CONNECTED_CODES: ReadonlySet<string> = new Set([
-  'ENOTFOUND',
-  'EAI_AGAIN',
-  'ECONNREFUSED',
-]);
-
 interface FailureShape {
   status?: number;
   responseData?: Record<string, unknown>;
-  code?: unknown;
-  syscall?: unknown;
   message?: unknown;
   requestSent?: unknown;
 }
@@ -173,15 +164,8 @@ export function refusedBeforeAnything(error: unknown): boolean {
     const retryAfter = e.responseData?.retryAfter;
     return retryAfter !== undefined && retryAfter !== null;
   }
-  if (isTransport(e)) {
-    if (e.requestSent === false) return true; // HttpClient saw no connect
-    return (
-      typeof e.code === 'string' &&
-      (NEVER_CONNECTED_CODES.has(e.code) ||
-        (e.code === 'ETIMEDOUT' && e.syscall === 'connect'))
-    );
-  }
-  return false;
+  // HttpClient saw the socket never connect.
+  return isTransport(e) && e.requestSent === false;
 }
 
 /** Kind 2: the request may have run (a timeout, a reset, another 5xx). */
@@ -209,9 +193,4 @@ export function shouldRetryClass(
 ): boolean {
   if (refusedBeforeAnything(error)) return true;
   return retryClass === REPEATABLE && ambiguous(error);
-}
-
-/** The rule, for one of the client's operations. */
-export function shouldRetry(operation: Operation, error: unknown): boolean {
-  return shouldRetryClass(OPERATIONS[operation], error);
 }

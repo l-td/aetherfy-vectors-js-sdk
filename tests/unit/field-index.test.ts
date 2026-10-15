@@ -595,6 +595,7 @@ describe('a retry inside createFieldIndex is bounded by the time left', () => {
         clock.now += 4000;
         throw Object.assign(new Error('Network error: connect ECONNREFUSED'), {
           code: 'ECONNREFUSED',
+          requestSent: false, // HttpClient's mark: the socket never connected
         });
       }
       return real(config);
