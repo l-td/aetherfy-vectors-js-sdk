@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.2] - 2026-10-16
+
+### Fixed
+
+- **An error rebuilt from a server's answer lost its code.** `deleteSchema()`
+  caught the server's 404 and threw a fresh `SchemaNotFoundError` with `code`
+  undefined (the server said `SCHEMA_NOT_DEFINED` or `COLLECTION_NOT_FOUND`), so
+  code branching on `err.code` never matched. It, and every other place that
+  throws a different error in place of a server error, now carries the server's
+  `code`: the "schema has changed" `ValidationError` of an upsert whose 412
+  retry failed (`SCHEMA_VERSION_MISMATCH`), the 400 `ValidationError` and the
+  5xx "Server error occurred" error of an upsert (which also carries its status
+  now), and the region-discovery error.
+- A test reads `src/client.ts` and fails when a `catch` block throws an SDK
+  error that does not carry the code, unless the case is listed with a reason
+  (transport failures and the SDK's own checks have no server answer).
+
 ## [1.2.1] - 2026-10-15
 
 This release contains changes marked BREAKING below: every collection now

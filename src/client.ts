@@ -48,6 +48,40 @@ import { validateVectors } from './schema';
 // without the same change here does not compile. See src/utils/options.ts.
 // CLIENT_CONFIG_KEYS is exported for MemoryClient, which refuses these keys
 // beside a bring-your-own client (not part of the package's exports).
+/**
+ * The server's error code on an HttpClient-thrown error (its parsed body).
+ *
+ * The backend uses two body shapes:
+ *   - nested:  { error: { code, message } }
+ *   - flat:    { error_code, message }
+ * HttpClient stashes the parsed body on error.responseData; both shapes are
+ * read so SDK code does not care which one a path produced. Also used to
+ * disambiguate schema-read 404s (collection gone vs. no schema set).
+ */
+function serverErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const data = (error as { responseData?: Record<string, unknown> })
+    .responseData;
+  if (!data || typeof data !== 'object') return undefined;
+  const nested = (data.error as { code?: string } | undefined)?.code;
+  if (nested) return nested;
+  return data.error_code as string | undefined;
+}
+
+/**
+ * `built`, carrying the server's code from the error it replaces.
+ *
+ * Code that catches a server error and throws another in its place (a more
+ * specific class, a clearer message) builds the new one from the same
+ * answer, so a branch on `err.code` must see the server's code whichever
+ * class it arrives as: `throw carrying(new SchemaNotFoundError(name), error)`.
+ */
+function carrying<T extends AetherfyVectorsError>(built: T, from: unknown): T {
+  const code = serverErrorCode(from);
+  if (code !== undefined) built.code = code;
+  return built;
+}
+
 // Every collection lives in a workspace, so a client without one is refused
 // at construction rather than on its first request.
 const NO_WORKSPACE_MESSAGE =
@@ -405,16 +439,21 @@ export class AetherfyVectorsClient {
     } catch (err) {
       tempHttp.destroy();
       const msg = err instanceof Error ? err.message : 'unknown error';
-      throw new AetherfyVectorsError(
-        `Could not resolve apiRegion '${config.apiRegion}' via discovery: ${msg}. ` +
-          'Check that the default endpoint is reachable, or pass endpoint= directly.'
+      throw carrying(
+        new AetherfyVectorsError(
+          `Could not resolve apiRegion '${config.apiRegion}' via discovery: ${msg}. ` +
+            'Check that the default endpoint is reachable, or pass endpoint= directly.'
+        ),
+        err
       );
     }
     tempHttp.destroy();
     if (response.status !== 200) {
       throw new AetherfyVectorsError(
         `Region discovery returned ${response.status} from ${url}. ` +
-          'Check that your API key is valid for the discovery endpoint.'
+          'Check that your API key is valid for the discovery endpoint.',
+        undefined,
+        response.status
       );
     }
     const cache = (response.data as Record<string, string>) ?? {};
@@ -720,7 +759,7 @@ export class AetherfyVectorsClient {
       ) {
         // Only "this collection is not in the workspace" is a false; an
         // unknown workspace (WORKSPACE_NOT_FOUND) or a refusal is thrown.
-        if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
+        if (serverErrorCode(error) === 'COLLECTION_NOT_FOUND') {
           // No-op when cache is already empty (we got past the
           // fast-path check above), but the call keeps the contract
           // "collection gone → caches dropped" uniform.
@@ -1041,8 +1080,11 @@ export class AetherfyVectorsClient {
             return response.status === 200;
           } catch {
             // If retry also fails, raise the original 412 error
-            throw new ValidationError(
-              `Collection schema has changed for '${originalCollectionName}'. Please retry your request.`
+            throw carrying(
+              new ValidationError(
+                `Collection schema has changed for '${originalCollectionName}'. Please retry your request.`
+              ),
+              error
             );
           }
         }
@@ -1059,7 +1101,7 @@ export class AetherfyVectorsClient {
             (responseData?.message as string) ||
             (responseData?.error as string) ||
             'Validation error occurred';
-          throw new ValidationError(errorMessage);
+          throw carrying(new ValidationError(errorMessage), error);
         }
 
         // Handle 500+ (server errors)
@@ -1072,8 +1114,13 @@ export class AetherfyVectorsClient {
             errorObj?.message ||
             (responseData?.message as string) ||
             'Unknown server error';
-          throw new AetherfyVectorsError(
-            `Server error occurred: ${errorMessage}`
+          throw carrying(
+            new AetherfyVectorsError(
+              `Server error occurred: ${errorMessage}`,
+              undefined,
+              httpError.status
+            ),
+            error
           );
         }
       }
@@ -1452,7 +1499,7 @@ export class AetherfyVectorsClient {
       );
       return true;
     } catch (error: unknown) {
-      if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
+      if (serverErrorCode(error) === 'COLLECTION_NOT_FOUND') {
         this.evictCachesIfNotFound(scopedName, error);
         return false;
       }
@@ -1944,34 +1991,10 @@ export class AetherfyVectorsClient {
   private evictCachesIfNotFound(scopedName: string, error: unknown): void {
     // Only when the COLLECTION is gone: an unknown workspace says nothing
     // about it.
-    if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
+    if (serverErrorCode(error) === 'COLLECTION_NOT_FOUND') {
       this.schemaCache.delete(scopedName);
       this.payloadSchemaCache.delete(scopedName);
     }
-  }
-
-  /**
-   * Pull error.code out of an HttpClient-thrown error.
-   *
-   * The backend uses two response shapes:
-   *   - nested:  { error: { code, message } }
-   *   - flat:    { error_code, message }
-   * HttpClient stashes the parsed body on error.responseData. Both
-   * shapes are checked here so SDK code can read the code without
-   * caring which one the backend produced for a given path.
-   *
-   * Used to disambiguate schema-read 404s where the same status
-   * covers two cases (collection gone vs. no schema set).
-   */
-  private errorCodeOf(error: unknown): string | undefined {
-    if (!error || typeof error !== 'object') return undefined;
-    const data = (error as { responseData?: Record<string, unknown> })
-      .responseData;
-    if (!data || typeof data !== 'object') return undefined;
-    const nested = (data.error as { code?: string } | undefined)?.code;
-    if (nested) return nested;
-    const flat = data.error_code as string | undefined;
-    return flat;
   }
 
   private getCachedSchema(
@@ -2265,7 +2288,7 @@ export class AetherfyVectorsClient {
       //   COLLECTION_NOT_FOUND → the collection is gone: evict caches
       //   SCHEMA_NOT_DEFINED → the collection has no schema (legit)
       // Any other 404 (an unknown workspace) is thrown.
-      const code = this.errorCodeOf(error);
+      const code = serverErrorCode(error);
       if (code === 'COLLECTION_NOT_FOUND') {
         this.schemaCache.delete(scopedName);
         this.payloadSchemaCache.delete(scopedName);
@@ -2373,14 +2396,14 @@ export class AetherfyVectorsClient {
       // Both surface as SchemaNotFoundError to the caller — the
       // difference is whether we self-heal the local caches. Any other
       // 404 (an unknown workspace) is thrown as it is.
-      const code = this.errorCodeOf(error);
+      const code = serverErrorCode(error);
       if (code === 'COLLECTION_NOT_FOUND') {
         this.schemaCache.delete(scopedName);
         this.payloadSchemaCache.delete(scopedName);
-        throw new SchemaNotFoundError(collectionName);
+        throw carrying(new SchemaNotFoundError(collectionName), error);
       }
       if (code === 'SCHEMA_NOT_DEFINED') {
-        throw new SchemaNotFoundError(collectionName);
+        throw carrying(new SchemaNotFoundError(collectionName), error);
       }
       throw this.handleError(error);
     }
