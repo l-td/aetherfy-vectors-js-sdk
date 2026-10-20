@@ -16,11 +16,6 @@
 
 import { AetherfyVectorsClient } from '../client';
 import {
-  AetherfyVectorsError,
-  CollectionNotFoundError,
-  PointNotFoundError,
-} from '../exceptions';
-import {
   EnforcementMode,
   Filter,
   Point,
@@ -252,13 +247,9 @@ export class Scope {
       );
     }
     await this.assertOwns([id]);
-    try {
-      return await this.client.setPayload(this.collection, partial, [id], {
-        key: 'metadata',
-      });
-    } catch (error: unknown) {
-      throw this.translatePointNotFound(error, id);
-    }
+    return this.client.setPayload(this.collection, partial, [id], {
+      key: 'metadata',
+    });
   }
 
   /**
@@ -289,23 +280,7 @@ export class Scope {
     }
     await this.assertOwns([id]);
     const dotted = keys.map(k => `metadata.${k}`);
-    try {
-      return await this.client.deletePayload(this.collection, dotted, [id]);
-    } catch (error: unknown) {
-      throw this.translatePointNotFound(error, id);
-    }
-  }
-
-  private translatePointNotFound(error: unknown, id: string | number): unknown {
-    if (
-      error instanceof AetherfyVectorsError &&
-      error.statusCode === 404 &&
-      !(error instanceof PointNotFoundError) &&
-      !(error instanceof CollectionNotFoundError)
-    ) {
-      return new PointNotFoundError(String(id), this.collection);
-    }
-    return error;
+    return this.client.deletePayload(this.collection, dotted, [id]);
   }
 
   // -------------------------------------------------------------------

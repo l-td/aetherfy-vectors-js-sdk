@@ -35,12 +35,14 @@ describe('AGENT_KEY_WORKSPACE_FORBIDDEN', () => {
     expect(err.message).toContain('afy access <agent> --add beta');
   });
 
-  it('names the workspaceless collections too', () => {
+  it('a workspace addressed by id is "this workspace"', () => {
+    // Addressed by id (workspace: 'auto'), the body's `workspace` is null.
     const err = createErrorFromResponse(forbidden(null), 403, 'Forbidden');
     expect(err).toBeInstanceOf(AgentWorkspaceForbiddenError);
     expect((err as AgentWorkspaceForbiddenError).workspace).toBeNull();
-    expect(err.message).toContain('the collections in no workspace');
-    expect(err.message).toContain('--add ""');
+    expect(err.message).toContain('this workspace');
+    expect(err.message).not.toContain('no workspace');
+    expect(err.message).toContain('afy access <agent> --add <workspace>');
   });
 
   it('CONTROL: another 403 is still the authentication error it was', () => {

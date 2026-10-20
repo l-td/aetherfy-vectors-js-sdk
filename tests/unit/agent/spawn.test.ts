@@ -106,12 +106,13 @@ describe('spawn()', () => {
     });
   });
 
-  it('carries null for a workspaceless spawn', async () => {
-    fetchMock.mockResolvedValue(reply(202, { ...ACCEPTED, workspace: null }));
+  it("carries the spawned agent's workspace name, which is never null", async () => {
+    fetchMock.mockResolvedValue(reply(202, ACCEPTED));
 
-    await expect(spawn('nightly-rollup')).resolves.toMatchObject({
-      workspace: null,
-    });
+    // Typed `string`: this assignment does not compile against
+    // `string | null` (ts-jest type-checks this file).
+    const workspace: string = (await spawn('nightly-rollup')).workspace;
+    expect(workspace).toBe('research');
   });
 
   it('maps 413 to PayloadTooLarge', async () => {

@@ -63,7 +63,7 @@ const CHECKS = `
   process.env.AETHERFY_REGION = 'us-east-1';
   const out = {
     refused: refusalOf(() => new root.AetherfyVectorsClient({ apiKey: key, region: 'eu-central-1' })),
-    control: new root.AetherfyVectorsClient({ apiKey: key, enableConnectionPooling: false }) instanceof root.AetherfyVectorsClient,
+    control: new root.AetherfyVectorsClient({ apiKey: key, workspace: 'default', enableConnectionPooling: false }) instanceof root.AetherfyVectorsClient,
   };
   agent.fanOut(x => x, [], { widht: 2 }).then(
     () => { out.fanOut = null; console.log(JSON.stringify(out)); },
@@ -134,7 +134,7 @@ describe('the installed package refuses an unknown option', () => {
         } catch (e) {
           return {
             refused: { isTypeError: e instanceof TypeError, message: e.message },
-            control: new root.AetherfyVectorsClient({ apiKey: 'afy_test_1234567890123456' }) instanceof root.AetherfyVectorsClient,
+            control: new root.AetherfyVectorsClient({ apiKey: 'afy_test_1234567890123456', workspace: 'default' }) instanceof root.AetherfyVectorsClient,
           };
         }
       })()`,

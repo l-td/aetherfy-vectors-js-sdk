@@ -317,13 +317,15 @@ export interface ClientConfig {
    */
   enableConnectionPooling?: boolean;
   /**
-   * Workspace name for multi-agent coordination.
-   * - Set to 'auto' to auto-detect from AETHERFY_WORKSPACE environment variable
-   * - Set to a string to use a specific workspace
-   * - Leave undefined for no workspace (collections are not namespaced)
+   * The workspace every collection of this client lives in. Every
+   * collection lives in exactly one workspace; names are unique per workspace.
+   * - 'auto' (the default): the workspace of the Aetherfy agent this code
+   *   runs in, by id, from AETHERFY_WORKSPACE_ID (the control plane injects
+   *   it on every agent). Requests go to `/workspace-ids/{id}/...`.
+   * - A workspace name: requests go to `/workspaces/{name}/...`.
    *
-   * When set, all collection names are automatically prefixed with the workspace.
-   * Example: workspace='invoice-pipeline', collection='documents' → 'invoice-pipeline/documents'
+   * There is no "no workspace": null, '' and 'auto' outside an agent throw
+   * at construction.
    */
   workspace?: string | 'auto';
   /**

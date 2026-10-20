@@ -41,8 +41,8 @@ export interface Spawn {
   child_agent_id: string;
   region: string;
   status: string;
-  /** Null when both parent and child are workspaceless. */
-  workspace: string | null;
+  /** The spawned agent's own workspace, by name. Every agent lives in one. */
+  workspace: string;
   estimated_start?: string;
 }
 

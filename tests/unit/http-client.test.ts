@@ -272,7 +272,7 @@ describe('HttpClient', () => {
   describe('Error Edge Cases', () => {
     it('should handle errors with custom code', async () => {
       const error = new Error('Custom error');
-      (error as any).code = 'CUSTOM_ERROR';
+      Object.assign(error, { code: 'CUSTOM_ERROR' });
 
       nock('https://api.example.com').get('/test').replyWithError(error);
 
@@ -283,7 +283,7 @@ describe('HttpClient', () => {
 
     it('should handle errors with code property', async () => {
       const error = new Error('Connection reset');
-      (error as any).code = 'ECONNRESET';
+      Object.assign(error, { code: 'ECONNRESET' });
 
       nock('https://api.example.com').get('/test').replyWithError(error);
 
@@ -314,7 +314,7 @@ describe('HttpClient', () => {
 
     it('should handle axios-specific timeout errors', async () => {
       const timeoutError = new Error('timeout of 100ms exceeded');
-      (timeoutError as any).code = 'ECONNABORTED';
+      Object.assign(timeoutError, { code: 'ECONNABORTED' });
 
       nock('https://api.example.com').get('/test').replyWithError(timeoutError);
 

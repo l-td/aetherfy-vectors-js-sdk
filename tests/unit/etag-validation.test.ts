@@ -5,6 +5,7 @@
 /// <reference path="../global.d.ts" />
 
 import nock from 'nock';
+import { TEST_WORKSPACE_ID } from '../setup';
 import { AetherfyVectorsClient } from '../../src/client';
 import { ValidationError, AetherfyVectorsError } from '../../src/exceptions';
 
@@ -22,7 +23,9 @@ describe('ETag Validation', () => {
   it('should fetch schema on first upsert', async () => {
     // Mock GET collection response
     const getScope = nock('http://localhost:3000')
-      .get('/api/v1/collections/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
+      )
       .reply(200, {
         result: {
           config: {
@@ -39,12 +42,16 @@ describe('ETag Validation', () => {
 
     // Mock GET schema response (404 = no payload schema defined)
     const schemaScope = nock('http://localhost:3000')
-      .get('/api/v1/schema/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
+      )
       .reply(404, {});
 
     // Mock PUT upsert response
     const putScope = nock('http://localhost:3000')
-      .put('/api/v1/collections/test-collection/points')
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
+      )
       .reply(200, { success: true });
 
     // First upsert
@@ -60,7 +67,9 @@ describe('ETag Validation', () => {
   it('should reuse cached schema on subsequent upserts', async () => {
     // Mock GET collection response (only once — second upsert uses cache)
     const getScope = nock('http://localhost:3000')
-      .get('/api/v1/collections/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
+      )
       .reply(200, {
         result: {
           config: {
@@ -77,12 +86,16 @@ describe('ETag Validation', () => {
 
     // Mock GET payload schema response (only once — second upsert uses cache)
     const schemaScope = nock('http://localhost:3000')
-      .get('/api/v1/schema/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
+      )
       .reply(404, {});
 
     // Mock PUT upsert responses (two times)
     const putScope = nock('http://localhost:3000')
-      .put('/api/v1/collections/test-collection/points')
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
+      )
       .times(2)
       .reply(200, { success: true });
 
@@ -102,7 +115,9 @@ describe('ETag Validation', () => {
   it('should send ETag in If-Match header', async () => {
     // Mock GET collection response
     nock('http://localhost:3000')
-      .get('/api/v1/collections/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
+      )
       .reply(200, {
         result: {
           config: {
@@ -119,12 +134,16 @@ describe('ETag Validation', () => {
 
     // Mock GET payload schema (no schema defined)
     nock('http://localhost:3000')
-      .get('/api/v1/schema/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
+      )
       .reply(404, {});
 
     // Mock PUT upsert response
     const putScope = nock('http://localhost:3000')
-      .put('/api/v1/collections/test-collection/points')
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
+      )
       .matchHeader('If-Match', 'abc12345')
       .reply(200, { success: true });
 
@@ -138,7 +157,9 @@ describe('ETag Validation', () => {
   it('should catch dimension mismatch client-side before request', async () => {
     // Mock GET collection response
     nock('http://localhost:3000')
-      .get('/api/v1/collections/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
+      )
       .reply(200, {
         result: {
           config: {
@@ -175,7 +196,9 @@ describe('ETag Validation', () => {
   it('should catch dimension mismatch for oversized vectors', async () => {
     // Mock GET collection response
     nock('http://localhost:3000')
-      .get('/api/v1/collections/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
+      )
       .reply(200, {
         result: {
           config: {
@@ -212,7 +235,9 @@ describe('ETag Validation', () => {
   it('should handle 412 response and retry successfully', async () => {
     // First upsert - populate cache
     nock('http://localhost:3000')
-      .get('/api/v1/collections/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
+      )
       .reply(200, {
         result: {
           config: {
@@ -229,11 +254,15 @@ describe('ETag Validation', () => {
 
     // Mock GET payload schema (no schema defined)
     nock('http://localhost:3000')
-      .get('/api/v1/schema/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
+      )
       .reply(404, {});
 
     nock('http://localhost:3000')
-      .put('/api/v1/collections/test-collection/points')
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
+      )
       .reply(200, { success: true });
 
     const points = [{ id: 1, vector: new Array(768).fill(0.1), payload: {} }];
@@ -248,18 +277,24 @@ describe('ETag Validation', () => {
     //   3. Retry: fetchAndCacheSchema → GET /collections (new version)
     //   4. Retry: PUT → 200 (success)
     nock('http://localhost:3000')
-      .put('/api/v1/collections/test-collection/points')
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
+      )
       .reply(412, {
         message: 'Collection schema has changed',
         code: 'SCHEMA_VERSION_MISMATCH',
       });
 
     nock('http://localhost:3000')
-      .get('/api/v1/schema/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
+      )
       .reply(404, {});
 
     nock('http://localhost:3000')
-      .get('/api/v1/collections/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
+      )
       .reply(200, {
         result: {
           config: {
@@ -275,7 +310,9 @@ describe('ETag Validation', () => {
       });
 
     nock('http://localhost:3000')
-      .put('/api/v1/collections/test-collection/points')
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
+      )
       .reply(200, { success: true });
 
     // 412 handler retries with refreshed schema and succeeds
@@ -284,7 +321,9 @@ describe('ETag Validation', () => {
 
     // Verify the new schema_version is cached: next upsert sends new If-Match
     const putScope = nock('http://localhost:3000')
-      .put('/api/v1/collections/test-collection/points')
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
+      )
       .matchHeader('If-Match', 'new-version')
       .reply(200, { success: true });
 
@@ -311,7 +350,9 @@ describe('ETag Validation', () => {
   it('should handle 400 validation error from backend', async () => {
     // Mock GET collection response
     nock('http://localhost:3000')
-      .get('/api/v1/collections/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
+      )
       .reply(200, {
         result: {
           config: {
@@ -328,12 +369,16 @@ describe('ETag Validation', () => {
 
     // Mock GET payload schema (no schema defined)
     nock('http://localhost:3000')
-      .get('/api/v1/schema/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
+      )
       .reply(404, {});
 
     // Mock PUT with 400 response
     nock('http://localhost:3000')
-      .put('/api/v1/collections/test-collection/points')
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
+      )
       .reply(400, {
         message: 'Vector dimension mismatch: expected 768, got 384',
         code: 'DIMENSION_MISMATCH',
@@ -353,7 +398,9 @@ describe('ETag Validation', () => {
   it('should handle 500 server error', async () => {
     // Mock GET collection response
     nock('http://localhost:3000')
-      .get('/api/v1/collections/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
+      )
       .reply(200, {
         result: {
           config: {
@@ -370,12 +417,18 @@ describe('ETag Validation', () => {
 
     // Mock GET payload schema (no schema defined)
     nock('http://localhost:3000')
-      .get('/api/v1/schema/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
+      )
       .reply(404, {});
 
     // Mock PUT with 500 response
     nock('http://localhost:3000')
-      .put('/api/v1/collections/test-collection/points')
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
+      )
+      // upsert is repeatable: the first attempt and 3 retries.
+      .times(4)
       .reply(500, {
         message: 'Internal server error',
         code: 'INTERNAL_ERROR',
@@ -394,10 +447,27 @@ describe('ETag Validation', () => {
     }
   });
 
-  it('should handle 503 server error', async () => {
+  it('should handle 503 server error, after retrying it', async () => {
+    // A 503 is retried (the retry rule, 3 retries): skip the backoff
+    // sleeps, keep the request timeout's real timer.
+    const real = global.setTimeout;
+    const timeout = jest.spyOn(global, 'setTimeout').mockImplementation(((
+      fn: () => void,
+      ms?: number,
+      ...rest: unknown[]
+    ) => {
+      if ((ms ?? 0) < 10_000) {
+        fn();
+        return 0;
+      }
+      return real(fn, ms, ...rest);
+    }) as unknown as typeof setTimeout);
+
     // Mock GET collection response
     nock('http://localhost:3000')
-      .get('/api/v1/collections/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
+      )
       .reply(200, {
         result: {
           config: {
@@ -414,12 +484,17 @@ describe('ETag Validation', () => {
 
     // Mock GET payload schema (no schema defined)
     nock('http://localhost:3000')
-      .get('/api/v1/schema/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/schema`
+      )
       .reply(404, {});
 
     // Mock PUT with 503 response (Service Unavailable)
     nock('http://localhost:3000')
-      .put('/api/v1/collections/test-collection/points')
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points`
+      )
+      .times(4)
       .reply(503, {
         message: 'Service temporarily unavailable',
         code: 'SERVICE_UNAVAILABLE',
@@ -434,13 +509,18 @@ describe('ETag Validation', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(AetherfyVectorsError);
       expect((error as Error).message).toMatch(/server error/i);
+    } finally {
+      timeout.mockRestore();
     }
+    expect(nock.isDone()).toBe(true); // all four attempts were made
   });
 
   it('should validate vector array exists', async () => {
     // Mock GET collection response
     nock('http://localhost:3000')
-      .get('/api/v1/collections/test-collection')
+      .get(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection`
+      )
       .reply(200, {
         result: {
           config: {

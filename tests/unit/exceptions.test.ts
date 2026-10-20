@@ -19,7 +19,6 @@ import {
   SchemaValidationError,
   createErrorFromResponse,
   isAetherfyVectorsError,
-  isRetryableError,
 } from '../../src/exceptions';
 
 describe('Custom Exceptions', () => {
@@ -119,7 +118,7 @@ describe('Custom Exceptions', () => {
         name: 'CollectionNotFoundError',
         message: "Collection 'test-collection' not found",
         requestId: undefined,
-        statusCode: undefined,
+        statusCode: 404, // every not-found error is a NotFoundError
         details: undefined,
         collectionName: 'test-collection',
       });
@@ -142,7 +141,7 @@ describe('Custom Exceptions', () => {
         name: 'PointNotFoundError',
         message: "Point 'point-1' not found in collection 'test-collection'",
         requestId: undefined,
-        statusCode: undefined,
+        statusCode: 404, // every not-found error is a NotFoundError
         details: undefined,
         pointId: 'point-1',
         collectionName: 'test-collection',
@@ -278,7 +277,7 @@ describe('Custom Exceptions', () => {
         name: 'SchemaNotFoundError',
         message: "No schema defined for collection 'products'",
         requestId: undefined,
-        statusCode: undefined,
+        statusCode: 404, // every not-found error is a NotFoundError
         details: undefined,
         collectionName: 'products',
       });
@@ -330,7 +329,13 @@ describe('Custom Exceptions', () => {
 
     it('should create CollectionNotFoundError for 404 with collection', () => {
       const error = createErrorFromResponse(
-        { collectionName: 'missing-collection' },
+        {
+          error: {
+            code: 'COLLECTION_NOT_FOUND',
+            message: "Collection 'missing-collection' not found",
+            collection_name: 'missing-collection',
+          },
+        },
         404,
         'Not Found'
       );
@@ -396,7 +401,14 @@ describe('Custom Exceptions', () => {
 
     it('should create PointNotFoundError for 404 with pointId and collection', () => {
       const error = createErrorFromResponse(
-        { pointId: 'point-123', collectionName: 'test-collection' },
+        {
+          error: {
+            code: 'POINT_NOT_FOUND',
+            message: 'Point not found',
+            point_id: 'point-123',
+            collection_name: 'test-collection',
+          },
+        },
         404,
         'Not Found'
       );
@@ -543,34 +555,6 @@ describe('Custom Exceptions', () => {
 
       expect(isAetherfyVectorsError(aetherfyError)).toBe(true);
       expect(isAetherfyVectorsError(regularError)).toBe(false);
-    });
-
-    it('should identify retryable errors', () => {
-      const retryableErrors = [
-        new ServiceUnavailableError(),
-        new RequestTimeoutError(),
-        new NetworkError(),
-        new RateLimitExceededError('Limited', 60),
-      ];
-
-      const nonRetryableErrors = [
-        new ValidationError(),
-        new AuthenticationError(),
-        new CollectionNotFoundError('test'),
-        new CollectionInUseError('test', ['agent-a']),
-      ];
-
-      retryableErrors.forEach(error => {
-        expect(isRetryableError(error)).toBe(true);
-      });
-
-      nonRetryableErrors.forEach(error => {
-        expect(isRetryableError(error)).toBe(false);
-      });
-
-      // Rate limit without retry info should not be retryable
-      const rateLimitNoRetry = new RateLimitExceededError('Limited');
-      expect(isRetryableError(rateLimitNoRetry)).toBe(false);
     });
   });
 

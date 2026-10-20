@@ -17,6 +17,7 @@ async function basicUsageExample() {
   // AETHERFY_API_KEY or AETHERFY_VECTORS_API_KEY
   const client = new AetherfyVectorsClient({
     apiKey: 'afy_live_your_api_key_here', // Replace with your actual API key
+    workspace: 'default', // every collection lives in a workspace; every account starts with "default"
   });
 
   try {

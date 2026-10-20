@@ -10,7 +10,7 @@
  * - Required-scope rule (no root-level add/search)
  * - Required-create rule (add/search before create → error)
  * - Reserved-name isolation via the name regex (the `__threads__` prefix)
- * - Threads as payload rows in one shared `__threads__<workspace>` collection
+ * - Threads as payload rows in one shared `__threads__` collection per workspace
  * - Forward-compat error when vector is omitted
  * - Operations parity (search/retrieve/delete/count/schema/analytics)
  * - Thread.history() ordering
@@ -28,8 +28,7 @@ import {
   NamespaceNotFoundError,
   THREAD_ID_KEY,
   THREAD_MARKER_KEY,
-  THREADS_COLLECTION_PREFIX,
-  threadsCollectionName,
+  THREADS_COLLECTION,
   ThreadAlreadyExistsError,
   ThreadNotFoundError,
   ThreadVectorSizeMismatchError,
@@ -46,7 +45,7 @@ import { validatePointId } from '../../src/utils';
 import { ValidationError } from '../../src/exceptions';
 
 // The mocked client below is in workspace "my-bot".
-const THREADS = threadsCollectionName('my-bot');
+const THREADS = THREADS_COLLECTION;
 
 // Mock upsert that runs the real point-id validator on each point, mirroring
 // what AetherfyVectorsClient.upsert does. Lets memory tests pin that an
@@ -212,7 +211,6 @@ describe('name validation', () => {
     // else (no dots), so a name the memory layer picks has to clear THAT
     // rule, not just the SDK's looser one.
     expect(THREADS).toMatch(/^[a-zA-Z0-9_-]{1,100}$/);
-    expect(THREADS.startsWith(THREADS_COLLECTION_PREFIX)).toBe(true);
   });
 
   it('rejects non-string names with InvalidNameError', async () => {

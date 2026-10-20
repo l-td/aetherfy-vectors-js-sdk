@@ -33,7 +33,13 @@ import {
   VectorConfigInput,
 } from '../../src/models';
 
-type Cond = Record<string, any>;
+/** The filter conditions this double supports (a Qdrant subset). */
+interface Cond {
+  has_id?: Array<string | number>;
+  key?: string;
+  match?: { value: unknown };
+  range?: { gt?: number; gte?: number; lt?: number; lte?: number };
+}
 
 interface Stored {
   id: string | number;
@@ -55,24 +61,24 @@ function matchCondition(
   cond: Cond,
   pointId?: string | number
 ): boolean {
-  if ('has_id' in cond) {
+  if (cond.has_id !== undefined) {
     // A first-class Qdrant condition (HasIdCondition in the pinned 1.15.0
     // schema), so the double supports it rather than treating it as an
     // unknown shape.
-    return (cond.has_id as Array<string | number>).includes(pointId!);
+    return pointId !== undefined && cond.has_id.includes(pointId);
   }
-  if (!('key' in cond)) {
+  if (cond.key === undefined) {
     throw new Error(`unsupported filter condition: ${JSON.stringify(cond)}`);
   }
-  const value = lookup(payload, cond.key as string);
-  if ('match' in cond) return value === cond.match.value;
-  if ('range' in cond) {
+  const value = lookup(payload, cond.key);
+  if (cond.match !== undefined) return value === cond.match.value;
+  if (cond.range !== undefined) {
     if (typeof value !== 'number') return false;
     const r = cond.range;
-    if ('gt' in r && !(value > r.gt)) return false;
-    if ('gte' in r && !(value >= r.gte)) return false;
-    if ('lt' in r && !(value < r.lt)) return false;
-    if ('lte' in r && !(value <= r.lte)) return false;
+    if (r.gt !== undefined && !(value > r.gt)) return false;
+    if (r.gte !== undefined && !(value >= r.gte)) return false;
+    if (r.lt !== undefined && !(value < r.lt)) return false;
+    if (r.lte !== undefined && !(value <= r.lte)) return false;
     return true;
   }
   throw new Error(`unsupported filter condition: ${JSON.stringify(cond)}`);
@@ -159,7 +165,7 @@ export class FakeVectorsClient {
   }
 
   async getCollection(name: string): Promise<Collection> {
-    const col = this.collections.get(name)!;
+    const col = this.collection(name);
     return {
       name,
       config: col.config,
@@ -195,8 +201,15 @@ export class FakeVectorsClient {
 
   // -- points -------------------------------------------------------------
 
+  /** The collection, or the error a real server would give for a missing one. */
+  private collection(name: string) {
+    const col = this.collections.get(name);
+    if (!col) throw new Error(`Collection '${name}' not found`);
+    return col;
+  }
+
   private points(name: string): Map<string | number, Stored> {
-    return this.collections.get(name)!.points;
+    return this.collection(name).points;
   }
 
   async upsert(
@@ -207,7 +220,7 @@ export class FakeVectorsClient {
       payload?: Record<string, unknown>;
     }>
   ): Promise<boolean> {
-    const size = this.collections.get(name)!.config.size;
+    const size = this.collection(name).config.size;
     for (const p of points) {
       if ((p.vector ?? []).length !== size) {
         throw new Error(
@@ -313,16 +326,18 @@ export class FakeVectorsClient {
     options: { withPayload?: boolean; withVectors?: boolean } = {}
   ): Promise<Point[]> {
     const store = this.points(name);
-    return ids
-      .filter(i => store.has(i))
-      .map(
-        i =>
-          this.project(
-            store.get(i)!,
-            options.withPayload ?? true,
-            options.withVectors ?? false
-          ) as unknown as Point
-      );
+    return ids.flatMap(i => {
+      const stored = store.get(i);
+      return stored
+        ? [
+            this.project(
+              stored,
+              options.withPayload ?? true,
+              options.withVectors ?? false
+            ) as unknown as Point,
+          ]
+        : [];
+    });
   }
 
   async search(

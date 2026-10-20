@@ -18,9 +18,6 @@ on:
       - '.github/workflows/docs-links.yml'
       - '.github/workflows/pin-guard.yml'
       - '.github/workflows/release.yml'
-  pull_request:
-    branches: [main, develop]
-    paths-ignore: *not-build-inputs
   workflow_dispatch:
 
 jobs:

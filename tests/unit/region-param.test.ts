@@ -45,7 +45,6 @@ describe('AetherfyVectorsClient apiRegion= + discovery', () => {
 
   afterEach(() => {
     if (!nock.isDone()) {
-      // eslint-disable-next-line no-console
       console.warn('Pending nock interceptors:', nock.pendingMocks());
       nock.cleanAll();
     }
