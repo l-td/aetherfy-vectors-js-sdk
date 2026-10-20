@@ -1,7 +1,7 @@
 /**
- * Collection performance modes.
+ * Collection storage modes.
  *
- * A collection's performance mode is a preset for how its vectors are stored
+ * A collection's storage mode is a preset for how its vectors are stored
  * and searched. The service compiles it to the engine's configuration; the
  * caller never sends engine tuning directly.
  *
@@ -14,33 +14,33 @@
  * - `compact`: a 2-bit copy, originals on disk. The smallest footprint and the
  *   lossiest mode; needs vectors of at least 512 dimensions.
  *
- * The Python SDK accepts the same names (`performance_mode`).
+ * The Python SDK accepts the same names (`storage_mode`).
  */
 
-export enum PerformanceMode {
+export enum StorageMode {
   EXACT = 'exact',
   BALANCED = 'balanced',
   FAST = 'fast',
   COMPACT = 'compact',
 }
 
-/** What a collection created without `performanceMode` gets. */
-export const DEFAULT_PERFORMANCE_MODE = PerformanceMode.EXACT;
+/** What a collection created without `storageMode` gets. */
+export const DEFAULT_STORAGE_MODE = StorageMode.EXACT;
 
-const NAMES: readonly string[] = Object.values(PerformanceMode);
+const NAMES: readonly string[] = Object.values(StorageMode);
 
 /**
- * `value` as a PerformanceMode.
+ * `value` as a StorageMode.
  *
  * @throws TypeError if it is not one of the four modes. A typo fails here,
  *   before a round trip, and names the accepted values.
  */
-export function coercePerformanceMode(value: unknown): PerformanceMode {
+export function coerceStorageMode(value: unknown): StorageMode {
   if (typeof value === 'string' && NAMES.includes(value)) {
-    return value as PerformanceMode;
+    return value as StorageMode;
   }
   throw new TypeError(
-    `Invalid performanceMode: ${JSON.stringify(value)}. ` +
+    `Invalid storageMode: ${JSON.stringify(value)}. ` +
       `Must be one of: ${NAMES.join(', ')}`
   );
 }
@@ -52,8 +52,8 @@ export function coercePerformanceMode(value: unknown): PerformanceMode {
  * server upgrade; anything else (an older server that reports no mode) is
  * `undefined`.
  */
-export function parsePerformanceMode(
+export function parseStorageMode(
   value: unknown
-): PerformanceMode | string | undefined {
+): StorageMode | string | undefined {
   return typeof value === 'string' ? value : undefined;
 }

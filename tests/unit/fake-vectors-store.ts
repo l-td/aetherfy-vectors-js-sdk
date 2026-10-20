@@ -27,7 +27,7 @@ import {
   ConflictError,
   ValidationError,
 } from '../../src/exceptions';
-import { PerformanceMode } from '../../src/performance-modes';
+import { StorageMode } from '../../src/storage-modes';
 import {
   Collection,
   CreateCollectionOptions,
@@ -41,9 +41,9 @@ import {
   VectorConfigInput,
 } from '../../src/models';
 
-// vectordb's PERFORMANCE_MODE_COOLDOWN_SECONDS and COMPACT_MIN_DIMENSIONS
-// (backend/utils/performanceModes.js). Copied, not imported: the server is
-// another repo, and tests/unit/performance-mode.test.ts pins the behaviour.
+// vectordb's STORAGE_MODE_COOLDOWN_SECONDS and COMPACT_MIN_DIMENSIONS
+// (backend/utils/storageModes.js). Copied, not imported: the server is
+// another repo, and tests/unit/storage-mode.test.ts pins the behaviour.
 const COOLDOWN_SECONDS = 900;
 const COMPACT_MIN_DIMENSIONS = 512;
 
@@ -153,11 +153,11 @@ export class FakeVectorsClient {
     {
       config: VectorConfig;
       points: Map<string | number, Stored>;
-      mode: PerformanceMode;
+      mode: StorageMode;
       modeChangedAt: number | null;
     }
   >();
-  /** A test advances this to cross the performance-mode cooldown. */
+  /** A test advances this to cross the storage-mode cooldown. */
   now = 0;
   readonly indexes: Array<[string, string, unknown]> = [];
   /**
@@ -178,8 +178,7 @@ export class FakeVectorsClient {
       size: vectors.size,
       distance: (vectors.distance ?? DistanceMetric.COSINE) as DistanceMetric,
     };
-    const mode =
-      this.validMode(options.performanceMode) ?? PerformanceMode.EXACT;
+    const mode = this.validMode(options.storageMode) ?? StorageMode.EXACT;
     this.checkSuitable(mode, config.size);
     this.collections.set(name, {
       config,
@@ -187,29 +186,29 @@ export class FakeVectorsClient {
       mode,
       modeChangedAt: null,
     });
-    return { name, config, performanceMode: mode } as Collection;
+    return { name, config, storageMode: mode } as Collection;
   }
 
   // vectordb's answers, in the order it gives them: an unknown mode is a 400
   // before anything is read, compact below the floor a 422.
-  private validMode(value: string | undefined): PerformanceMode | undefined {
+  private validMode(value: string | undefined): StorageMode | undefined {
     if (value === undefined) return undefined;
-    if (!(Object.values(PerformanceMode) as string[]).includes(value)) {
+    if (!(Object.values(StorageMode) as string[]).includes(value)) {
       throw new ValidationError(
-        'performance_mode must be one of: exact, balanced, fast, compact',
-        'performance_mode'
+        'storage_mode must be one of: exact, balanced, fast, compact',
+        'storage_mode'
       );
     }
-    return value as PerformanceMode;
+    return value as StorageMode;
   }
 
-  private checkSuitable(mode: PerformanceMode, size: number): void {
-    if (mode === PerformanceMode.COMPACT && size < COMPACT_MIN_DIMENSIONS) {
+  private checkSuitable(mode: StorageMode, size: number): void {
+    if (mode === StorageMode.COMPACT && size < COMPACT_MIN_DIMENSIONS) {
       const error = new ValidationError(
-        `performance_mode 'compact' needs vectors of at least ${COMPACT_MIN_DIMENSIONS} dimensions; this collection's are ${size}.`,
-        'performance_mode'
+        `storage_mode 'compact' needs vectors of at least ${COMPACT_MIN_DIMENSIONS} dimensions; this collection's are ${size}.`,
+        'storage_mode'
       );
-      error.code = 'PERFORMANCE_MODE_UNSUITABLE';
+      error.code = 'STORAGE_MODE_UNSUITABLE';
       throw error;
     }
   }
@@ -219,7 +218,7 @@ export class FakeVectorsClient {
     options: UpdateCollectionOptions = {}
   ): Promise<boolean> {
     const col = this.collection(name);
-    const mode = this.validMode(options.performanceMode);
+    const mode = this.validMode(options.storageMode);
     if (mode === undefined) return true;
     this.checkSuitable(mode, col.config.size);
     if (mode === col.mode) return true; // a no-op: no cooldown consumed
@@ -228,7 +227,7 @@ export class FakeVectorsClient {
       this.now - col.modeChangedAt < COOLDOWN_SECONDS
     ) {
       const error: AetherfyVectorsError = new ConflictError(
-        'The performance mode was changed less than 15 minutes ago.',
+        'The storage mode was changed less than 15 minutes ago.',
         409,
         {
           retry_after_seconds:
@@ -236,7 +235,7 @@ export class FakeVectorsClient {
           cooldown_seconds: COOLDOWN_SECONDS,
         }
       );
-      error.code = 'PERFORMANCE_MODE_CHANGE_TOO_SOON';
+      error.code = 'STORAGE_MODE_CHANGE_TOO_SOON';
       throw error;
     }
     col.mode = mode;
@@ -255,7 +254,7 @@ export class FakeVectorsClient {
       config: col.config,
       points_count: col.points.size,
       status: 'green',
-      performanceMode: col.mode,
+      storageMode: col.mode,
     } as Collection;
   }
 

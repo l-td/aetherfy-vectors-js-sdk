@@ -10,8 +10,8 @@ aetherfy-e2e-tests wrapper that calls `createCollection` must move with it.
 - **BREAKING: `createCollection(name, vectors, options?)` takes an options
   object.** `description` and `regions` were the third and fourth positional
   arguments; they are now `options.description` and `options.regions`, beside
-  the new `options.performanceMode`:
-  `createCollection('docs', vectors, { description, regions, performanceMode })`.
+  the new `options.storageMode`:
+  `createCollection('docs', vectors, { description, regions, storageMode })`.
   The options object is key-checked like every other (an unknown key is a
   `TypeError` naming the accepted ones). A call still passing a description
   string, or `undefined` followed by a regions array, throws a `TypeError` that
@@ -20,19 +20,24 @@ aetherfy-e2e-tests wrapper that calls `createCollection` must move with it.
 
 ### Added
 
-- **Performance modes.** `createCollection(..., { performanceMode })` takes a
-  `PerformanceMode` (or its name): `exact` (the default, the layout every
-  collection had), `balanced`, `fast` or `compact`. `Collection.performanceMode`
+- **Storage modes.** `createCollection(..., { storageMode })` takes a
+  `StorageMode` (or its name): `exact` (the default, the layout every
+  collection had), `balanced`, `fast` or `compact`. `Collection.storageMode`
   reports it on create, `getCollection` and `getCollections`; `getCollection`
-  and `getCollections` now map the wire's `performance_mode` to it. `PerformanceMode`
+  and `getCollections` now map the wire's `storage_mode` to it. `StorageMode`
   is exported from the package root. An unknown mode is a `TypeError` before any
   request.
-- **`updateCollection(name, { description?, performanceMode? })`** changes a
-  collection's description or performance mode and resolves `true`. A change
+- **`updateCollection(name, { description?, storageMode? })`** changes a
+  collection's description or storage mode and resolves `true`. A change
   inside the 15-minute cooldown is a `ConflictError` with `code`
-  `PERFORMANCE_MODE_CHANGE_TOO_SOON`; `compact` below 512 dimensions is a
-  `ValidationError` with `PERFORMANCE_MODE_UNSUITABLE`. It is classed
-  repeatable for retries (`OPERATIONS` in `src/retry-policy.ts`).
+  `STORAGE_MODE_CHANGE_TOO_SOON`; `compact` below 512 dimensions is a
+  `ValidationError` with `STORAGE_MODE_UNSUITABLE`. Past the plan's storage-mode
+  changes per period (across the account) it throws `RateLimitExceededError`
+  with `code` `STORAGE_MODE_CHANGE_LIMIT_REACHED` and `limit`, `period`,
+  `resets_at` and `retry_after_seconds` in `details`; neither is retried. It is
+  classed repeatable for retries (`OPERATIONS` in `src/retry-policy.ts`).
+- `RateLimitExceededError` carries the server's `details` and `statusCode`
+  (429), as `ConflictError` does.
 - `HttpClient.patch()`, and `PATCH` as a request method.
 
 ### Fixed

@@ -75,8 +75,8 @@ export {
   SchemaData,
 } from './models';
 
-// Performance modes
-export { PerformanceMode, DEFAULT_PERFORMANCE_MODE } from './performance-modes';
+// Storage modes
+export { StorageMode, DEFAULT_STORAGE_MODE } from './storage-modes';
 
 // Exception exports
 export {

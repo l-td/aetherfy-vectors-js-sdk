@@ -337,7 +337,7 @@ export class HttpClient {
 
   /**
    * PATCH request helper. A PATCH body is a few fields (a description, a
-   * performance mode), so the client's own timeout applies: no body-aware
+   * storage mode), so the client's own timeout applies: no body-aware
    * extension as for post() and put().
    */
   async patch<T>(

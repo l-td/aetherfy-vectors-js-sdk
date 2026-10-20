@@ -806,9 +806,9 @@ await client.setSchema('products', analysis.suggestedSchema, 'warn');
 
 Schema violations throw `SchemaValidationError` with a detailed per-field errors array. If the server reports a stale schema (`412 Precondition Failed`), the SDK auto-refreshes the cache and retries. Use `refreshSchema(name)` or `clearSchemaCache(name?)` for manual control.
 
-## 🎚️ Performance modes
+## 🎚️ Storage modes
 
-A collection's **performance mode** is a preset for how its vectors are stored
+A collection's **storage mode** is a preset for how its vectors are stored
 and searched. You pick one of four names; the service applies the settings.
 
 | Mode                  | What it does                                                                                                                               |
@@ -819,18 +819,18 @@ and searched. You pick one of four names; the service applies the settings.
 | `compact`             | A 2-bit copy with the originals on disk: the smallest footprint and the lossiest mode. Needs vectors of at least 512 dimensions.           |
 
 ```typescript
-import { PerformanceMode } from 'aetherfy-vectors';
+import { StorageMode } from 'aetherfy-vectors';
 
 const collection = await client.createCollection(
   'docs',
   { size: 1536, distance: DistanceMetric.COSINE },
-  { performanceMode: PerformanceMode.BALANCED } // or the string 'balanced'
+  { storageMode: StorageMode.BALANCED } // or the string 'balanced'
 );
-console.log(collection.performanceMode); // PerformanceMode.BALANCED
+console.log(collection.storageMode); // StorageMode.BALANCED
 
 // Change it later. The collection stays usable while its storage is rewritten
 // in the background (its status reads 'yellow' until that finishes).
-await client.updateCollection('docs', { performanceMode: 'fast' });
+await client.updateCollection('docs', { storageMode: 'fast' });
 ```
 
 - Quantized modes lose some recall. Searching with oversampling and rescoring
@@ -839,18 +839,23 @@ await client.updateCollection('docs', { performanceMode: 'fast' });
   `compact` loses the most, and how much depends on the embedding model: test
   it on your own data before you rely on it.
 - A collection can change mode once every 15 minutes. A change inside that
-  window throws `ConflictError` with `code` `PERFORMANCE_MODE_CHANGE_TOO_SOON`;
+  window throws `ConflictError` with `code` `STORAGE_MODE_CHANGE_TOO_SOON`;
   the seconds left are `error.details.retry_after_seconds` (`details` is the error object). It is not retried
   for you, because waiting inside the call cannot help. Asking for the mode a
   collection already has does nothing and does not start the wait.
+- Your plan also limits the storage-mode changes your whole account can make per
+  period (a day, week or month, UTC). Past it, `updateCollection` throws
+  `RateLimitExceededError` with `code` `STORAGE_MODE_CHANGE_LIMIT_REACHED`;
+  `error.details` carries `limit`, `period`, `resets_at` and
+  `retry_after_seconds`. It is not retried for you either.
 - `compact` on a collection of fewer than 512 dimensions throws
-  `ValidationError` with `code` `PERFORMANCE_MODE_UNSUITABLE`.
+  `ValidationError` with `code` `STORAGE_MODE_UNSUITABLE`.
 - Re-creating a collection that exists never changes its mode, and the returned
   `Collection` shows the mode it has, not the one you asked for.
 - `updateCollection(name, { description })` changes the description too;
   `description: null` clears it. Pass at least one of the two.
-- `getCollection` and `getCollections` return `performanceMode` (camelCase);
-  the wire's `performance_mode` is not kept on the object.
+- `getCollection` and `getCollections` return `storageMode` (camelCase);
+  the wire's `storage_mode` is not kept on the object.
 - Every mode is available on every plan. Storage is metered the same way in
   every mode.
 
@@ -877,14 +882,14 @@ await client.createCollection(
   { description: 'EU-resident collection', regions: ['eu-central-1'] }
 );
 
-// Choose how the vectors are stored and searched (see Performance modes),
+// Choose how the vectors are stored and searched (see Storage modes),
 // and change it later. Returns true once the change is applied.
 await client.createCollection(
   'docs',
   { size: 1536, distance: DistanceMetric.COSINE },
-  { performanceMode: PerformanceMode.BALANCED }
+  { storageMode: StorageMode.BALANCED }
 );
-await client.updateCollection('docs', { performanceMode: 'fast' });
+await client.updateCollection('docs', { storageMode: 'fast' });
 
 // List all collections
 const collections = await client.getCollections();
@@ -1200,8 +1205,8 @@ client.destroy();
 
 | Method                                                   | Description                                                                        | Returns                   |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------- |
-| `createCollection(name, config, options?)`               | Create a new collection; `options`: `description`, `regions`, `performanceMode`    | `Promise<Collection>`     |
-| `updateCollection(name, options)`                        | Change `description` or `performanceMode`                                          | `Promise<boolean>`        |
+| `createCollection(name, config, options?)`               | Create a new collection; `options`: `description`, `regions`, `storageMode`    | `Promise<Collection>`     |
+| `updateCollection(name, options)`                        | Change `description` or `storageMode`                                          | `Promise<boolean>`        |
 | `deleteCollection(name)`                                 | Delete a collection                                                                | `Promise<boolean>`        |
 | `getCollections()`                                       | List all collections                                                               | `Promise<Collection[]>`   |
 | `collectionExists(name)`                                 | Check if collection exists                                                         | `Promise<boolean>`        |

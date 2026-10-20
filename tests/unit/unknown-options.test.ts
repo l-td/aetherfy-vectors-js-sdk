@@ -442,7 +442,7 @@ const ENTRY_POINTS: EntryPoint[] = [
       param: 1,
     },
     // Nothing to change is its own TypeError, so a completed call carries one.
-    required: { performanceMode: 'fast' },
+    required: { storageMode: 'fast' },
     setup: onVectors((c, o) => c.updateCollection('col', o as any)),
   },
   {

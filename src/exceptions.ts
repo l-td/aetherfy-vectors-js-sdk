@@ -71,8 +71,12 @@ export class AuthenticationError extends AetherfyVectorsError {
 export class RateLimitExceededError extends AetherfyVectorsError {
   public readonly retryAfter?: number;
 
-  constructor(message: string = 'Rate limit exceeded', retryAfter?: number) {
-    super(message);
+  constructor(
+    message: string = 'Rate limit exceeded',
+    retryAfter?: number,
+    details?: Record<string, unknown>
+  ) {
+    super(message, undefined, 429, details);
     this.name = 'RateLimitExceededError';
     this.retryAfter = retryAfter;
     Object.setPrototypeOf(this, RateLimitExceededError.prototype);
@@ -759,7 +763,11 @@ export function createErrorFromResponse(
         );
       }
       return stamp(
-        new RateLimitExceededError(message, responseData?.retryAfter as number)
+        new RateLimitExceededError(
+          message,
+          responseData?.retryAfter as number,
+          details as Record<string, unknown> | undefined
+        )
       );
 
     case 502:
