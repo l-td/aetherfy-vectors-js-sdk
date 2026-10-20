@@ -96,6 +96,7 @@ export {
   CollectionInUseError,
   CollectionInOtherRegionError,
   AgentWorkspaceForbiddenError,
+  StorageModeNotInPlanError,
   WorkspaceNotFoundError,
   NotFoundError,
   QuotaExceededError,

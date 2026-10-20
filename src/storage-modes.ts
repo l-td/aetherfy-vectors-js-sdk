@@ -11,8 +11,10 @@
  *   disk and rescore the best candidates. Uses far less memory than exact.
  * - `fast`: the same 8-bit copy, with the originals kept in memory too. Uses
  *   MORE memory than exact, not less.
- * - `compact`: a 2-bit copy, originals on disk. The smallest footprint and the
- *   lossiest mode; needs vectors of at least 512 dimensions.
+ *
+ * `fast` is available on the Performance plan and above; `exact` and
+ * `balanced` on every plan. A mode outside the plan throws
+ * StorageModeNotInPlanError.
  *
  * The Python SDK accepts the same names (`storage_mode`).
  */
@@ -21,7 +23,6 @@ export enum StorageMode {
   EXACT = 'exact',
   BALANCED = 'balanced',
   FAST = 'fast',
-  COMPACT = 'compact',
 }
 
 /** What a collection created without `storageMode` gets. */
@@ -32,7 +33,7 @@ const NAMES: readonly string[] = Object.values(StorageMode);
 /**
  * `value` as a StorageMode.
  *
- * @throws TypeError if it is not one of the four modes. A typo fails here,
+ * @throws TypeError if it is not one of the three modes. A typo fails here,
  *   before a round trip, and names the accepted values.
  */
 export function coerceStorageMode(value: unknown): StorageMode {

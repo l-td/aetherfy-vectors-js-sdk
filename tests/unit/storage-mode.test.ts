@@ -6,7 +6,7 @@
  * The wire contract is vectordb's (backend/docs/STORAGE_MODES.md): a mode
  * is sent only when the caller names one, so a caller who never does sends the
  * body this SDK always sent; the server answers 400 for an unknown mode, 422
- * STORAGE_MODE_UNSUITABLE for compact below 512 dimensions, 409
+ * STORAGE_MODE_NOT_IN_PLAN for a mode outside the plan, 409
  * STORAGE_MODE_CHANGE_TOO_SOON inside the cooldown, with the extras under
  * the error object (the house style: `field` and `max` sit there too).
  */
@@ -16,6 +16,7 @@ import { TEST_WORKSPACE_ID } from '../setup';
 import { AetherfyVectorsClient } from '../../src/client';
 import {
   ConflictError,
+  StorageModeNotInPlanError,
   ValidationError,
   createErrorFromResponse,
 } from '../../src/exceptions';
@@ -46,13 +47,8 @@ afterEach(() => {
 });
 
 describe('StorageMode', () => {
-  it('the four modes are their wire names, exact first and the default', () => {
-    expect(Object.values(StorageMode)).toEqual([
-      'exact',
-      'balanced',
-      'fast',
-      'compact',
-    ]);
+  it('the three modes are their wire names, exact first and the default', () => {
+    expect(Object.values(StorageMode)).toEqual(['exact', 'balanced', 'fast']);
     expect(DEFAULT_STORAGE_MODE).toBe(StorageMode.EXACT);
   });
 
@@ -64,9 +60,7 @@ describe('StorageMode', () => {
   it.each(['turbo', 'Exact', '', null, undefined, 3, {}])(
     'coerceStorageMode(%p) names the accepted values',
     bad => {
-      expect(() => coerceStorageMode(bad)).toThrow(
-        /exact, balanced, fast, compact/
-      );
+      expect(() => coerceStorageMode(bad)).toThrow(/exact, balanced, fast/);
     }
   );
 
@@ -125,7 +119,7 @@ describe('createCollection', () => {
       newClient().createCollection('docs', VECTORS, {
         storageMode: 'turbo' as unknown as 'exact',
       })
-    ).rejects.toThrow(/exact, balanced, fast, compact/);
+    ).rejects.toThrow(/exact, balanced, fast/);
     expect(scope.isDone()).toBe(false);
   });
 
@@ -152,15 +146,15 @@ describe('createCollection', () => {
         expect(body).toMatchObject({
           description: 'notes',
           regions: ['us-east-1'],
-          storage_mode: 'compact',
+          storage_mode: 'balanced',
         });
         return true;
       })
-      .reply(200, { regions: ['us-east-1'], storage_mode: 'compact' });
+      .reply(200, { regions: ['us-east-1'], storage_mode: 'balanced' });
     const col = await newClient().createCollection('docs', VECTORS, {
       description: 'notes',
       regions: ['us-east-1'],
-      storageMode: StorageMode.COMPACT,
+      storageMode: StorageMode.BALANCED,
     });
     expect(col.regions).toEqual(['us-east-1']);
     expect(scope.isDone()).toBe(true);
@@ -183,29 +177,27 @@ describe('createCollection', () => {
     expect(scope.isDone()).toBe(false);
   });
 
-  it('a 422 for compact below the floor is a ValidationError naming the field and code', async () => {
+  it('a 403 for a mode outside the plan is a StorageModeNotInPlanError naming the plan that has it', async () => {
     nock(HOST)
       .post(LIST_PATH)
-      .reply(422, {
+      .reply(403, {
         error: {
-          code: 'STORAGE_MODE_UNSUITABLE',
+          code: 'STORAGE_MODE_NOT_IN_PLAN',
           message:
-            "storage_mode 'compact' needs vectors of at least 512 dimensions",
+            "The 'fast' storage mode is available on the Performance plan and above.",
           field: 'storage_mode',
-          min_vector_size: 512,
-          suggested_mode: 'balanced',
+          storage_mode: 'fast',
+          plan: 'starter',
+          required_plan: 'performance',
+          allowed_modes: ['exact', 'balanced'],
         },
       });
     const error = await newClient()
-      .createCollection(
-        'docs',
-        { size: 384, distance: DistanceMetric.COSINE },
-        { storageMode: StorageMode.COMPACT }
-      )
+      .createCollection('docs', VECTORS, { storageMode: StorageMode.FAST })
       .catch(e => e);
-    expect(error).toBeInstanceOf(ValidationError);
-    expect(error.code).toBe('STORAGE_MODE_UNSUITABLE');
-    expect(error.field).toBe('storage_mode');
+    expect(error).toBeInstanceOf(StorageModeNotInPlanError);
+    expect(error.code).toBe('STORAGE_MODE_NOT_IN_PLAN');
+    expect(error.requiredPlan).toBe('performance');
   });
 });
 
@@ -220,9 +212,9 @@ describe('reading a collection', () => {
   it('getCollection maps the wire key and passes the rest through', async () => {
     nock(HOST)
       .get(ITEM_PATH)
-      .reply(200, { result: row('docs', 'compact') });
+      .reply(200, { result: row('docs', 'balanced') });
     const col = await newClient().getCollection('docs');
-    expect(col.storageMode).toBe(StorageMode.COMPACT);
+    expect(col.storageMode).toBe(StorageMode.BALANCED);
     expect(col).not.toHaveProperty('storage_mode');
     expect(col.points_count).toBe(5);
   });
@@ -317,7 +309,7 @@ describe('updateCollection', () => {
       newClient().updateCollection('docs', {
         storageMode: 'turbo' as unknown as 'exact',
       })
-    ).rejects.toThrow(/exact, balanced, fast, compact/);
+    ).rejects.toThrow(/exact, balanced, fast/);
     expect(scope.isDone()).toBe(false);
   });
 
@@ -418,21 +410,20 @@ describe('FakeVectorsClient (the memory layer tests share it)', () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
-  it('compact below the floor is a 422-shaped ValidationError', async () => {
+  it('a mode outside the plan is a 403 on create and on update', async () => {
     const fake = new FakeVectorsClient();
+    fake.planModes = ['exact', 'balanced'];
     const error = await fake
-      .createCollection(
-        'c',
-        { size: 384, distance: DistanceMetric.COSINE },
-        { storageMode: StorageMode.COMPACT }
-      )
+      .createCollection('c', VECTORS, { storageMode: StorageMode.FAST })
       .catch(e => e);
-    expect(error.code).toBe('STORAGE_MODE_UNSUITABLE');
+    expect(error).toBeInstanceOf(StorageModeNotInPlanError);
+    expect(error.code).toBe('STORAGE_MODE_NOT_IN_PLAN');
+    await fake.createCollection('ok', VECTORS, {
+      storageMode: StorageMode.BALANCED,
+    });
     await expect(
-      fake.createCollection('ok', VECTORS, {
-        storageMode: StorageMode.COMPACT,
-      })
-    ).resolves.toBeDefined();
+      fake.updateCollection('ok', { storageMode: 'fast' })
+    ).rejects.toBeInstanceOf(StorageModeNotInPlanError);
   });
 
   it('the cooldown blocks a second change until it has passed', async () => {

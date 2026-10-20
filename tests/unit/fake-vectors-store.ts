@@ -25,6 +25,7 @@
 import {
   AetherfyVectorsError,
   ConflictError,
+  StorageModeNotInPlanError,
   ValidationError,
 } from '../../src/exceptions';
 import { StorageMode } from '../../src/storage-modes';
@@ -41,11 +42,10 @@ import {
   VectorConfigInput,
 } from '../../src/models';
 
-// vectordb's STORAGE_MODE_COOLDOWN_SECONDS and COMPACT_MIN_DIMENSIONS
-// (backend/utils/storageModes.js). Copied, not imported: the server is
-// another repo, and tests/unit/storage-mode.test.ts pins the behaviour.
+// vectordb's STORAGE_MODE_COOLDOWN_SECONDS (backend/utils/storageModes.js).
+// Copied, not imported: the server is another repo, and
+// tests/unit/storage-mode.test.ts pins the behaviour.
 const COOLDOWN_SECONDS = 900;
-const COMPACT_MIN_DIMENSIONS = 512;
 
 /** The filter conditions this double supports (a Qdrant subset). */
 interface Cond {
@@ -159,6 +159,8 @@ export class FakeVectorsClient {
   >();
   /** A test advances this to cross the storage-mode cooldown. */
   now = 0;
+  /** The storage modes the fake's plan allows; a test narrows it. */
+  planModes: string[] = ['exact', 'balanced', 'fast'];
   readonly indexes: Array<[string, string, unknown]> = [];
   /**
    * Flip to make every read behave as if the mustNot clause had been
@@ -179,7 +181,7 @@ export class FakeVectorsClient {
       distance: (vectors.distance ?? DistanceMetric.COSINE) as DistanceMetric,
     };
     const mode = this.validMode(options.storageMode) ?? StorageMode.EXACT;
-    this.checkSuitable(mode, config.size);
+    this.checkInPlan(mode);
     this.collections.set(name, {
       config,
       points: new Map(),
@@ -190,25 +192,30 @@ export class FakeVectorsClient {
   }
 
   // vectordb's answers, in the order it gives them: an unknown mode is a 400
-  // before anything is read, compact below the floor a 422.
+  // before anything is read, a mode outside the plan a 403.
   private validMode(value: string | undefined): StorageMode | undefined {
     if (value === undefined) return undefined;
     if (!(Object.values(StorageMode) as string[]).includes(value)) {
       throw new ValidationError(
-        'storage_mode must be one of: exact, balanced, fast, compact',
+        'storage_mode must be one of: exact, balanced, fast',
         'storage_mode'
       );
     }
     return value as StorageMode;
   }
 
-  private checkSuitable(mode: StorageMode, size: number): void {
-    if (mode === StorageMode.COMPACT && size < COMPACT_MIN_DIMENSIONS) {
-      const error = new ValidationError(
-        `storage_mode 'compact' needs vectors of at least ${COMPACT_MIN_DIMENSIONS} dimensions; this collection's are ${size}.`,
-        'storage_mode'
+  private checkInPlan(mode: StorageMode): void {
+    if (!this.planModes.includes(mode)) {
+      const error = new StorageModeNotInPlanError(
+        `The '${mode}' storage mode is not part of your plan.`,
+        {
+          storageMode: mode,
+          plan: 'starter',
+          requiredPlan: 'performance',
+          allowedModes: this.planModes,
+        }
       );
-      error.code = 'STORAGE_MODE_UNSUITABLE';
+      error.code = 'STORAGE_MODE_NOT_IN_PLAN';
       throw error;
     }
   }
@@ -220,7 +227,7 @@ export class FakeVectorsClient {
     const col = this.collection(name);
     const mode = this.validMode(options.storageMode);
     if (mode === undefined) return true;
-    this.checkSuitable(mode, col.config.size);
+    this.checkInPlan(mode);
     if (mode === col.mode) return true; // a no-op: no cooldown consumed
     if (
       col.modeChangedAt !== null &&

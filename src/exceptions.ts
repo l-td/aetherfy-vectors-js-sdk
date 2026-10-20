@@ -318,6 +318,52 @@ export class CollectionInOtherRegionError extends AetherfyVectorsError {
 }
 
 /**
+ * The storage mode asked for is not part of the account's plan (403
+ * STORAGE_MODE_NOT_IN_PLAN). `storageMode` is the mode asked for, `plan` the
+ * account's plan, `requiredPlan` the cheapest plan that has the mode (null when
+ * none does) and `allowedModes` the modes the account's plan allows. Not
+ * retryable: the plan decides, so change the plan or choose an allowed mode.
+ * Collections already in a mode a later downgrade removes are switched to
+ * `exact` by the service.
+ */
+export class StorageModeNotInPlanError extends AetherfyVectorsError {
+  public readonly storageMode: string | null;
+  public readonly plan: string | null;
+  public readonly requiredPlan: string | null;
+  public readonly allowedModes: string[];
+
+  constructor(
+    message: string,
+    fields: {
+      storageMode?: string | null;
+      plan?: string | null;
+      requiredPlan?: string | null;
+      allowedModes?: string[];
+    } = {},
+    requestId?: string,
+    details?: Record<string, unknown>
+  ) {
+    super(message, requestId, 403, details);
+    this.name = 'StorageModeNotInPlanError';
+    this.storageMode = fields.storageMode ?? null;
+    this.plan = fields.plan ?? null;
+    this.requiredPlan = fields.requiredPlan ?? null;
+    this.allowedModes = fields.allowedModes ? [...fields.allowedModes] : [];
+    Object.setPrototypeOf(this, StorageModeNotInPlanError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      storageMode: this.storageMode,
+      plan: this.plan,
+      requiredPlan: this.requiredPlan,
+      allowedModes: this.allowedModes,
+    };
+  }
+}
+
+/**
  * An agent's API key addressed a workspace it has not been granted (403
  * AGENT_KEY_WORKSPACE_FORBIDDEN). The key Aetherfy injects into a deployed
  * agent reaches its own workspace plus the workspaces the account owner
@@ -657,6 +703,28 @@ export function createErrorFromResponse(
         return stamp(
           new AgentWorkspaceForbiddenError(
             typeof workspace === 'string' ? workspace : null
+          )
+        );
+      }
+      if (errorCode === 'STORAGE_MODE_NOT_IN_PLAN') {
+        const str = (key: string): string | null =>
+          typeof nestedError?.[key] === 'string'
+            ? (nestedError[key] as string)
+            : null;
+        const allowed = nestedError?.allowed_modes;
+        return stamp(
+          new StorageModeNotInPlanError(
+            message,
+            {
+              storageMode: str('storage_mode'),
+              plan: str('plan'),
+              requiredPlan: str('required_plan'),
+              allowedModes: Array.isArray(allowed)
+                ? allowed.filter((m): m is string => typeof m === 'string')
+                : [],
+            },
+            requestId,
+            details
           )
         );
       }

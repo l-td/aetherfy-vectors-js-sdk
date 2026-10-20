@@ -630,14 +630,14 @@ export class AetherfyVectorsClient {
    *     connect to rather than where the collection lives.
    *   - `storageMode`: how the collection's vectors are stored and
    *     searched: a `StorageMode` or its name (`'exact'`, `'balanced'`,
-   *     `'fast'`, `'compact'`). Omit for `exact`, the layout every collection
-   *     had before modes existed. `compact` needs vectors of at least 512
-   *     dimensions (ValidationError otherwise). Re-creating a collection that
+   *     `'fast'`). Omit for `exact`, the layout every collection
+   *     had before modes existed. `fast` needs the Performance plan or above
+   *     (StorageModeNotInPlanError otherwise). Re-creating a collection that
    *     exists never changes its mode; use `updateCollection`.
    * @returns Promise resolving to the created Collection, including its
    *   resolved `regions` list and its `storageMode`.
    * @throws TypeError for an unknown option key, or a `storageMode` that
-   *   is not one of the four modes.
+   *   is not one of the three modes.
    *
    * @example
    * ```typescript
@@ -755,8 +755,9 @@ export class AetherfyVectorsClient {
    * @returns Promise that resolves to true when the change was applied
    * @throws TypeError for an unknown option key, an unknown mode, or no
    *   option at all.
-   * @throws ValidationError for `compact` on a collection of fewer than 512
-   *   dimensions (`code` `STORAGE_MODE_UNSUITABLE`).
+   * @throws StorageModeNotInPlanError when the mode is not part of the plan
+   *   (`code` `STORAGE_MODE_NOT_IN_PLAN`; `requiredPlan` names the plan that
+   *   has it). It is not retried.
    * @throws ConflictError when the mode changed less than 15 minutes ago
    *   (`code` `STORAGE_MODE_CHANGE_TOO_SOON`; the seconds left are
    *   `details.retry_after_seconds`; `details` is the error object). It is not

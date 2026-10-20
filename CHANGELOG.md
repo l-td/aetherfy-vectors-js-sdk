@@ -22,7 +22,7 @@ aetherfy-e2e-tests wrapper that calls `createCollection` must move with it.
 
 - **Storage modes.** `createCollection(..., { storageMode })` takes a
   `StorageMode` (or its name): `exact` (the default, the layout every
-  collection had), `balanced`, `fast` or `compact`. `Collection.storageMode`
+  collection had), `balanced` or `fast`. `Collection.storageMode`
   reports it on create, `getCollection` and `getCollections`; `getCollection`
   and `getCollections` now map the wire's `storage_mode` to it. `StorageMode`
   is exported from the package root. An unknown mode is a `TypeError` before any
@@ -30,12 +30,15 @@ aetherfy-e2e-tests wrapper that calls `createCollection` must move with it.
 - **`updateCollection(name, { description?, storageMode? })`** changes a
   collection's description or storage mode and resolves `true`. A change
   inside the 15-minute cooldown is a `ConflictError` with `code`
-  `STORAGE_MODE_CHANGE_TOO_SOON`; `compact` below 512 dimensions is a
-  `ValidationError` with `STORAGE_MODE_UNSUITABLE`. Past the plan's storage-mode
+  `STORAGE_MODE_CHANGE_TOO_SOON`. Past the plan's storage-mode
   changes per period (across the account) it throws `RateLimitExceededError`
   with `code` `STORAGE_MODE_CHANGE_LIMIT_REACHED` and `limit`, `period`,
   `resets_at` and `retry_after_seconds` in `details`; neither is retried. It is
   classed repeatable for retries (`OPERATIONS` in `src/retry-policy.ts`).
+- **`StorageModeNotInPlanError`** (403 `STORAGE_MODE_NOT_IN_PLAN`), thrown by
+  `createCollection` and `updateCollection` when the plan does not include the
+  mode: `fast` is part of the Performance plan and above. It carries
+  `storageMode`, `plan`, `requiredPlan` and `allowedModes`, and is not retried.
 - `RateLimitExceededError` carries the server's `details` and `statusCode`
   (429), as `ConflictError` does.
 - `HttpClient.patch()`, and `PATCH` as a request method.
@@ -110,7 +113,7 @@ described here.
 - **BREAKING: a 404 is typed from the server's own body.** The 404 mapping
   read a top-level camelCase `collectionName` / `pointId` (or matched Qdrant's
   message text), so the server's `{ error: { code: 'COLLECTION_NOT_FOUND',
-  collection_name } }` arrived as the base `AetherfyVectorsError`. It is now a
+collection_name } }` arrived as the base `AetherfyVectorsError`. It is now a
   `CollectionNotFoundError`; `POINT_NOT_FOUND` a `PointNotFoundError`;
   `SCHEMA_NOT_DEFINED` a `SchemaNotFoundError`. The camelCase and message
   shapes are no longer read.
@@ -245,6 +248,7 @@ described here.
   account.
 
 ### Documented
+
 - `result()` and `wait()` called with the agent's own `AETHERFY_API_KEY` on a
   run it may not read get that 403, which arrives as `RunReadError` with `code`
   `AUTH_AGENT_KEY_OUT_OF_SCOPE` — not `RunAccessDenied`, which stays
@@ -363,7 +367,6 @@ version, not 2.0.0, because the package has no users yet (owner ruling,
   EVER, and the fourth `createThread` threw `COLLECTION_LIMIT_EXCEEDED` and
   fired the "you hit your plan limit" email. Creating a thread now consumes no
   collection slot.
-
   - `createThread(threadId)` no longer accepts a `CreateScopeOptions` argument.
     One collection has one vector size and one distance metric; they come from
     `new MemoryClient({ threadVectorSize: 384, threadDistance: DistanceMetric.COSINE })`
@@ -409,7 +412,7 @@ version, not 2.0.0, because the package has no users yet (owner ruling,
 - **The package root exports everything the SDK hands you.**
   `ThreadVectorSizeMismatchError` was thrown by the memory client and exported
   from the memory module but not from `aetherfy-vectors`, so `err instanceof
-  ThreadVectorSizeMismatchError` was impossible for a root importer.
+ThreadVectorSizeMismatchError` was impossible for a root importer.
   `ScrollOptions` and `ScrollResult` — the parameter and return types of
   `client.scroll()` — were the only method option/result types the root did not
   export. All three are exported now, and `tests/unit/public-surface.test.ts`
@@ -456,7 +459,6 @@ version, not 2.0.0, because the package has no users yet (owner ruling,
 
 - **`aetherfy-vectors/agent` — what code running on an Aetherfy agent does.**
   A new subpath export on this same package, beside the root entry:
-
   - `payload()` reads this run's input. The file named by
     `AETHERFY_SPAWN_PAYLOAD_PATH` first, then the documented HTTP fallback
     when the machine could not write it; `{}` for a run given no input, which
@@ -582,7 +584,7 @@ version, not 2.0.0, because the package has no users yet (owner ruling,
   verbatim, there is no inbound transform in this SDK, and the wire field is
   `points_count`. The same defect `UsageStats` carried, one interface over —
   and it was provable the whole time, because the e2e suite reads the
-  snake_case name *through this method* and passes against live infrastructure.
+  snake_case name _through this method_ and passes against live infrastructure.
   `name`, `description`, `status` and `regions` were correct only because the
   two vocabularies spell them identically; that is coincidence, not a
   transform, and the type now says so. Pinned by a new live e2e shape guard.
@@ -683,7 +685,7 @@ in here rather than carried to a `1.0.1` that never existed.
 ### Packaging
 
 - Added the missing `LICENSE` file. `package.json` declared `"license":
-  "MIT"` and listed `LICENSE` in `files`, but no such file existed, so the
+"MIT"` and listed `LICENSE` in `files`, but no such file existed, so the
   tarball would have shipped without one.
 - Corrected `repository.url` and `bugs.url`, which pointed at a
   `github.com/aetherfy/aetherfy-vectors-js` repository that does not exist.

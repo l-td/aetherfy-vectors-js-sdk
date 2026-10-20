@@ -13,8 +13,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  AuthenticationError,
   ConflictError,
   RateLimitExceededError,
+  StorageModeNotInPlanError,
   ValidationError,
   createErrorFromResponse,
 } from '../../src/exceptions';
@@ -37,8 +39,8 @@ describe("createErrorFromResponse reads vectordb's real envelopes", () => {
         '_provenance',
         'limit_reached_429',
         'mode_400',
+        'not_in_plan_403',
         'too_soon_409',
-        'unsuitable_422',
         'vectors_400',
       ].sort()
     );
@@ -65,15 +67,22 @@ describe("createErrorFromResponse reads vectordb's real envelopes", () => {
     expect(error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('422 STORAGE_MODE_UNSUITABLE is a ValidationError with its field and code', () => {
+  it('403 STORAGE_MODE_NOT_IN_PLAN is its own class with typed fields, not an AuthenticationError', () => {
     const error = createErrorFromResponse(
-      body('unsuitable_422'),
-      422,
-      'Unprocessable'
-    ) as ValidationError;
-    expect(error).toBeInstanceOf(ValidationError);
-    expect(error.field).toBe('storage_mode');
-    expect(error.code).toBe('STORAGE_MODE_UNSUITABLE');
+      body('not_in_plan_403'),
+      403,
+      'Forbidden'
+    ) as StorageModeNotInPlanError;
+    expect(error).toBeInstanceOf(StorageModeNotInPlanError);
+    expect(error).not.toBeInstanceOf(AuthenticationError);
+    expect(error.statusCode).toBe(403);
+    expect(error.code).toBe('STORAGE_MODE_NOT_IN_PLAN');
+    expect(error.storageMode).toBe('fast');
+    expect(error.plan).toBe('starter');
+    expect(error.requiredPlan).toBe('performance');
+    expect(error.allowedModes).toEqual(['exact', 'balanced']);
+    expect(error.details).toMatchObject({ field: 'storage_mode' });
+    expect(refusedBeforeAnything(error)).toBe(false);
   });
 
   it('409 STORAGE_MODE_CHANGE_TOO_SOON is a ConflictError whose details carry the wait', () => {
