@@ -45,6 +45,7 @@
  * | deletePayload      | REPEATABLE | removing the same keys again changes nothing |
  * | createFieldIndex   | REPEATABLE | creating the same index again changes nothing |
  * | setSchema          | REPEATABLE | BECAUSE it is sent without If-Match (below) |
+ * | updateCollection   | REPEATABLE | a repeat finds the mode already changed: a 200 no-op |
  * | createCollection   | ONCE       | a repeat finds the collection it just made   |
  * | deleteCollection   | ONCE       | a repeat finds nothing to delete             |
  * | delete             | ONCE       | deleting points; a repeat reports a false error |
@@ -95,6 +96,10 @@ export const OPERATIONS = {
   // success gets a false 412, and it must move to ONCE
   // (tests/unit/retry-policy.test.ts holds the two together).
   setSchema: REPEATABLE,
+  // A repeat after a hidden success asks for the mode the collection now has,
+  // which the server answers with a 200 that starts no cooldown; a repeated
+  // description writes the same text.
+  updateCollection: REPEATABLE,
   createCollection: ONCE,
   deleteCollection: ONCE,
   delete: ONCE,

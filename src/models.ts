@@ -2,6 +2,11 @@
  * Data models and types for Aetherfy Vectors SDK
  */
 
+import type {
+  PerformanceMode,
+  PerformanceModeInput,
+} from './performance-modes';
+
 /**
  * Distance metrics supported by Aetherfy Vectors
  */
@@ -64,7 +69,8 @@ export interface SearchResult {
  * Collection information.
  *
  * SNAKE_CASE ON PURPOSE, for the same reason `UsageStats` is: `getCollection()`
- * returns `response.data.result` VERBATIM.
+ * returns `response.data.result` VERBATIM, except for `performanceMode` (see
+ * below), the one field it maps.
  *
  * THIS SDK HAS TWO RESPONSE PATTERNS, and which one a method uses decides
  * whether its type may be camelCase:
@@ -109,6 +115,40 @@ export interface Collection {
    * didn't report it (older backend / non-regional response).
    */
   regions?: string[];
+  /**
+   * The collection's performance mode: the `PerformanceMode` member, or the
+   * plain string of a mode this SDK does not know yet. Undefined when the
+   * server did not report one (an older backend).
+   *
+   * CAMELCASE, and MAPPED: the wire spells it `performance_mode`.
+   * `createCollection`, `getCollection` and `getCollections` read that key
+   * and set this one (the "explicit mapping" pattern above), so there is no
+   * `performance_mode` on the object they return.
+   */
+  performanceMode?: PerformanceMode | string;
+}
+
+/** Options of `createCollection`. */
+export interface CreateCollectionOptions {
+  /** Collection description (max 500 characters) */
+  description?: string;
+  /**
+   * Explicit placement regions. Omit for your full scope; an empty array is
+   * rejected by the server (422).
+   */
+  regions?: string[];
+  /**
+   * How the collection's vectors are stored and searched. Omit for `exact`.
+   */
+  performanceMode?: PerformanceModeInput;
+}
+
+/** Options of `updateCollection`; pass at least one. */
+export interface UpdateCollectionOptions {
+  /** The new description (max 500 characters); `null` clears it */
+  description?: string | null;
+  /** The mode to move the collection to */
+  performanceMode?: PerformanceModeInput;
 }
 
 /**

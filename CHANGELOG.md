@@ -1,5 +1,51 @@
 # Changelog
 
+## [Unreleased]
+
+This release contains one change marked BREAKING below, so it is 2.0.0, and the
+aetherfy-e2e-tests wrapper that calls `createCollection` must move with it.
+
+### Changed (breaking)
+
+- **BREAKING: `createCollection(name, vectors, options?)` takes an options
+  object.** `description` and `regions` were the third and fourth positional
+  arguments; they are now `options.description` and `options.regions`, beside
+  the new `options.performanceMode`:
+  `createCollection('docs', vectors, { description, regions, performanceMode })`.
+  The options object is key-checked like every other (an unknown key is a
+  `TypeError` naming the accepted ones). A call still passing a description
+  string, or `undefined` followed by a regions array, throws a `TypeError` that
+  names the new shape instead of dropping the argument: dropping `regions`
+  would have placed the collection in every region.
+
+### Added
+
+- **Performance modes.** `createCollection(..., { performanceMode })` takes a
+  `PerformanceMode` (or its name): `exact` (the default, the layout every
+  collection had), `balanced`, `fast` or `compact`. `Collection.performanceMode`
+  reports it on create, `getCollection` and `getCollections`; `getCollection`
+  and `getCollections` now map the wire's `performance_mode` to it. `PerformanceMode`
+  is exported from the package root. An unknown mode is a `TypeError` before any
+  request.
+- **`updateCollection(name, { description?, performanceMode? })`** changes a
+  collection's description or performance mode and resolves `true`. A change
+  inside the 15-minute cooldown is a `ConflictError` with `code`
+  `PERFORMANCE_MODE_CHANGE_TOO_SOON`; `compact` below 512 dimensions is a
+  `ValidationError` with `PERFORMANCE_MODE_UNSUITABLE`. It is classed
+  repeatable for retries (`OPERATIONS` in `src/retry-policy.ts`).
+- `HttpClient.patch()`, and `PATCH` as a request method.
+
+### Fixed
+
+- **An error's `details` and `field` were read from the wrong place.**
+  vectordb nests an error's extras inside the error object
+  (`{"error": {"code", "message", "details": {...}}}`), but
+  `createErrorFromResponse` read `details` from the top level, so
+  `ConflictError.details` and the other `details` were `undefined` on every
+  real answer. It now reads `error.details` first. A 400
+  `ValidationError.field` was read from the top level too; it now reads
+  `error.field`, then `error.details.field`, then the top level.
+
 ## [1.2.2] - 2026-10-16
 
 ### Fixed

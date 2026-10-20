@@ -336,6 +336,20 @@ export class HttpClient {
   }
 
   /**
+   * PATCH request helper. A PATCH body is a few fields (a description, a
+   * performance mode), so the client's own timeout applies: no body-aware
+   * extension as for post() and put().
+   */
+  async patch<T>(
+    url: string,
+    body?: unknown,
+    headers?: Record<string, string>
+  ): Promise<HttpResponse<T>> {
+    const { data } = this.prepareBody(body);
+    return this.request<T>({ url, method: 'PATCH', body: data, headers });
+  }
+
+  /**
    * DELETE request helper. Accepts an optional body — the API ships
    * endpoints (e.g. /points/payload) where DELETE carries the keys to
    * remove plus the points to remove them from. Browsers and Node both

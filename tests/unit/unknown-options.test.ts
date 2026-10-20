@@ -282,6 +282,7 @@ function fakeTransport() {
     get: jest.fn().mockResolvedValue(OK),
     post: jest.fn().mockResolvedValue(OK),
     put: jest.fn().mockResolvedValue(OK),
+    patch: jest.fn().mockResolvedValue(OK),
     delete: jest.fn().mockResolvedValue(OK),
     // createFieldIndex's only call; it resolves only on a built index.
     request: jest.fn().mockResolvedValue(INDEX_BUILT),
@@ -419,6 +420,30 @@ const ENTRY_POINTS: EntryPoint[] = [
       call: options => AetherfyVectorsClient.create(options as any),
       touched: () => null,
     }),
+  },
+  {
+    id: 'AetherfyVectorsClient.createCollection#2',
+    label: 'createCollection',
+    where: {
+      owner: 'AetherfyVectorsClient',
+      member: 'createCollection',
+      param: 2,
+    },
+    setup: onVectors((c, o) =>
+      c.createCollection('col', { size: 3, distance: 'Cosine' }, o as any)
+    ),
+  },
+  {
+    id: 'AetherfyVectorsClient.updateCollection#1',
+    label: 'updateCollection',
+    where: {
+      owner: 'AetherfyVectorsClient',
+      member: 'updateCollection',
+      param: 1,
+    },
+    // Nothing to change is its own TypeError, so a completed call carries one.
+    required: { performanceMode: 'fast' },
+    setup: onVectors((c, o) => c.updateCollection('col', o as any)),
   },
   {
     id: 'AetherfyVectorsClient.setPayload#3',

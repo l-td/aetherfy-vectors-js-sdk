@@ -23,15 +23,32 @@
  */
 
 import {
+  AetherfyVectorsError,
+  ConflictError,
+  ValidationError,
+} from '../../src/exceptions';
+import {
+  PerformanceMode,
+  PerformanceModeInput,
+} from '../../src/performance-modes';
+import {
   Collection,
+  CreateCollectionOptions,
   DistanceMetric,
   Filter,
   Point,
   ScrollPoint,
   SearchResult,
   VectorConfig,
+  UpdateCollectionOptions,
   VectorConfigInput,
 } from '../../src/models';
+
+// vectordb's PERFORMANCE_MODE_COOLDOWN_SECONDS and COMPACT_MIN_DIMENSIONS
+// (backend/utils/performanceModes.js). Copied, not imported: the server is
+// another repo, and tests/unit/performance-mode.test.ts pins the behaviour.
+const COOLDOWN_SECONDS = 900;
+const COMPACT_MIN_DIMENSIONS = 512;
 
 /** The filter conditions this double supports (a Qdrant subset). */
 interface Cond {
@@ -136,8 +153,15 @@ export class FakeVectorsClient {
   }
   readonly collections = new Map<
     string,
-    { config: VectorConfig; points: Map<string | number, Stored> }
+    {
+      config: VectorConfig;
+      points: Map<string | number, Stored>;
+      mode: PerformanceMode;
+      modeChangedAt: number | null;
+    }
   >();
+  /** A test advances this to cross the performance-mode cooldown. */
+  now = 0;
   readonly indexes: Array<[string, string, unknown]> = [];
   /**
    * Flip to make every read behave as if the mustNot clause had been
@@ -149,15 +173,80 @@ export class FakeVectorsClient {
 
   async createCollection(
     name: string,
-    vectors: VectorConfigInput
+    vectors: VectorConfigInput,
+    options: CreateCollectionOptions = {}
   ): Promise<Collection> {
     if (this.collections.has(name)) throw new Error(`${name} already exists`);
     const config: VectorConfig = {
       size: vectors.size,
       distance: (vectors.distance ?? DistanceMetric.COSINE) as DistanceMetric,
     };
-    this.collections.set(name, { config, points: new Map() });
-    return { name, config } as Collection;
+    const mode =
+      this.validMode(options.performanceMode) ?? PerformanceMode.EXACT;
+    this.checkSuitable(mode, config.size);
+    this.collections.set(name, {
+      config,
+      points: new Map(),
+      mode,
+      modeChangedAt: null,
+    });
+    return { name, config, performanceMode: mode } as Collection;
+  }
+
+  // vectordb's answers, in the order it gives them: an unknown mode is a 400
+  // before anything is read, compact below the floor a 422.
+  private validMode(
+    value: PerformanceModeInput | undefined
+  ): PerformanceMode | undefined {
+    if (value === undefined) return undefined;
+    if (!(Object.values(PerformanceMode) as string[]).includes(value)) {
+      throw new ValidationError(
+        'performance_mode must be one of: exact, balanced, fast, compact',
+        'performance_mode'
+      );
+    }
+    return value as PerformanceMode;
+  }
+
+  private checkSuitable(mode: PerformanceMode, size: number): void {
+    if (mode === PerformanceMode.COMPACT && size < COMPACT_MIN_DIMENSIONS) {
+      const error = new ValidationError(
+        `performance_mode 'compact' needs vectors of at least ${COMPACT_MIN_DIMENSIONS} dimensions; this collection's are ${size}.`,
+        'performance_mode'
+      );
+      error.code = 'PERFORMANCE_MODE_UNSUITABLE';
+      throw error;
+    }
+  }
+
+  async updateCollection(
+    name: string,
+    options: UpdateCollectionOptions = {}
+  ): Promise<boolean> {
+    const col = this.collection(name);
+    const mode = this.validMode(options.performanceMode);
+    if (mode === undefined) return true;
+    this.checkSuitable(mode, col.config.size);
+    if (mode === col.mode) return true; // a no-op: no cooldown consumed
+    if (
+      col.modeChangedAt !== null &&
+      this.now - col.modeChangedAt < COOLDOWN_SECONDS
+    ) {
+      const error: AetherfyVectorsError = new ConflictError(
+        'The performance mode was changed less than 15 minutes ago.',
+        409,
+        {
+          retry_after_seconds:
+            COOLDOWN_SECONDS - (this.now - col.modeChangedAt),
+          cooldown_seconds: COOLDOWN_SECONDS,
+        }
+      );
+      error.code = 'PERFORMANCE_MODE_CHANGE_TOO_SOON';
+      throw error;
+    }
+    col.mode = mode;
+    col.modeChangedAt = this.now;
+    return true;
   }
 
   async collectionExists(name: string): Promise<boolean> {
@@ -171,6 +260,7 @@ export class FakeVectorsClient {
       config: col.config,
       points_count: col.points.size,
       status: 'green',
+      performanceMode: col.mode,
     } as Collection;
   }
 

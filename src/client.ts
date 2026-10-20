@@ -6,6 +6,8 @@ import {
   Point,
   SearchResult,
   Collection,
+  CreateCollectionOptions,
+  UpdateCollectionOptions,
   SearchOptions,
   RetrieveOptions,
   CountOptions,
@@ -38,6 +40,10 @@ import {
 import { HttpResponse } from './http/types';
 import { retryWithBackoff, validatePointId } from './utils';
 import { OPERATIONS, Operation, backoff } from './retry-policy';
+import {
+  coercePerformanceMode,
+  parsePerformanceMode,
+} from './performance-modes';
 import { assertAllowedOptionKeys, optionKeys } from './utils/options';
 import { serializeFilter } from './utils/filter';
 import { chunkPointsByBytes, MAX_REQUEST_BYTES } from './utils/chunking';
@@ -66,6 +72,25 @@ function serverErrorCode(error: unknown): string | undefined {
   const nested = (data.error as { code?: string } | undefined)?.code;
   if (nested) return nested;
   return data.error_code as string | undefined;
+}
+
+/**
+ * A collection as vectordb sends it: `Collection` with the mode spelled the
+ * wire's way.
+ */
+type WireCollection = Omit<Collection, 'performanceMode'> & {
+  performance_mode?: unknown;
+};
+
+/**
+ * `Collection` from the wire object: `performance_mode` becomes
+ * `performanceMode`, and the snake_case key is not kept. Everything else is
+ * passed through as sent (`points_count`, `status`, `config`).
+ */
+function readCollection(wire: WireCollection): Collection {
+  const { performance_mode: mode, ...rest } = wire;
+  const performanceMode = parsePerformanceMode(mode);
+  return performanceMode === undefined ? rest : { ...rest, performanceMode };
 }
 
 /**
@@ -100,6 +125,15 @@ export const CLIENT_CONFIG_KEYS = optionKeys<ClientConfig>({
   enableConnectionPooling: true,
   workspace: true,
   apiRegion: true,
+});
+const CREATE_COLLECTION_OPTION_KEYS = optionKeys<CreateCollectionOptions>({
+  description: true,
+  regions: true,
+  performanceMode: true,
+});
+const UPDATE_COLLECTION_OPTION_KEYS = optionKeys<UpdateCollectionOptions>({
+  description: true,
+  performanceMode: true,
 });
 const SET_PAYLOAD_OPTION_KEYS = optionKeys<
   NonNullable<Parameters<AetherfyVectorsClient['setPayload']>[3]>
@@ -588,35 +622,69 @@ export class AetherfyVectorsClient {
    *
    * @param collectionName - Collection name (must be unique)
    * @param vectorsConfig - Vector configuration or legacy config object
-   * @param description - Optional collection description (max 500 characters)
-   * @param regions - Optional explicit placement regions for this collection.
-   *   Omit to default to your full scope — the server resolves it
-   *   and the returned Collection echoes the explicit list. Pass a subset of
-   *   your scope to pin the collection to those regions; an empty array is
-   *   rejected by the server (422). Subset/empty validation is server-side.
-   *   Distinct from the constructor's `apiRegion`, which selects the endpoint
-   *   to connect to rather than where the collection lives.
+   * @param options - Optional settings:
+   *   - `description`: collection description (max 500 characters).
+   *   - `regions`: explicit placement regions for this collection. Omit to
+   *     default to your full scope — the server resolves it and the returned
+   *     Collection echoes the explicit list. Pass a subset of your scope to
+   *     pin the collection to those regions; an empty array is rejected by
+   *     the server (422). Subset/empty validation is server-side. Distinct
+   *     from the constructor's `apiRegion`, which selects the endpoint to
+   *     connect to rather than where the collection lives.
+   *   - `performanceMode`: how the collection's vectors are stored and
+   *     searched: a `PerformanceMode` or its name (`'exact'`, `'balanced'`,
+   *     `'fast'`, `'compact'`). Omit for `exact`, the layout every collection
+   *     had before modes existed. `compact` needs vectors of at least 512
+   *     dimensions (ValidationError otherwise). Re-creating a collection that
+   *     exists never changes its mode; use `updateCollection`.
    * @returns Promise resolving to the created Collection, including its
-   *   resolved `regions` list.
+   *   resolved `regions` list and its `performanceMode`.
+   * @throws TypeError for an unknown option key, or a `performanceMode` that
+   *   is not one of the four modes.
    *
    * @example
    * ```typescript
    * const coll = await client.createCollection('my-collection', {
    *   size: 384,
    *   distance: DistanceMetric.COSINE
-   * }, 'My collection', ['us-east-1']);
+   * }, {
+   *   description: 'My collection',
+   *   regions: ['us-east-1'],
+   *   performanceMode: PerformanceMode.BALANCED
+   * });
    * console.log(coll.regions); // ['us-east-1']
    * ```
    */
   async createCollection(
     collectionName: string,
     vectorsConfig: VectorConfig | VectorConfigInput,
-    description?: string,
-    regions?: string[]
+    options: CreateCollectionOptions = {}
   ): Promise<Collection> {
+    // Before 2.0.0 the third and fourth arguments were `description` and
+    // `regions`. `createCollection(name, vectors, undefined, ['us-east-1'])`
+    // now has an empty options object and a stray argument, which would
+    // quietly place the collection in every region: refuse it instead.
+    if (arguments.length > 3) {
+      throw new TypeError(
+        'createCollection: takes (name, vectors, options). description and ' +
+          'regions moved into the options object: createCollection(name, ' +
+          'vectors, { description, regions, performanceMode }).'
+      );
+    }
+    assertAllowedOptionKeys(
+      options,
+      CREATE_COLLECTION_OPTION_KEYS,
+      'createCollection',
+      'Pass description, regions and performanceMode in the third argument: createCollection(name, vectors, { description, regions, performanceMode }).'
+    );
+    const { description, regions, performanceMode } = options;
     this.validateCollectionName(collectionName);
 
     const config = this.normalizeVectorConfig(vectorsConfig);
+    const mode =
+      performanceMode !== undefined
+        ? coercePerformanceMode(performanceMode)
+        : undefined;
     const scopedName = this.scopeCollection(collectionName);
 
     try {
@@ -635,12 +703,17 @@ export class AetherfyVectorsClient {
       if (regions !== undefined) {
         body.regions = regions;
       }
+      // Same rule: omitted means the server default (exact), so a caller who
+      // never names a mode sends the body this SDK always sent.
+      if (mode !== undefined) {
+        body.performance_mode = mode;
+      }
 
       const response = await this.send('createCollection', async () =>
-        this.httpClient.post<{ regions?: string[] }>(
-          this.apiUrl(this.buildCollectionsListPath()),
-          body
-        )
+        this.httpClient.post<{
+          regions?: string[];
+          performance_mode?: unknown;
+        }>(this.apiUrl(this.buildCollectionsListPath()), body)
       );
 
       if (response.status === 200 || response.status === 201) {
@@ -657,13 +730,86 @@ export class AetherfyVectorsClient {
       // §66 Option SDK-B: return the created collection with its resolved
       // placement regions echoed by the server (the full scope on omit, the
       // caller's subset otherwise; the stored list on idempotent re-create).
+      // `performanceMode` is the STORED mode the server echoes (an
+      // idempotent re-create answers with the existing row's), not the one
+      // asked for; undefined from a server that reports none.
       return {
         name: collectionName,
         config,
         description,
         regions: response.data?.regions,
+        performanceMode: parsePerformanceMode(response.data?.performance_mode),
       };
     } catch (error: unknown) {
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Change a collection's description or performance mode
+   *
+   * @param collectionName - Collection name
+   * @param options - What to change; pass at least one:
+   *   - `description`: the new description (max 500 characters); `null`
+   *     clears it.
+   *   - `performanceMode`: the mode to move the collection to. The collection
+   *     stays usable while the engine rewrites its storage in the background
+   *     (its status reads `yellow` until that finishes), and a collection can
+   *     change mode once every 15 minutes. Asking for the mode it already has
+   *     does nothing and does not start the wait.
+   * @returns Promise that resolves to true when the change was applied
+   * @throws TypeError for an unknown option key, an unknown mode, or no
+   *   option at all.
+   * @throws ValidationError for `compact` on a collection of fewer than 512
+   *   dimensions (`code` `PERFORMANCE_MODE_UNSUITABLE`).
+   * @throws ConflictError when the mode changed less than 15 minutes ago
+   *   (`code` `PERFORMANCE_MODE_CHANGE_TOO_SOON`; the seconds left are
+   *   `details.retry_after_seconds`). It is not retried: waiting inside the
+   *   call cannot help.
+   * @throws CollectionNotFoundError if the collection does not exist.
+   *
+   * @example
+   * ```typescript
+   * await client.updateCollection('my-collection', {
+   *   performanceMode: PerformanceMode.FAST
+   * });
+   * ```
+   */
+  async updateCollection(
+    collectionName: string,
+    options: UpdateCollectionOptions = {}
+  ): Promise<boolean> {
+    assertAllowedOptionKeys(
+      options,
+      UPDATE_COLLECTION_OPTION_KEYS,
+      'updateCollection'
+    );
+    this.validateCollectionName(collectionName);
+
+    const body: Record<string, unknown> = {};
+    if (options.description !== undefined) {
+      body.description = options.description;
+    }
+    if (options.performanceMode !== undefined) {
+      body.performance_mode = coercePerformanceMode(options.performanceMode);
+    }
+    if (Object.keys(body).length === 0) {
+      throw new TypeError(
+        'updateCollection: nothing to change; pass description or performanceMode.'
+      );
+    }
+
+    const scopedName = this.scopeCollection(collectionName);
+    try {
+      await this.send('updateCollection', () =>
+        this.httpClient.patch(
+          this.apiUrl(this.buildCollectionPath(collectionName)),
+          body
+        )
+      );
+      return true;
+    } catch (error: unknown) {
+      this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);
     }
   }
@@ -710,14 +856,14 @@ export class AetherfyVectorsClient {
   async getCollections(): Promise<Collection[]> {
     try {
       const response = await this.send('getCollections', () =>
-        this.httpClient.get<{ collections: Collection[] }>(
+        this.httpClient.get<{ collections: WireCollection[] }>(
           this.apiUrl(this.buildCollectionsListPath())
         )
       );
 
       // The workspace's list holds only its own collections, with bare
       // names: nothing to filter or unscope.
-      return response.data.collections || [];
+      return (response.data.collections || []).map(readCollection);
     } catch (error: unknown) {
       throw this.handleError(error);
     }
@@ -784,13 +930,13 @@ export class AetherfyVectorsClient {
 
     try {
       const response = await this.send('getCollection', () =>
-        this.httpClient.get<{ result: Collection }>(
+        this.httpClient.get<{ result: WireCollection }>(
           this.apiUrl(this.buildCollectionPath(collectionName))
         )
       );
 
       // vectordb returns the bare collection name: nothing to unscope.
-      return response.data.result;
+      return readCollection(response.data.result);
     } catch (error: unknown) {
       this.evictCachesIfNotFound(scopedName, error);
       throw this.handleError(error);

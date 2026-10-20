@@ -42,6 +42,8 @@ export {
   Point,
   SearchResult,
   Collection,
+  CreateCollectionOptions,
+  UpdateCollectionOptions,
   Filter,
 
   // Options interfaces
@@ -72,6 +74,13 @@ export {
   AnalysisResult,
   SchemaData,
 } from './models';
+
+// Performance modes
+export {
+  PerformanceMode,
+  PerformanceModeInput,
+  DEFAULT_PERFORMANCE_MODE,
+} from './performance-modes';
 
 // Exception exports
 export {

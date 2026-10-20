@@ -194,7 +194,7 @@ const client = new AetherfyVectorsClient({
 
 `apiRegion` pins which **regional API endpoint** the client connects to —
 a transport/routing override, NOT where collections live (for collection
-placement see `createCollection(..., regions)`). Production agents have
+placement see `createCollection(name, config, { regions })`). Production agents have
 `AETHERFY_VECTORS_URL` injected by the control-plane — that's the URL they
 reach the regional backend through, and it takes precedence over
 `apiRegion`. For local development (no env var injected), you can pin a
@@ -226,7 +226,7 @@ and a warning is logged — production-agent protection rule.
 ### Unknown options throw
 
 Every options object the SDK takes — the client constructor and `create()`,
-`search`, `retrieve`, `scroll`, `scrollIter`, `count`, `setPayload`, the
+`createCollection`, `updateCollection`, `search`, `retrieve`, `scroll`, `scrollIter`, `count`, `setPayload`, the
 `MemoryClient` constructor, the `Namespace` / `Thread` methods,
 `retryWithBackoff`, `HttpClient` and `fanOut` — accepts exactly the keys its TypeScript type declares. Any
 other key throws a `TypeError` naming the key, the method and the accepted
@@ -562,6 +562,7 @@ a call's timeout.
 |---|---|
 | `getCollections`, `getCollection`, `collectionExists`, `getSchema`, `analyzeSchema`, `search`, `retrieve`, `scroll`, `count`, `getUsageStats` | reads: repeatable |
 | `upsert`, `setPayload`, `overwritePayload`, `deletePayload`, `createFieldIndex`, `setSchema` | writes keyed by id: repeatable |
+| `updateCollection` | repeatable: a repeat after a hidden success asks for the mode the collection now has, which does nothing |
 | `createCollection`, `deleteCollection`, `delete` (points), `deleteSchema`, `deleteFieldIndex` | once: a repeat after a hidden success reports a false error, so an ambiguous failure is raised after one attempt |
 
 `setSchema` is repeatable because it is sent without `If-Match`: a repeat writes
@@ -805,6 +806,54 @@ await client.setSchema('products', analysis.suggestedSchema, 'warn');
 
 Schema violations throw `SchemaValidationError` with a detailed per-field errors array. If the server reports a stale schema (`412 Precondition Failed`), the SDK auto-refreshes the cache and retries. Use `refreshSchema(name)` or `clearSchemaCache(name?)` for manual control.
 
+## 🎚️ Performance modes
+
+A collection's **performance mode** is a preset for how its vectors are stored
+and searched. You pick one of four names; the service applies the settings.
+
+| Mode                  | What it does                                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `exact` (the default) | Full-precision vectors in memory, and search reads them. The layout every collection had before modes existed.                             |
+| `balanced`            | Searches a compact 8-bit copy of each vector and keeps the originals on disk to rescore the best candidates. Far less memory than `exact`. |
+| `fast`                | The same compact copy, with the originals kept in memory too. Uses **more** memory than `exact`, not less.                                 |
+| `compact`             | A 2-bit copy with the originals on disk: the smallest footprint and the lossiest mode. Needs vectors of at least 512 dimensions.           |
+
+```typescript
+import { PerformanceMode } from 'aetherfy-vectors';
+
+const collection = await client.createCollection(
+  'docs',
+  { size: 1536, distance: DistanceMetric.COSINE },
+  { performanceMode: PerformanceMode.BALANCED } // or the string 'balanced'
+);
+console.log(collection.performanceMode); // PerformanceMode.BALANCED
+
+// Change it later. The collection stays usable while its storage is rewritten
+// in the background (its status reads 'yellow' until that finishes).
+await client.updateCollection('docs', { performanceMode: 'fast' });
+```
+
+- Quantized modes lose some recall. Searching with oversampling and rescoring
+  recovers most of it:
+  `client.search('docs', query, { limit: 10, searchParams: { quantization: { rescore: true, oversampling: 2.0 } } })`.
+  `compact` loses the most, and how much depends on the embedding model: test
+  it on your own data before you rely on it.
+- A collection can change mode once every 15 minutes. A change inside that
+  window throws `ConflictError` with `code` `PERFORMANCE_MODE_CHANGE_TOO_SOON`;
+  the seconds left are `error.details.retry_after_seconds`. It is not retried
+  for you, because waiting inside the call cannot help. Asking for the mode a
+  collection already has does nothing and does not start the wait.
+- `compact` on a collection of fewer than 512 dimensions throws
+  `ValidationError` with `code` `PERFORMANCE_MODE_UNSUITABLE`.
+- Re-creating a collection that exists never changes its mode, and the returned
+  `Collection` shows the mode it has, not the one you asked for.
+- `updateCollection(name, { description })` changes the description too;
+  `description: null` clears it. Pass at least one of the two.
+- `getCollection` and `getCollections` return `performanceMode` (camelCase);
+  the wire's `performance_mode` is not kept on the object.
+- Every mode is available on every plan. Storage is metered the same way in
+  every mode.
+
 ## 🔧 Core Operations
 
 ### Collection Management
@@ -825,9 +874,17 @@ console.log(collection.name, collection.regions);
 await client.createCollection(
   'eu-only',
   { size: 768, distance: DistanceMetric.COSINE },
-  'EU-resident collection',
-  ['eu-central-1']
+  { description: 'EU-resident collection', regions: ['eu-central-1'] }
 );
+
+// Choose how the vectors are stored and searched (see Performance modes),
+// and change it later. Returns true once the change is applied.
+await client.createCollection(
+  'docs',
+  { size: 1536, distance: DistanceMetric.COSINE },
+  { performanceMode: PerformanceMode.BALANCED }
+);
+await client.updateCollection('docs', { performanceMode: 'fast' });
 
 // List all collections
 const collections = await client.getCollections();
@@ -1143,7 +1200,8 @@ client.destroy();
 
 | Method                                                   | Description                                                                        | Returns                   |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------- |
-| `createCollection(name, config, description?, regions?)` | Create a new collection (returns the created Collection, incl. resolved `regions`) | `Promise<Collection>`     |
+| `createCollection(name, config, options?)`               | Create a new collection; `options`: `description`, `regions`, `performanceMode`    | `Promise<Collection>`     |
+| `updateCollection(name, options)`                        | Change `description` or `performanceMode`                                          | `Promise<boolean>`        |
 | `deleteCollection(name)`                                 | Delete a collection                                                                | `Promise<boolean>`        |
 | `getCollections()`                                       | List all collections                                                               | `Promise<Collection[]>`   |
 | `collectionExists(name)`                                 | Check if collection exists                                                         | `Promise<boolean>`        |

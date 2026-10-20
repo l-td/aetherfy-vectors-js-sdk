@@ -184,7 +184,8 @@ const FACTORY_RETURNS: Record<string, string> = {
  * to the skip counter forever, which is a permanent hole wearing the costume of
  * a deliberate skip.
  */
-const OPTIONS_INTERFACE: Record<string, { argIndex: number; iface: string }> = {
+type OptionsBag = { argIndex: number; iface: string };
+const OPTIONS_INTERFACE: Record<string, OptionsBag | OptionsBag[]> = {
   search: { argIndex: 2, iface: 'SearchOptions' },
   retrieve: { argIndex: 2, iface: 'RetrieveOptions' },
   count: { argIndex: 1, iface: 'CountOptions' },
@@ -196,7 +197,12 @@ const OPTIONS_INTERFACE: Record<string, { argIndex: number; iface: string }> = {
   iter: { argIndex: 0, iface: 'NamespaceIterOptions' },
   iterHistory: { argIndex: 0, iface: 'ThreadHistoryOptions' },
   history: { argIndex: 0, iface: 'ThreadHistoryOptions' },
-  createCollection: { argIndex: 1, iface: 'VectorConfig' },
+  // Two bags: the vector config and, since 2.0.0, the options object.
+  createCollection: [
+    { argIndex: 1, iface: 'VectorConfig' },
+    { argIndex: 2, iface: 'CreateCollectionOptions' },
+  ],
+  updateCollection: { argIndex: 1, iface: 'UpdateCollectionOptions' },
   // `delete(name, selector)` takes point ids OR a filter; when a sample writes
   // the filter inline, its clauses are checkable — and this is where a
   // snake_case `must_not` in a sample would be caught.
@@ -362,15 +368,19 @@ export function checkSample(
             // Silence is not allowed: without the counter, adding a method with
             // an options bag — or moving one to a different argument position —
             // quietly shrinks coverage while the suite stays green.
-            const spec =
+            const mapped =
               OPTIONS_INTERFACE[`${clsName}.${method}`] ??
               OPTIONS_INTERFACE[method];
+            const specs: OptionsBag[] =
+              mapped === undefined
+                ? []
+                : Array.isArray(mapped)
+                  ? mapped
+                  : [mapped];
             node.arguments.forEach((arg, argIndex) => {
               if (!ts.isObjectLiteralExpression(arg)) return;
-              const allowed =
-                spec && spec.argIndex === argIndex
-                  ? interfaceMembers(spec.iface)
-                  : null;
+              const spec = specs.find(s => s.argIndex === argIndex);
+              const allowed = spec ? interfaceMembers(spec.iface) : null;
               if (!allowed) {
                 stats.skippedOptionBags.push(
                   `${clsName}.${method}#${argIndex}`
