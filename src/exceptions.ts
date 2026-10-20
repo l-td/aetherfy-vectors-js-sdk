@@ -575,23 +575,6 @@ export class PartialUpsertError extends AetherfyVectorsError {
 }
 
 /**
- * The field a validation error names: on the error object (the envelope of
- * `vectors` and the query limits), in the error's `details` (performance
- * modes), or at the top level, in that order.
- */
-function fieldOf(
-  nestedError: Record<string, unknown> | undefined,
-  responseData: Record<string, unknown> | undefined
-): string | undefined {
-  const nestedDetails = nestedError?.details as
-    | Record<string, unknown>
-    | undefined;
-  const field =
-    nestedError?.field ?? nestedDetails?.field ?? responseData?.field;
-  return typeof field === 'string' ? field : undefined;
-}
-
-/**
  * Utility function to create appropriate error from HTTP response
  */
 export function createErrorFromResponse(
@@ -639,12 +622,10 @@ export function createErrorFromResponse(
   } catch {
     message = statusText || 'Unknown error';
   }
-  // vectordb nests an error's extras inside the error object
-  // ({"error": {"code", "message", "details": {...}}}), so that is read first;
-  // the top-level key is read as it always was.
-  const details = (nestedError?.details ?? responseData?.details) as
-    | Record<string, unknown>
-    | undefined;
+  // vectordb puts an error's extras (`field`, `max`, `retry_after_seconds`, ...)
+  // directly on the error object, beside `code` and `message`. `details` is that
+  // object, as in the Python SDK's.
+  const details = nestedError;
 
   switch (status) {
     case 400:
@@ -661,7 +642,7 @@ export function createErrorFromResponse(
       return stamp(
         new ValidationError(
           message,
-          fieldOf(nestedError, responseData),
+          nestedError?.field as string | undefined,
           responseData?.violations as string[] | undefined
         )
       );
@@ -728,7 +709,7 @@ export function createErrorFromResponse(
       return stamp(
         new ValidationError(
           message,
-          fieldOf(nestedError, responseData),
+          nestedError?.field as string | undefined,
           nestedError?.violations as string[] | undefined
         )
       );

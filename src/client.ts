@@ -764,7 +764,8 @@ export class AetherfyVectorsClient {
    *   dimensions (`code` `PERFORMANCE_MODE_UNSUITABLE`).
    * @throws ConflictError when the mode changed less than 15 minutes ago
    *   (`code` `PERFORMANCE_MODE_CHANGE_TOO_SOON`; the seconds left are
-   *   `details.retry_after_seconds`). It is not retried: waiting inside the
+   *   `details.retry_after_seconds`; `details` is the error object). It is not
+   *   retried: waiting inside the
    *   call cannot help.
    * @throws CollectionNotFoundError if the collection does not exist.
    *

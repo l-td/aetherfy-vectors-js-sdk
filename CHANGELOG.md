@@ -38,13 +38,13 @@ aetherfy-e2e-tests wrapper that calls `createCollection` must move with it.
 ### Fixed
 
 - **An error's `details` and `field` were read from the wrong place.**
-  vectordb nests an error's extras inside the error object
-  (`{"error": {"code", "message", "details": {...}}}`), but
-  `createErrorFromResponse` read `details` from the top level, so
-  `ConflictError.details` and the other `details` were `undefined` on every
-  real answer. It now reads `error.details` first. A 400
-  `ValidationError.field` was read from the top level too; it now reads
-  `error.field`, then `error.details.field`, then the top level.
+  vectordb puts an error's extras (`field`, `max`, `retry_after_seconds`, ...)
+  directly on the error object, beside `code` and `message`, but
+  `createErrorFromResponse` read `details` and a 400's `field` from the TOP level
+  of the body, so `ConflictError.details` and `ValidationError.field` were
+  `undefined` on every real answer. It now reads them from the error object:
+  `ValidationError.field` is `error.field`, and `details` is the error object (as
+  in the Python SDK), so the cooldown's wait is `error.details.retry_after_seconds`.
 
 ## [1.2.2] - 2026-10-16
 

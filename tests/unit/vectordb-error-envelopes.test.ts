@@ -1,11 +1,11 @@
 /**
  * createErrorFromResponse against the error bodies vectordb really authors.
  *
- * vectordb nests an error's extras inside the error object
- * ({"error": {"code", "message", "field"?, "details"?}}). This parser used to
- * read `details` and a 400's `field` from the TOP level of the body, so
- * `ConflictError.details` and `ValidationError.field` were undefined on every
- * real answer, and the tests that passed hand-written bodies never noticed.
+ * vectordb puts every extra of an error directly on the error object
+ * ({"error": {"code", "message", "field"?, "retry_after_seconds"?, ...}}). This
+ * parser used to read `details` and a 400's `field` from the TOP level of the
+ * body, so `ConflictError.details` and `ValidationError.field` were undefined on
+ * every real answer, and the tests that passed hand-written bodies never noticed.
  * The bodies below are produced by vectordb's own code (see _provenance in the
  * fixture), not typed here.
  */
@@ -52,7 +52,7 @@ describe("createErrorFromResponse reads vectordb's real envelopes", () => {
     expect(error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('400 with `field` inside `details` (the performance mode) names the field', () => {
+  it('400 for an unknown performance mode names its field and the accepted modes', () => {
     const error = createErrorFromResponse(
       body('mode_400'),
       400,
@@ -81,7 +81,7 @@ describe("createErrorFromResponse reads vectordb's real envelopes", () => {
     ) as ConflictError;
     expect(error).toBeInstanceOf(ConflictError);
     expect(error.code).toBe('PERFORMANCE_MODE_CHANGE_TOO_SOON');
-    expect(error.details).toEqual({
+    expect(error.details).toMatchObject({
       field: 'performance_mode',
       retry_after_seconds: 437,
       cooldown_seconds: 900,

@@ -8,7 +8,7 @@
  * body this SDK always sent; the server answers 400 for an unknown mode, 422
  * PERFORMANCE_MODE_UNSUITABLE for compact below 512 dimensions, 409
  * PERFORMANCE_MODE_CHANGE_TOO_SOON inside the cooldown, with the extras under
- * `error.details`.
+ * the error object (the house style: `field` and `max` sit there too).
  */
 
 import nock from 'nock';
@@ -193,11 +193,9 @@ describe('createCollection', () => {
           code: 'PERFORMANCE_MODE_UNSUITABLE',
           message:
             "performance_mode 'compact' needs vectors of at least 512 dimensions",
-          details: {
-            field: 'performance_mode',
-            min_vector_size: 512,
-            suggested_mode: 'balanced',
-          },
+          field: 'performance_mode',
+          min_vector_size: 512,
+          suggested_mode: 'balanced',
         },
       });
     const error = await newClient()
@@ -333,11 +331,9 @@ describe('updateCollection', () => {
         error: {
           code: 'PERFORMANCE_MODE_CHANGE_TOO_SOON',
           message: 'It can change again in 7 minutes.',
-          details: {
-            field: 'performance_mode',
-            retry_after_seconds: 437,
-            cooldown_seconds: 900,
-          },
+          field: 'performance_mode',
+          retry_after_seconds: 437,
+          cooldown_seconds: 900,
         },
       });
     const error = await newClient()
@@ -365,44 +361,38 @@ describe('updateCollection', () => {
   });
 });
 
-describe('error envelope: extras under error.details', () => {
-  it('a 409 carries error.details on ConflictError.details', () => {
+describe('error envelope: extras on the error object', () => {
+  it('a 409 carries the error object as ConflictError.details', () => {
     const error = createErrorFromResponse(
       {
         error: {
           code: 'PERFORMANCE_MODE_CHANGE_TOO_SOON',
           message: 'x',
-          details: { retry_after_seconds: 12 },
+          retry_after_seconds: 12,
         },
       },
       409,
       'Conflict'
     );
     expect(error).toBeInstanceOf(ConflictError);
-    expect((error as ConflictError).details).toEqual({
+    expect((error as ConflictError).details).toMatchObject({
       retry_after_seconds: 12,
     });
   });
 
-  it('a 400 names its field wherever vectordb puts it: on the error, or in its details', () => {
-    const onError = createErrorFromResponse(
-      { error: { code: 'VALIDATION_ERROR', message: 'x', field: 'vectors' } },
-      400,
-      'Bad Request'
-    ) as ValidationError;
-    const inDetails = createErrorFromResponse(
+  it('a 400 names its field from the error object', () => {
+    const error = createErrorFromResponse(
       {
         error: {
           code: 'VALIDATION_ERROR',
           message: 'x',
-          details: { field: 'performance_mode' },
+          field: 'performance_mode',
         },
       },
       400,
       'Bad Request'
     ) as ValidationError;
-    expect(onError.field).toBe('vectors');
-    expect(inDetails.field).toBe('performance_mode');
+    expect(error.field).toBe('performance_mode');
   });
 });
 

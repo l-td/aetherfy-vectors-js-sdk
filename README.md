@@ -840,7 +840,7 @@ await client.updateCollection('docs', { performanceMode: 'fast' });
   it on your own data before you rely on it.
 - A collection can change mode once every 15 minutes. A change inside that
   window throws `ConflictError` with `code` `PERFORMANCE_MODE_CHANGE_TOO_SOON`;
-  the seconds left are `error.details.retry_after_seconds`. It is not retried
+  the seconds left are `error.details.retry_after_seconds` (`details` is the error object). It is not retried
   for you, because waiting inside the call cannot help. Asking for the mode a
   collection already has does nothing and does not start the wait.
 - `compact` on a collection of fewer than 512 dimensions throws
