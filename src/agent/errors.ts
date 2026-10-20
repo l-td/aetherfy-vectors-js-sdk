@@ -352,7 +352,7 @@ export const CONNECTION_NEEDS_REAUTH = 'CONNECTION_NEEDS_REAUTH';
 export const CONNECTION_PROVIDER_UNAVAILABLE =
   'CONNECTION_PROVIDER_UNAVAILABLE';
 export const CONNECTION_REQUIRES_AGENT_KEY = 'CONNECTION_REQUIRES_AGENT_KEY';
-export const CONNECTION_NAME_AMBIGUOUS = 'CONNECTION_NAME_AMBIGUOUS';
+export const CONNECTION_GRANT_NOT_ENABLED = 'CONNECTION_GRANT_NOT_ENABLED';
 
 /**
  * The control plane refused a connection token.
@@ -388,12 +388,11 @@ export class ConnectionTokenError extends AgentError {
 }
 
 /**
- * `404 CONNECTION_NOT_FOUND`. An agent's key is never answered this for an
- * unknown or unpermitted name: the control plane refuses that with
- * `403 AUTH_AGENT_KEY_OUT_OF_SCOPE` (it does not reveal which names exist),
- * which arrives as the generic {@link ConnectionTokenError}. This class is what
- * is left for a connection removed while the request was being checked.
- * Connect it on the dashboard, or check the name.
+ * `404 CONNECTION_NOT_FOUND` — no connection with this id is available to this
+ * agent: it does not exist (it may have been disconnected), or it is not one of
+ * the agent's own, its workspace's or an enabled granted workspace's. The
+ * control plane does not say which. List the ids the agent may use with
+ * `listConnections()`.
  */
 export class ConnectionNotFound extends ConnectionTokenError {
   constructor(message: string, detail?: Record<string, unknown>) {
@@ -404,23 +403,18 @@ export class ConnectionNotFound extends ConnectionTokenError {
 }
 
 /**
- * `409 CONNECTION_NAME_AMBIGUOUS` — two or more workspaces this agent is
- * granted (at a level that lets it use their connections) hold a connection of
- * this name, and the agent has neither an own nor a home workspace connection
- * of it to take precedence. Aetherfy never picks one: `workspaces` lists them.
- * Connect the name on the agent itself, or rename one of them, on the
- * dashboard.
+ * `403 CONNECTION_GRANT_NOT_ENABLED` — the connection is in a workspace this
+ * agent is granted, but that grant's connections switch is off. A grant is data
+ * access; a connection token acts at the provider, so the account owner turns
+ * it on per grant (on the agent's page in the dashboard, or
+ * `afy access <agent> --connections-on <workspace>`). Asking again cannot help
+ * until they do.
  */
-export class ConnectionNameAmbiguous extends ConnectionTokenError {
-  /** The names of the workspaces that tie, sorted. */
-  public readonly workspaces: string[];
-
+export class ConnectionGrantNotEnabled extends ConnectionTokenError {
   constructor(message: string, detail?: Record<string, unknown>) {
-    super(message, { status: 409, code: CONNECTION_NAME_AMBIGUOUS, detail });
-    this.name = 'ConnectionNameAmbiguous';
-    const listed = detail?.workspaces;
-    this.workspaces = Array.isArray(listed) ? listed.map(String) : [];
-    Object.setPrototypeOf(this, ConnectionNameAmbiguous.prototype);
+    super(message, { status: 403, code: CONNECTION_GRANT_NOT_ENABLED, detail });
+    this.name = 'ConnectionGrantNotEnabled';
+    Object.setPrototypeOf(this, ConnectionGrantNotEnabled.prototype);
   }
 }
 
