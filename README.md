@@ -774,16 +774,17 @@ Full contract, including the environment variables behind every call:
 
 ### Connections: OAuth access tokens
 
-Connect Google, Slack, Notion, Microsoft 365, HubSpot or Atlassian to an agent (or its workspace) once, on the
-Aetherfy dashboard. Agent code then asks for a fresh access token by the
-connection's name; Aetherfy runs the OAuth sign-in and the refreshes, and no
-refresh token reaches the agent.
+Connect Google, Slack, Notion, Microsoft 365, HubSpot or Atlassian to an agent (or
+its workspace) once, on the Aetherfy dashboard. Agent code then asks for a fresh
+access token by the connection's **id**; Aetherfy runs the OAuth sign-in and the
+refreshes, and no refresh token reaches the agent.
 
 ```ts
-import { connection, ConnectionNeedsReauth } from 'aetherfy-vectors/agent';
+import { connection, listConnections, ConnectionNeedsReauth } from 'aetherfy-vectors/agent';
 
+const google = (await listConnections()).find((c) => c.provider === 'google');
 try {
-  const token = await connection('google', { minValidSeconds: 300 });
+  const token = await connection(google!.id, { minValidSeconds: 300 });
   const headers = { Authorization: `${token.token_type} ${token.access_token}` };
 } catch (error) {
   if (error instanceof ConnectionNeedsReauth) console.log('reconnect it on the dashboard');
@@ -791,15 +792,16 @@ try {
 }
 ```
 
-Only an agent machine's own `AETHERFY_API_KEY` is answered. A token is reused
-until it would have less than `minValidSeconds` (and never less than a minute)
-left. `ConnectionUnavailable` is the one refusal worth retrying. An agent uses
-its own connections and its workspace's (its own wins on a name clash). A name
-that is neither, unknown or someone else's, is refused with
-`ConnectionTokenError` (`403 AUTH_AGENT_KEY_OUT_OF_SCOPE`); a name two
-workspaces it is granted both hold is `ConnectionNameAmbiguous`, which lists
-them in `.workspaces`. The full contract is the Connections page of the
-Aetherfy agent docs.
+`listConnections()` returns the connections this agent's key may use (each a
+`ConnectionInfo` with `id`, `name`, `provider`, `scope`, `account_label`, `status`).
+The `name` is a label for people; code asks by `id`. Only an agent machine's own
+`AETHERFY_API_KEY` is answered. A token is reused until it would have less than
+`minValidSeconds` (and never less than a minute) left. `ConnectionUnavailable` is the
+one refusal worth retrying. An agent may use its own connections, its workspace's, and
+those of a workspace it is granted only when that grant's connections switch is on: a
+connection in a granted workspace whose switch is off is `ConnectionGrantNotEnabled`,
+and an id that is not a connection the agent may use is `ConnectionNotFound`. The full
+contract is the Connections page of the Aetherfy agent docs.
 
 ## 🧩 Payload Schemas
 

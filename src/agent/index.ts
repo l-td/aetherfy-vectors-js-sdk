@@ -57,20 +57,26 @@ import {
   WaitTimeoutInvalid,
 } from './errors';
 import { requestJson } from './http';
-import { ConnectionToken, MachineShape, Run, Spawn } from './models';
+import {
+  ConnectionInfo,
+  ConnectionToken,
+  MachineShape,
+  Run,
+  Spawn,
+} from './models';
 import { requireEnv, userAgent } from './runtime';
 import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
 import { SDK_VERSION } from '../version';
 
 export {
   ConnectionAccessDenied,
-  ConnectionNameAmbiguous,
+  ConnectionGrantNotEnabled,
   ConnectionNeedsReauth,
   ConnectionNotFound,
   ConnectionTokenError,
   ConnectionUnavailable,
 } from './errors';
-export { connection } from './connections';
+export { connection, listConnections } from './connections';
 export type { ConnectionOptions } from './connections';
 export {
   AgentError,
@@ -86,7 +92,7 @@ export {
   TooManyRunsInFlight,
   WaitTimeoutInvalid,
 };
-export type { ConnectionToken, MachineShape, Run, Spawn };
+export type { ConnectionInfo, ConnectionToken, MachineShape, Run, Spawn };
 
 /**
  * The release this helper announces in its User-Agent. NOT a literal of its

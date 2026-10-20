@@ -87,7 +87,8 @@ export interface Run {
 }
 
 /**
- * A fresh access token for one connection (Google, Slack, Notion, Microsoft 365, HubSpot, Atlassian).
+ * A fresh access token for one connection (Google, Slack, Notion, Microsoft 365,
+ * HubSpot, Atlassian).
  *
  * Send `access_token` to the provider's own API as
  * `Authorization: ${token_type} ${access_token}`. `expires_at` is null for a
@@ -96,11 +97,29 @@ export interface Run {
  * runs low.
  */
 export interface ConnectionToken {
+  id: string;
   access_token: string;
   token_type: string;
   expires_at: Date | null;
   provider: string;
   name: string;
   account_label: string | null;
+  scopes: string[];
+}
+
+/**
+ * One connection this agent's key may ask a token for, as `listConnections()`
+ * returns it. `id` is what `connection()` takes; `name` is a label for people.
+ * `scope` is `agent` (the agent's own) or `workspace` (its workspace's, or a
+ * granted workspace's whose grant has the connections switch on). No token
+ * material.
+ */
+export interface ConnectionInfo {
+  id: string;
+  name: string;
+  provider: string;
+  scope: string;
+  account_label: string | null;
+  status: string;
   scopes: string[];
 }

@@ -128,49 +128,27 @@ described here.
 
 ### Added
 
-- **`connection(name, { minValidSeconds })` in `aetherfy-vectors/agent`**
+- **`connection(connectionId, { minValidSeconds })` in `aetherfy-vectors/agent`**
   returns a fresh OAuth access token (`ConnectionToken`) for a Google, Slack,
   Notion, Microsoft 365, HubSpot or Atlassian connection made on the Aetherfy
-  dashboard, from the control plane's `POST /connections/{name}/token`. Tokens are cached per name in the
-  process until they would have less than `max(minValidSeconds, 60)` seconds
-  left, and a token with no expiry (Notion) is asked for again after five
-  minutes; an unknown option is refused like every other options object.
-  Refusals are typed: `ConnectionNotFound`, `ConnectionNeedsReauth`,
-  `ConnectionUnavailable` (retryable) and `ConnectionAccessDenied`, all
-  extending `ConnectionTokenError`. Same semantics as the Python helper's
-  `aetherfy_agent.connection`.
-  A name that is not the agent's own connection or its workspace's (unknown,
-  or someone else's) is refused `403 AUTH_AGENT_KEY_OUT_OF_SCOPE`, with
-  `required_scope` `connections:token`, and arrives as the generic
-  `ConnectionTokenError`; `ConnectionNotFound` is only a connection removed
-  mid-request.
-  A name that two workspaces the agent is granted (at a level that lets it use
-  their connections) both hold, with no own or home connection of it, is
-  `ConnectionNameAmbiguous` (`409 CONNECTION_NAME_AMBIGUOUS`); `.workspaces`
-  lists the tie.
-- **`NotFoundError`** (exported from the package root): the parent of
-  `CollectionNotFoundError`, `PointNotFoundError`, `SchemaNotFoundError` and
-  `WorkspaceNotFoundError`, and what a 404 whose `code` the SDK does not know
-  arrives as (it was the base `AetherfyVectorsError`), carrying the code.
-  Every not-found error now has `statusCode` 404 (it was undefined).
-- **`WorkspaceNotFoundError`** (exported from the package root): 404
-  `WORKSPACE_NOT_FOUND`, with `.workspace` (the name sent) or `.workspaceId`
-  (the id sent). Not retryable.
-- **`AgentWorkspaceForbiddenError` (exported from the package root), with
-  `.workspace`**: the vector API refuses an agent's injected key a workspace
-  it was not granted (403 `AGENT_KEY_WORKSPACE_FORBIDDEN`; `workspace` names
-  it, or is null when it was addressed by id). The error says how to grant
-  access (the agent's page in the dashboard, or
-  `afy access <agent> --add <workspace>`). Not retryable.
-  `AGENT_ACCESS_UNAVAILABLE` (503) arrives as the existing retryable
-  `ServiceUnavailableError`.
-- The workspace-required codes, mapped on `code`: 400 `WORKSPACE_REQUIRED`
-  (`ValidationError`); 409 `ADDRESSED_AN_ALIAS`, `COLLECTION_NAME_TAKEN`,
-  `COLLECTION_NAME_IS_AN_ALIAS` (`ConflictError`); 403
-  `AUTH_AGENT_KEY_OUT_OF_SCOPE` (`AuthenticationError`, e.g. `getUsageStats()`
-  with an agent's key, an account-only route); and the retryable 503s
-  `WORKSPACE_LOOKUP_UNAVAILABLE`, `COLLECTION_LOOKUP_UNAVAILABLE` and
-  `PLACEMENT_UNAVAILABLE` (`ServiceUnavailableError`).
+  dashboard, from the control plane's `POST /connections/{connection_id}/token`.
+  A connection is addressed by its **id** (a malformed one is an `AgentError`
+  before any request). Tokens are cached per id in the process until they would
+  have less than `max(minValidSeconds, 60)` seconds left, and a token with no
+  expiry (Notion) is asked for again after five minutes; an unknown option is
+  refused like every other options object.
+  **`listConnections()`** returns the connections this agent's key may use
+  (`ConnectionInfo`: `id`, `name`, `provider`, `scope`, `account_label`,
+  `status`, `scopes`), from `GET /connections/usable`.
+  Refusals are typed: `ConnectionNotFound` (`404`: no such connection, or not one
+  the agent may use), `ConnectionGrantNotEnabled` (`403
+  CONNECTION_GRANT_NOT_ENABLED`: the connection is in a granted workspace whose
+  grant's connections switch is off), `ConnectionNeedsReauth`,
+  `ConnectionUnavailable` (retryable) and `ConnectionAccessDenied`, all extending
+  `ConnectionTokenError`. Same semantics as the Python helper's
+  `aetherfy_agent.connection` and `list_connections`. A malformed id is refused by
+  the key's policy, `403 AUTH_AGENT_KEY_OUT_OF_SCOPE`, as the generic
+  `ConnectionTokenError`.
 
 ### Not in the SDK
 

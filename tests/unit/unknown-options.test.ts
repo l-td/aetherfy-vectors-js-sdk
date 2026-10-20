@@ -680,7 +680,7 @@ const ENTRY_POINTS: EntryPoint[] = [
       // .optionally(): a refusal never reaches it, and must not be reported
       // as a pending mock by tests/node-setup.ts for doing its job.
       nock('https://agents.aetherfy.com')
-        .post('/api/v1/connections/google/token')
+        .post('/api/v1/connections/6f1c2b7e-0a2d-4f8e-9c31-2b0d5a7e4411/token')
         .optionally()
         .reply(() => {
           requests += 1;
@@ -698,7 +698,8 @@ const ENTRY_POINTS: EntryPoint[] = [
           ];
         });
       return {
-        call: options => connection('google', options as any),
+        call: options =>
+          connection('6f1c2b7e-0a2d-4f8e-9c31-2b0d5a7e4411', options as any),
         touched: () => requests,
       };
     },
