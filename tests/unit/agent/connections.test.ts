@@ -172,6 +172,30 @@ describe('connection()', () => {
     }
   );
 
+  it('maps an unknown or unpermitted name (403 out of scope) to the generic error', async () => {
+    // The route policy refuses an agent key a name that is not its own or its
+    // workspace's, whether or not the name exists. That is not "no such
+    // connection": it must not arrive as ConnectionNotFound.
+    nock(HOST)
+      .post(PATH)
+      .reply(403, {
+        detail: {
+          code: 'AUTH_AGENT_KEY_OUT_OF_SCOPE',
+          message: 'this key cannot do that',
+          required_scope: 'connections:token',
+        },
+      });
+    const error = (await connection('google').catch(
+      (e: unknown) => e
+    )) as ConnectionTokenError;
+    expect(error.constructor).toBe(ConnectionTokenError);
+    expect(error).not.toBeInstanceOf(ConnectionNotFound);
+    expect([error.status, error.code]).toEqual([
+      403,
+      'AUTH_AGENT_KEY_OUT_OF_SCOPE',
+    ]);
+  });
+
   it('reports an unrecognised pairing as it came', async () => {
     nock(HOST)
       .post(PATH)

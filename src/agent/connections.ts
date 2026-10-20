@@ -99,11 +99,17 @@ function detailOf(body: unknown): Record<string, unknown> {
  * @throws {TypeError} An unknown option.
  * @throws {AgentError} `minValidSeconds` is out of range.
  * @throws {NotRunningOnAgent} `AETHERFY_API_URL` or `AETHERFY_API_KEY` is unset.
- * @throws {ConnectionNotFound} No connection by that name here.
+ * @throws {ConnectionNotFound} `404 CONNECTION_NOT_FOUND`. An agent's key does
+ *   NOT get this for an unknown or unpermitted name (see the last entry); it is
+ *   only the answer for a connection removed while the request was checked.
  * @throws {ConnectionNeedsReauth} The provider refused the grant; reconnect it.
  * @throws {ConnectionUnavailable} The provider did not answer; retry shortly.
  * @throws {ConnectionAccessDenied} The key is not this agent's own.
- * @throws {ConnectionTokenError} Any other refusal — read `code`.
+ * @throws {ConnectionTokenError} Any other refusal — read `code`. A name that
+ *   is not one of this agent's own connections or its workspace's (unknown, or
+ *   someone else's) is `403 AUTH_AGENT_KEY_OUT_OF_SCOPE` (`detail.required_scope`
+ *   is `connections:token`) and arrives as this class, not a subclass: the
+ *   control plane does not say which names exist.
  * @throws {AgentTransportError} The request never reached the control plane.
  */
 export async function connection(

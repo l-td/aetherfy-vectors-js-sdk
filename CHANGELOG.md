@@ -139,6 +139,11 @@ described here.
   `ConnectionUnavailable` (retryable) and `ConnectionAccessDenied`, all
   extending `ConnectionTokenError`. Same semantics as the Python helper's
   `aetherfy_agent.connection`.
+  A name that is not the agent's own connection or its workspace's (unknown,
+  or someone else's) is refused `403 AUTH_AGENT_KEY_OUT_OF_SCOPE`, with
+  `required_scope` `connections:token`, and arrives as the generic
+  `ConnectionTokenError`; `ConnectionNotFound` is only a connection removed
+  mid-request.
 - **`NotFoundError`** (exported from the package root): the parent of
   `CollectionNotFoundError`, `PointNotFoundError`, `SchemaNotFoundError` and
   `WorkspaceNotFoundError`, and what a 404 whose `code` the SDK does not know

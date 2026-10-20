@@ -387,8 +387,12 @@ export class ConnectionTokenError extends AgentError {
 }
 
 /**
- * `404 CONNECTION_NOT_FOUND` — no connection by that name on this agent or its
- * workspace. Connect it on the dashboard, or check the name.
+ * `404 CONNECTION_NOT_FOUND`. An agent's key is never answered this for an
+ * unknown or unpermitted name: the control plane refuses that with
+ * `403 AUTH_AGENT_KEY_OUT_OF_SCOPE` (it does not reveal which names exist),
+ * which arrives as the generic {@link ConnectionTokenError}. This class is what
+ * is left for a connection removed while the request was being checked.
+ * Connect it on the dashboard, or check the name.
  */
 export class ConnectionNotFound extends ConnectionTokenError {
   constructor(message: string, detail?: Record<string, unknown>) {
