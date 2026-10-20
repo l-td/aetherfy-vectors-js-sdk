@@ -128,6 +128,16 @@ described here.
 
 ### Added
 
+- **`token({ audience, scopes })` on `aetherfy-vectors/agent`** exchanges the
+  agent's own `AETHERFY_API_KEY` for a short-lived agent token
+  (`POST /agent-tokens`) and resolves to an `AgentToken` (`token`,
+  `expires_at`). The token names one audience, carries a subset of the key's
+  scopes, and stops working within fifteen minutes or when the deployment
+  ends. The only audience today is the control plane, so a token is a narrower
+  credential for it, not something to give a third party. Cached per
+  key, audience and scopes until a minute before it expires. A refusal rejects
+  with the new `TokenError`, carrying the platform's `code`. An unknown option
+  is refused like every other options object.
 - **`NotFoundError`** (exported from the package root): the parent of
   `CollectionNotFoundError`, `PointNotFoundError`, `SchemaNotFoundError` and
   `WorkspaceNotFoundError`, and what a 404 whose `code` the SDK does not know
