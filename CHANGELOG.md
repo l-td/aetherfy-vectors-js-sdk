@@ -129,9 +129,9 @@ described here.
 ### Added
 
 - **`connection(name, { minValidSeconds })` in `aetherfy-vectors/agent`**
-  returns a fresh OAuth access token (`ConnectionToken`) for a Google, Slack
-  or Notion connection made on the Aetherfy dashboard, from the control
-  plane's `POST /connections/{name}/token`. Tokens are cached per name in the
+  returns a fresh OAuth access token (`ConnectionToken`) for a Google, Slack,
+  Notion, Microsoft 365, HubSpot or Atlassian connection made on the Aetherfy
+  dashboard, from the control plane's `POST /connections/{name}/token`. Tokens are cached per name in the
   process until they would have less than `max(minValidSeconds, 60)` seconds
   left, and a token with no expiry (Notion) is asked for again after five
   minutes; an unknown option is refused like every other options object.

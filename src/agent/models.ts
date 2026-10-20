@@ -87,7 +87,7 @@ export interface Run {
 }
 
 /**
- * A fresh access token for one connection (Google, Slack, Notion).
+ * A fresh access token for one connection (Google, Slack, Notion, Microsoft 365, HubSpot, Atlassian).
  *
  * Send `access_token` to the provider's own API as
  * `Authorization: ${token_type} ${access_token}`. `expires_at` is null for a
