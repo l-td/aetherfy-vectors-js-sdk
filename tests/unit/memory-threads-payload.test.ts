@@ -14,6 +14,7 @@
  * Parity file with the Python SDK's tests/test_memory_threads_payload.py.
  */
 
+import { defined } from './defined';
 import { AetherfyVectorsClient } from '../../src/client';
 import { PointNotFoundError } from '../../src/exceptions';
 import {
@@ -22,8 +23,7 @@ import {
   Thread,
   THREAD_ID_KEY,
   THREAD_MARKER_KEY,
-  THREADS_COLLECTION_PREFIX,
-  threadsCollectionName,
+  THREADS_COLLECTION,
   ThreadAlreadyExistsError,
   ThreadNotFoundError,
   ThreadVectorSizeMismatchError,
@@ -33,7 +33,7 @@ import { FakeVectorsClient, unitVector } from './fake-vectors-store';
 
 const DIM = 4;
 // FakeVectorsClient is in workspace "my-bot" unless told otherwise.
-const THREADS = threadsCollectionName('my-bot');
+const THREADS = THREADS_COLLECTION;
 
 function build(): { store: FakeVectorsClient; memory: MemoryClient } {
   const store = new FakeVectorsClient();
@@ -65,16 +65,10 @@ async function msgs(thread: Thread, n: number, prefix = 'm') {
 // The defect this change removes
 // ---------------------------------------------------------------------------
 
-describe('one threads collection per workspace, named for it', () => {
-  // Collection names are unique per ACCOUNT, so a single `__threads__` in
-  // every workspace could exist in one workspace only: the server answered
-  // the second workspace's create 409 COLLECTION_NAME_TAKEN.
-  it('is __threads__ outside a workspace and __threads__<workspace> in one', () => {
-    expect(threadsCollectionName(undefined)).toBe('__threads__');
-    expect(threadsCollectionName('my-bot')).toBe('__threads__my-bot');
-  });
-
-  it('two workspaces of one account get two collections', async () => {
+describe('one plain __threads__ in each workspace', () => {
+  // Collection names are unique per workspace, so each workspace holds its
+  // own `__threads__`; the name carries no workspace suffix.
+  it('every workspace gets its own plain threads collection', async () => {
     const a = new FakeVectorsClient('support');
     const b = new FakeVectorsClient('sales');
     await new MemoryClient({
@@ -83,33 +77,19 @@ describe('one threads collection per workspace, named for it', () => {
     await new MemoryClient({
       client: b as unknown as AetherfyVectorsClient,
     }).createThread('conv-1');
-    expect([...a.collections.keys()]).toEqual(['__threads__support']);
-    expect([...b.collections.keys()]).toEqual(['__threads__sales']);
+    expect([...a.collections.keys()]).toEqual(['__threads__']);
+    expect([...b.collections.keys()]).toEqual(['__threads__']);
   });
 
-  it('outside any workspace it is the bare prefix', async () => {
-    const store = new FakeVectorsClient(null);
-    await new MemoryClient({
-      client: store as unknown as AetherfyVectorsClient,
-    }).createThread('conv-1');
-    expect([...store.collections.keys()]).toEqual(['__threads__']);
+  it('the name fits the server rule', () => {
+    expect(THREADS_COLLECTION).toMatch(/^[a-zA-Z0-9_-]{1,100}$/);
   });
 
-  it('every workspace name the product accepts fits the server rule', () => {
-    // Workspace names are ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$, 3 to 63 characters
-    // (control plane api/routes/workspaces.py): at most 74 with the prefix,
-    // inside vectordb's [a-zA-Z0-9_-]{1,100}.
-    for (const ws of ['abc', 'a'.repeat(63), 'my-bot-2', '0'.repeat(63)]) {
-      expect(threadsCollectionName(ws)).toMatch(/^[a-zA-Z0-9_-]{1,100}$/);
-    }
-  });
-
-  it("another workspace's threads collection is never opened", async () => {
-    // Derived from the client's own workspace on every use: a `__threads__`
-    // of another scope (or the bare one from before this rule) is never read
-    // or written as this workspace's.
+  it('a suffixed threads collection is not adopted', async () => {
+    // `__threads__<workspace>` (the name before every collection lived in a
+    // workspace) is neither read nor written: threads go to `__threads__`.
     const store = new FakeVectorsClient('support');
-    await store.createCollection('__threads__', {
+    await store.createCollection('__threads__support', {
       size: DEFAULT_VECTOR_SIZE,
       distance: DistanceMetric.COSINE,
     });
@@ -120,7 +100,10 @@ describe('one threads collection per workspace, named for it', () => {
       '__threads__',
       '__threads__support',
     ]);
-    expect(store.collections.get('__threads__')!.points.size).toBe(0);
+    expect(
+      defined(store.collections.get('__threads__support'), 'the collection')
+        .points.size
+    ).toBe(0);
   });
 });
 
@@ -130,10 +113,10 @@ describe('the cross-repo pin', () => {
     // literal should be a literal there, so a rename is caught rather than
     // followed. This is the other half of that pin. Without it a rename goes
     // green here and reds in a repo that cannot explain why — so the gate
-    // lives where the rename would happen. The control plane's SDK-managed
-    // prefix (which it refuses to move) is held equal to it by an e2e pair
-    // test.
-    expect(THREADS_COLLECTION_PREFIX).toBe('__threads__');
+    // lives where the rename would happen. The server's SDK-managed name
+    // (which it refuses to move or rename) is held equal to it by an e2e
+    // pair test.
+    expect(THREADS_COLLECTION).toBe('__threads__');
     expect(THREAD_ID_KEY).toBe('thread_id');
     expect(THREAD_MARKER_KEY).toBe('thread_marker');
   });
@@ -230,9 +213,16 @@ describe('an empty thread', () => {
   it('the marker carries a unit vector, not a zero vector', async () => {
     const { store, memory } = build();
     await memory.createThread('conv-1');
-    const [marker] = [...store.collections.get(THREADS)!.points.values()];
-    expect(marker!.payload[THREAD_MARKER_KEY]).toBe(true);
-    expect(marker!.vector.reduce((a, b) => a + b * b, 0)).toBeCloseTo(1);
+    const [marker] = [
+      ...defined(
+        store.collections.get(THREADS),
+        'the collection'
+      ).points.values(),
+    ];
+    expect(defined(marker, 'the marker').payload[THREAD_MARKER_KEY]).toBe(true);
+    expect(
+      defined(marker, 'the marker').vector.reduce((a, b) => a + b * b, 0)
+    ).toBeCloseTo(1);
   });
 });
 
@@ -290,15 +280,19 @@ describe('isolation between threads', () => {
     const { a, b } = await twoThreads();
     const [aId] = await msgs(a, 1, 'a');
     const [bId] = await msgs(b, 1, 'b');
-    expect((await a.retrieve([aId!])).map(p => p.id)).toEqual([aId]);
-    await expect(a.retrieve([bId!])).resolves.toEqual([]);
+    expect((await a.retrieve([defined(aId, 'aId')])).map(p => p.id)).toEqual([
+      aId,
+    ]);
+    await expect(a.retrieve([defined(bId, 'bId')])).resolves.toEqual([]);
   });
 
   it('retrieve without payload still scopes and still omits the payload', async () => {
     const { a, b } = await twoThreads();
     const [aId] = await msgs(a, 1, 'a');
     const [bId] = await msgs(b, 1, 'b');
-    const got = await a.retrieve([aId!, bId!], { withPayload: false });
+    const got = await a.retrieve([defined(aId, 'aId'), defined(bId, 'bId')], {
+      withPayload: false,
+    });
     expect(got.map(p => p.id)).toEqual([aId]);
     expect(got[0]).not.toHaveProperty('payload');
   });
@@ -306,7 +300,7 @@ describe('isolation between threads', () => {
   it('delete by id will not reach into a sibling thread', async () => {
     const { a, b } = await twoThreads();
     const [bId] = await msgs(b, 1, 'b');
-    await a.delete([bId!]);
+    await a.delete([defined(bId, 'bId')]);
     await expect(b.count()).resolves.toBe(1);
   });
 
@@ -324,7 +318,7 @@ describe('isolation between threads', () => {
       sent.push(sel);
       return realDelete(name, sel);
     };
-    await a.delete([drop!]);
+    await a.delete([defined(drop, 'drop')]);
 
     expect(sent).toHaveLength(1);
     const selector = sent[0] as { must: unknown[]; mustNot: unknown[] };
@@ -396,15 +390,15 @@ describe('isolation between threads', () => {
   it('metadata writes will not reach into a sibling thread', async () => {
     const { a, b } = await twoThreads();
     const [bId] = await msgs(b, 1, 'b');
-    await expect(a.setMetadata(bId!, { x: 1 })).rejects.toThrow(
+    await expect(a.setMetadata(defined(bId, 'bId'), { x: 1 })).rejects.toThrow(
       PointNotFoundError
     );
-    await expect(a.mergeMetadata(bId!, { x: 1 })).rejects.toThrow(
-      PointNotFoundError
-    );
-    await expect(a.deleteMetadataKeys(bId!, ['x'])).rejects.toThrow(
-      PointNotFoundError
-    );
+    await expect(
+      a.mergeMetadata(defined(bId, 'bId'), { x: 1 })
+    ).rejects.toThrow(PointNotFoundError);
+    await expect(
+      a.deleteMetadataKeys(defined(bId, 'bId'), ['x'])
+    ).rejects.toThrow(PointNotFoundError);
   });
 });
 
@@ -424,7 +418,10 @@ describe('markers never read as messages', () => {
    */
   function failOpenWithAStampedMarker(store: FakeVectorsClient) {
     store.failOpenOnMustNot = true;
-    for (const p of store.collections.get(THREADS)!.points.values()) {
+    for (const p of defined(
+      store.collections.get(THREADS),
+      'the collection'
+    ).points.values()) {
       if (p.payload[THREAD_MARKER_KEY]) p.payload.ts = 99;
     }
   }
@@ -458,7 +455,7 @@ describe('markers never read as messages', () => {
     await msgs(a, 1, 'a');
     const hits = await a.search(v(), { limit: 50 });
     expect(hits).toHaveLength(1);
-    expect(hits[0]!.payload?.content).toBe('a0');
+    expect(defined(hits[0], 'the first hit').payload?.content).toBe('a0');
   });
 
   it('the marker is not counted and not iterated', async () => {
@@ -715,8 +712,8 @@ describe('getThread, namespaces and the schema surface', () => {
       client: store as unknown as AetherfyVectorsClient,
     });
     await m.createThread('a');
-    expect(store.collections.get(THREADS)!.config.size).toBe(
-      DEFAULT_VECTOR_SIZE
-    );
+    expect(
+      defined(store.collections.get(THREADS), 'the collection').config.size
+    ).toBe(DEFAULT_VECTOR_SIZE);
   });
 });

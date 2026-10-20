@@ -91,6 +91,8 @@ export {
   CollectionInUseError,
   CollectionInOtherRegionError,
   AgentWorkspaceForbiddenError,
+  WorkspaceNotFoundError,
+  NotFoundError,
   QuotaExceededError,
   SchemaNotFoundError,
   SchemaValidationError,
@@ -99,7 +101,6 @@ export {
   // Utility functions
   createErrorFromResponse,
   isAetherfyVectorsError,
-  isRetryableError,
 } from './exceptions';
 
 // Schema validation exports
@@ -143,6 +144,10 @@ export {
   debounce,
   throttle,
 } from './utils';
+
+// The retry rule's operation classes, for retryWithBackoff (retry-policy.ts).
+export { REPEATABLE, ONCE } from './retry-policy';
+export type { RetryClass } from './retry-policy';
 
 // HTTP client types (for advanced usage)
 export type {

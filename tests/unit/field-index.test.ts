@@ -13,6 +13,7 @@
  */
 
 import nock from 'nock';
+import { TEST_WORKSPACE_ID } from '../setup';
 import {
   AetherfyVectorsClient,
   INDEX_ATTEMPT_TIMEOUT_MS,
@@ -56,10 +57,13 @@ describe('createFieldIndex', () => {
   it('PUTs field_name and field_schema to the index route', async () => {
     let seen: unknown;
     const scope = nock(HOST)
-      .put('/api/v1/collections/articles/index', body => {
-        seen = body;
-        return true;
-      })
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/articles/index`,
+        body => {
+          seen = body;
+          return true;
+        }
+      )
       .reply(200, COMPLETED);
 
     await expect(
@@ -76,10 +80,13 @@ describe('createFieldIndex', () => {
   it('forwards the schema verbatim', async () => {
     let seen: Record<string, unknown> = {};
     const scope = nock(HOST)
-      .put('/api/v1/collections/articles/index', body => {
-        seen = body as Record<string, unknown>;
-        return true;
-      })
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/articles/index`,
+        body => {
+          seen = body as Record<string, unknown>;
+          return true;
+        }
+      )
       .reply(200, COMPLETED);
 
     await newClient().createFieldIndex('articles', 'flag', 'bool');
@@ -90,10 +97,13 @@ describe('createFieldIndex', () => {
   it('forwards a parameterised schema object verbatim', async () => {
     let seen: Record<string, unknown> = {};
     const scope = nock(HOST)
-      .put('/api/v1/collections/articles/index', body => {
-        seen = body as Record<string, unknown>;
-        return true;
-      })
+      .put(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/articles/index`,
+        body => {
+          seen = body as Record<string, unknown>;
+          return true;
+        }
+      )
       .reply(200, COMPLETED);
 
     const schema = { type: 'text', tokenizer: 'word', lowercase: true };
@@ -132,7 +142,9 @@ describe('deleteFieldIndex', () => {
 
   it('DELETEs the field-scoped route', async () => {
     const scope = nock(HOST)
-      .delete('/api/v1/collections/articles/index/thread_id')
+      .delete(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/articles/index/thread_id`
+      )
       .reply(200, { result: true });
 
     await expect(
@@ -145,7 +157,9 @@ describe('deleteFieldIndex', () => {
     // The field name is one path segment; a '/' inside it must not become a
     // separator, or the request lands on a path the allowlist rejects.
     const scope = nock(HOST)
-      .delete('/api/v1/collections/articles/index/metadata%2Ftag')
+      .delete(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/articles/index/metadata%2Ftag`
+      )
       .reply(200, { result: true });
 
     await newClient().deleteFieldIndex('articles', 'metadata/tag');
@@ -156,7 +170,9 @@ describe('deleteFieldIndex', () => {
     // The only 404 here is the collection's: a field that was never indexed
     // is answered 200 by the server, and so resolves true above.
     const scope = nock(HOST)
-      .delete('/api/v1/collections/articles/index/thread_id')
+      .delete(
+        `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/articles/index/thread_id`
+      )
       .reply(404, {
         error: {
           code: 'COLLECTION_NOT_FOUND',
@@ -560,5 +576,35 @@ describe('createFieldIndex keeps its time on the monotonic clock', () => {
     expect((error as Error).message).toMatch(/still building after the 60 s/);
     expect(clock.now).toBe(60000);
     expect(route.attempts.length).toBeLessThan(15);
+  });
+});
+
+describe('a retry inside createFieldIndex is bounded by the time left', () => {
+  it("each attempt's timeout is the time left before the deadline", async () => {
+    const clock = fakeClock();
+    const route = indexRoute(clock, [COMPLETED], 10);
+    const timeouts: number[] = [];
+    const real = route.request.getMockImplementation();
+    if (real === undefined) throw new Error('indexRoute has no implementation');
+    let first = true;
+    route.request.mockImplementation(async config => {
+      timeouts.push(config.timeout);
+      if (first) {
+        // Refused after 4 s: nothing ran, so it is retried at once.
+        first = false;
+        clock.now += 4000;
+        throw Object.assign(new Error('Network error: connect ECONNREFUSED'), {
+          code: 'ECONNREFUSED',
+          requestSent: false, // HttpClient's mark: the socket never connected
+        });
+      }
+      return real(config);
+    });
+
+    await onRoute(route).createFieldIndex('articles', 'ts', 'integer', {
+      timeout: 5000,
+    });
+
+    expect(timeouts).toEqual([5000, 1000]);
   });
 });

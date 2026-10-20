@@ -183,6 +183,8 @@ const EXPECTED_CLAIMS: string[] = [
   'TooManyRunsInFlight.inFlightCount',
   'TooManyRunsInFlight.maxInFlightRuns',
   'ValidationError.message',
+  'WorkspaceNotFoundError.workspace',
+  'WorkspaceNotFoundError.workspaceId',
 ];
 
 const FENCE_RE = /^```(\w+)\n([\s\S]*?)^```/gm;
@@ -816,8 +818,7 @@ describe('README error-object properties', () => {
     ].join('\n');
     expect(audit(markdown, table).claims).toEqual([]);
 
-    // The README's own retryCondition sample reads `error.name` on an untracked
-    // binding, so the live census is the standing proof it stays out.
+    // The live README reads no `.name` on a caught error either.
     expect(census(readme()).some(c => c.endsWith('.name'))).toBe(false);
   });
 

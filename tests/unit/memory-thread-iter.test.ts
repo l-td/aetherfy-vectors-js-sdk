@@ -108,7 +108,6 @@ describe('Thread.iterHistory', () => {
     const { th, client } = makeThread();
     client.scrollIter.mockReturnValue(asyncFrom([]));
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for await (const _ of th.iterHistory()) {
       /* no-op */
     }

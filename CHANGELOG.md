@@ -1,6 +1,130 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.2] - 2026-10-16
+
+### Fixed
+
+- **An error rebuilt from a server's answer lost its code.** `deleteSchema()`
+  caught the server's 404 and threw a fresh `SchemaNotFoundError` with `code`
+  undefined (the server said `SCHEMA_NOT_DEFINED` or `COLLECTION_NOT_FOUND`), so
+  code branching on `err.code` never matched. It, and every other place that
+  throws a different error in place of a server error, now carries the server's
+  `code`: the "schema has changed" `ValidationError` of an upsert whose 412
+  retry failed (`SCHEMA_VERSION_MISMATCH`), the 400 `ValidationError` and the
+  5xx "Server error occurred" error of an upsert (which also carries its status
+  now), and the region-discovery error.
+- A test reads `src/client.ts` and fails when a `catch` block throws an SDK
+  error that does not carry the code, unless the case is listed with a reason
+  (transport failures and the SDK's own checks have no server answer).
+
+## [1.2.1] - 2026-10-15
+
+This release contains changes marked BREAKING below: every collection now
+lives in a workspace. They ship in a patch version, not 2.0.0, because the
+package has no users yet (owner ruling, 2026-10-14); the labels stay because
+they are true, and they are why code written against 1.2.0 needs the changes
+described here.
+
+### Changed (breaking)
+
+- **BREAKING: every collection lives in a workspace; there is no workspaceless
+  client, and `workspace` defaults to `'auto'`** (it defaulted to no
+  workspace). `'auto'` addresses the agent's workspace by **id**, from
+  `AETHERFY_WORKSPACE_ID`, at `/api/v1/workspace-ids/{id}/...`; a workspace
+  name goes to `/api/v1/workspaces/{name}/...`. `workspace: null`, `''`, and
+  `'auto'` outside an agent (`AETHERFY_WORKSPACE_ID` unset, which includes
+  every browser) throw at construction, saying to pass a workspace name or run
+  inside an Aetherfy agent; `workspace: undefined` means "not given" and takes
+  the default. Before, `'auto'` read `AETHERFY_WORKSPACE` (the name), which is
+  no longer read or injected; every request without a workspace now answers
+  400 `WORKSPACE_REQUIRED`. Every account starts with a workspace named
+  `default`.
+- **BREAKING: `workspace` (the name, or undefined when built from the id) and
+  the new `workspaceId`** are read-only on `AetherfyVectorsClient` and
+  `MemoryClient`.
+- **BREAKING: collection names are unique per workspace, not per account.**
+  `invoices` in two workspaces are two collections.
+- **BREAKING: schema calls use the collection's own routes**
+  (`.../collections/{name}/schema[/analyze]`); the old `/api/v1/schema/...`
+  mount answers 400 `WORKSPACE_REQUIRED`.
+- **BREAKING: an unknown workspace throws `WorkspaceNotFoundError` instead of
+  reading as empty.** `collectionExists()` and `deleteFieldIndex()` are false
+  only for 404 `COLLECTION_NOT_FOUND`; `getSchema()` returns null, and
+  `deleteSchema()` throws `SchemaNotFoundError`, only for
+  `COLLECTION_NOT_FOUND` or `SCHEMA_NOT_DEFINED`; `mergeMetadata()` /
+  `deleteMetadataKeys()` (client and memory) no longer turn it into
+  `PointNotFoundError`; and the memory layer's `namespace()` throws
+  `NamespaceNotFoundError` only for a missing collection. Each decided on the
+  404 status alone, so a mistyped workspace read as "not there".
+- **BREAKING: a 404 is typed from the server's own body.** The 404 mapping
+  read a top-level camelCase `collectionName` / `pointId` (or matched Qdrant's
+  message text), so the server's `{ error: { code: 'COLLECTION_NOT_FOUND',
+  collection_name } }` arrived as the base `AetherfyVectorsError`. It is now a
+  `CollectionNotFoundError`; `POINT_NOT_FOUND` a `PointNotFoundError`;
+  `SCHEMA_NOT_DEFINED` a `SchemaNotFoundError`. The camelCase and message
+  shapes are no longer read.
+- **BREAKING: any 422 is a `ValidationError`** (it was the base class), e.g.
+  `COLLECTION_SDK_MANAGED`.
+- **BREAKING: `AgentWorkspaceForbiddenError.workspace` is null only for a
+  workspace addressed by id** (`workspace: 'auto'`); there are no "collections
+  in no workspace" any more.
+- **BREAKING (`aetherfy-vectors/agent`): `Spawn.workspace` is a `string`**,
+  the spawned agent's workspace name; it is never null.
+- **The memory layer's threads collection is `__threads__` in each
+  workspace**, as in 1.2.0 (`THREADS_COLLECTION`). The per-workspace
+  `__threads__<workspace>` name, `THREADS_COLLECTION_PREFIX` and
+  `threadsCollectionName()` that were briefly on the unreleased branch are
+  gone and never shipped. Aetherfy refuses to move or rename a threads
+  collection (`COLLECTION_SDK_MANAGED`); an agent that moves to another
+  workspace leaves its conversations in the old one's `__threads__`.
+
+- **BREAKING: when a request is retried follows one rule, the same as the
+  Python SDK** (`src/retry-policy.ts`, and the README's table). A refusal
+  before anything ran (503 `WORKSPACE_LOOKUP_UNAVAILABLE`,
+  `COLLECTION_LOOKUP_UNAVAILABLE`, `PLACEMENT_UNAVAILABLE`; a connection
+  never made: DNS, refused, or a connect that never completed, known from
+  whether the socket ever connected (see below: axios reports a connect
+  timeout as `ECONNABORTED`, like a read timeout); 429 with a Retry-After) is retried for every operation. An
+  ambiguous failure (a timeout waiting for the answer, a reset after
+  sending, any other 5xx) is retried only for reads and writes keyed by id;
+  `createCollection`, `deleteCollection`, `delete`, `deleteSchema` and
+  `deleteFieldIndex` throw it after one attempt. A 4xx is never retried.
+  Up to 3 retries, waiting about 1, 2, then 4 s (jittered), as in Python;
+  `createFieldIndex` stops retrying at its own deadline. Before, only
+  `createCollection`, `upsert` and `search` retried, and (see Fixed) never
+  on a 503.
+
+- **BREAKING: `retryWithBackoff` needs the operation's class.** Its options
+  take `retryClass` (`REPEATABLE` or `ONCE`, exported from the root,
+  required) and decide which failures to retry through the same rule as the
+  client; `retryCondition` is gone, and so is its default, which retried
+  every error, 4xx included. New optional `deadline` / `now`.
+- **BREAKING: `isRetryableError` is removed** (from the root and from
+  `exceptions`), as Python removed `is_retryable_error`. Whether to retry
+  depends on the operation's class and on `requestSent`; a yes/no on the
+  error alone contradicts the rule. `retryWithBackoff` and the classes it
+  takes (`REPEATABLE`, `ONCE`) are the public surface, with the same
+  example in both READMEs.
+- **A connect that never completed is now known to be one.** Under real
+  Node, axios reports it with its own timeout code (`ECONNABORTED`), the
+  same as a timeout waiting for the answer, so it read as ambiguous. The
+  SDK's agents (now always used in Node; keep-alive only with connection
+  pooling) watch each socket's `connect`, and a transport failure on a
+  socket that never connected carries `requestSent: false`, and so does the
+  typed `NetworkError` a client call throws (`retryWithBackoff` around it
+  reads it too): retried for every operation. Proven against TEST-NET-1, a `.invalid` host and a
+  refused local port (`tests/unit/retry-real-network.test.ts`).
+- `createFieldIndex`: each attempt, retries included, gets only the time
+  left before its deadline (it reused the first attempt's timeout).
+
+- **BREAKING: a missing point on the payload routes is `PointNotFoundError`
+  by code.** vectordb re-wraps Qdrant's own 404 (a point that does not
+  exist) as `NOT_FOUND`; `setPayload`, `overwritePayload` and
+  `deletePayload` throw it as `PointNotFoundError` (carrying the code), and
+  so `mergeMetadata` / `deleteMetadataKeys` and the memory layer's do.
+  Before, any 404 without a known type on the metadata calls was turned
+  into `PointNotFoundError`; a 404 without a code is now the
+  `NotFoundError` fallback like anywhere else.
 
 ### Added
 
@@ -14,12 +138,45 @@
   key, audience and scopes until a minute before it expires. A refusal rejects
   with the new `TokenError`, carrying the platform's `code`. An unknown option
   is refused like every other options object.
-- **`AgentWorkspaceForbiddenError` (exported from the package root), with `.workspace`** — the vector API now refuses an agent's injected key a workspace
-  it was not granted (403 `AGENT_KEY_WORKSPACE_FORBIDDEN`; `workspace` names it,
-  or is null for the collections in no workspace). The error says how to grant
-  access (the agent's page in the dashboard, or `afy access <agent> --add`). Not
-  retryable. `AGENT_ACCESS_UNAVAILABLE` (503) arrives as the existing retryable
-  service-unavailable error.
+- **`NotFoundError`** (exported from the package root): the parent of
+  `CollectionNotFoundError`, `PointNotFoundError`, `SchemaNotFoundError` and
+  `WorkspaceNotFoundError`, and what a 404 whose `code` the SDK does not know
+  arrives as (it was the base `AetherfyVectorsError`), carrying the code.
+  Every not-found error now has `statusCode` 404 (it was undefined).
+- **`WorkspaceNotFoundError`** (exported from the package root): 404
+  `WORKSPACE_NOT_FOUND`, with `.workspace` (the name sent) or `.workspaceId`
+  (the id sent). Not retryable.
+- **`AgentWorkspaceForbiddenError` (exported from the package root), with
+  `.workspace`**: the vector API refuses an agent's injected key a workspace
+  it was not granted (403 `AGENT_KEY_WORKSPACE_FORBIDDEN`; `workspace` names
+  it, or is null when it was addressed by id). The error says how to grant
+  access (the agent's page in the dashboard, or
+  `afy access <agent> --add <workspace>`). Not retryable.
+  `AGENT_ACCESS_UNAVAILABLE` (503) arrives as the existing retryable
+  `ServiceUnavailableError`.
+- The workspace-required codes, mapped on `code`: 400 `WORKSPACE_REQUIRED`
+  (`ValidationError`); 409 `ADDRESSED_AN_ALIAS`, `COLLECTION_NAME_TAKEN`,
+  `COLLECTION_NAME_IS_AN_ALIAS` (`ConflictError`); 403
+  `AUTH_AGENT_KEY_OUT_OF_SCOPE` (`AuthenticationError`, e.g. `getUsageStats()`
+  with an agent's key, an account-only route); and the retryable 503s
+  `WORKSPACE_LOOKUP_UNAVAILABLE`, `COLLECTION_LOOKUP_UNAVAILABLE` and
+  `PLACEMENT_UNAVAILABLE` (`ServiceUnavailableError`).
+
+### Not in the SDK
+
+- Renaming a collection, and moving one to another workspace: the dashboard
+  or the CLI (`afy collections update`). The SDK exposes no collection
+  update; code still using a collection's old name gets
+  `CollectionNotFoundError`.
+
+### Fixed
+
+- **A 503 was never retried.** The HTTP layer throws a plain error carrying
+  the status, and the retry check knew only the typed classes, so the three
+  calls that retried (`createCollection`, `upsert`, `search`) gave up after
+  one attempt. Retries now follow the rule below.
+- `clearSchemaCache(name)` cleared nothing on a workspaced client: it removed
+  the bare name, and the caches are keyed by the workspace-scoped one.
 
 ### Changed
 
@@ -30,27 +187,9 @@
   message now says so, and that retrying the upsert is safe because it
   replaces points by id. Only the message changed: the class, `.saved`,
   `.total` and `.failed` are as before.
-- **BREAKING: the memory layer's threads collection is named for its
-  workspace** — `__threads__<workspace>` in a workspace, `__threads__` outside
-  one. Collection names are unique per account, so the single `__threads__`
-  every workspace used could exist in one workspace only: a second workspace's
-  first `createThread` was refused 409 `COLLECTION_NAME_TAKEN`. A
-  `MemoryClient` derives the name from its own workspace on every use, so it
-  never opens another workspace's threads collection. A `__threads__` created
-  inside a workspace by an earlier version is not read: create the threads
-  again (there is no migration shim).
-- **BREAKING (export): `THREADS_COLLECTION` is replaced by
-  `THREADS_COLLECTION_PREFIX` (`'__threads__'`) and
-  `threadsCollectionName(workspace)`.**
-- The control plane now refuses to move a threads collection to another
-  workspace (`COLLECTION_SDK_MANAGED`); the prefix it refuses on is held equal
-  to `THREADS_COLLECTION_PREFIX` by an e2e pair test.
 
 ### Documentation
 
-- The README no longer says workspaces avoid name collisions: collection names
-  are unique per account, and a workspace decides where a collection is
-  reachable from, not what it may be called.
 - **BREAKING (platform): an agent's injected `AETHERFY_API_KEY` is no longer
   the account on the Aetherfy agents API.** The control plane now answers it
   403 `AUTH_AGENT_KEY_OUT_OF_SCOPE` on every route outside the routes listed at

@@ -1,22 +1,20 @@
 /**
  * Workspaced URL contract tests for AetherfyVectorsClient.
  *
- * Pins the post-A/B (vectordb PR 1) wire URL shape: when `workspace` is
- * set, every collection-scoped HTTP call must use the nested form
- * `/api/v1/workspaces/{ws}/collections/{name}[/<suffix>]` with a bare
- * collection name (no slash) in the URL/body. The legacy slash-in-name
- * encoding (`name: "ws/coll"` in POST body, `/collections/ws%2Fcoll`
- * in URLs) is rejected by vectordb post-cutover.
+ * Every collection lives in a workspace, so every collection-scoped HTTP
+ * call uses one of two nested forms, with a bare collection name:
+ * `/api/v1/workspaces/{name}/collections/{coll}[/<suffix>]` for a name, and
+ * `/api/v1/workspace-ids/{id}/collections/{coll}[/<suffix>]` for
+ * workspace: 'auto'. There is no bare `/collections` form: vectordb
+ * answers it with 400 WORKSPACE_REQUIRED.
  *
- * Tests use nock to assert exact URL paths. Each test sets `workspace`
- * on the client and verifies the corresponding endpoint emits the
- * nested URL — never the flat one.
+ * Tests use nock to assert exact URL paths.
  */
 import nock from 'nock';
 import { AetherfyVectorsClient } from '../../src/client';
 import { DistanceMetric } from '../../src/models';
 
-describe('AetherfyVectorsClient — workspaced URL contract (post-A/B)', () => {
+describe('AetherfyVectorsClient — workspaced URL contract', () => {
   let client: AetherfyVectorsClient;
   const WS = 'my-workspace';
   const COLL = 'my-coll';
@@ -206,19 +204,24 @@ describe('AetherfyVectorsClient — workspaced URL contract (post-A/B)', () => {
     }
   });
 
-  describe('workspaceless client (sanity / regression)', () => {
-    it('still uses flat /collections URL when workspace is unset', async () => {
-      const flatClient = new AetherfyVectorsClient({
+  describe("workspace: 'auto' (the agent's workspace, by id)", () => {
+    it('uses /workspace-ids/{id}/collections', async () => {
+      const id = '0f8e2b9a-7c41-4d2e-9b3a-5e6f7a8b9c0d';
+      process.env.AETHERFY_WORKSPACE_ID = id;
+      const idClient = new AetherfyVectorsClient({
         apiKey: 'afy_test_1234567890123456',
         endpoint: 'https://vectors.aetherfy.com',
         enableConnectionPooling: false,
       });
 
       const scope = nock('https://vectors.aetherfy.com')
-        .post('/api/v1/collections', body => body.name === COLL)
+        .post(
+          `/api/v1/workspace-ids/${id}/collections`,
+          body => body.name === COLL
+        )
         .reply(201, {});
 
-      await flatClient.createCollection(COLL, {
+      await idClient.createCollection(COLL, {
         size: 128,
         distance: DistanceMetric.COSINE,
       });

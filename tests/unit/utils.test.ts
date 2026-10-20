@@ -24,6 +24,8 @@ import {
   debounce,
   throttle,
 } from '../../src/utils';
+import { ONCE, REPEATABLE } from '../../src/retry-policy';
+import { ServiceUnavailableError } from '../../src/exceptions';
 import { ValidationError, AetherfyVectorsError } from '../../src/exceptions';
 import { DistanceMetric } from '../../src/models';
 
@@ -524,7 +526,7 @@ describe('Async Utilities', () => {
   describe('retryWithBackoff', () => {
     it('should succeed on first try', async () => {
       const fn = jest.fn().mockResolvedValue('success');
-      const result = await retryWithBackoff(fn);
+      const result = await retryWithBackoff(fn, { retryClass: REPEATABLE });
 
       expect(result).toBe('success');
       expect(fn).toHaveBeenCalledTimes(1);
@@ -535,10 +537,11 @@ describe('Async Utilities', () => {
 
       const fn = jest
         .fn()
-        .mockRejectedValueOnce(new Error('fail'))
+        .mockRejectedValueOnce(new Error('Network error: fail'))
         .mockResolvedValue('success');
 
       const resultPromise = retryWithBackoff(fn, {
+        retryClass: REPEATABLE,
         maxRetries: 2,
         baseDelay: 1,
       });
@@ -553,21 +556,72 @@ describe('Async Utilities', () => {
     });
 
     it('should fail after max retries', async () => {
-      const fn = jest.fn().mockRejectedValue(new Error('fail'));
+      const fn = jest.fn().mockRejectedValue(new Error('Network error: fail'));
 
       await expect(
-        retryWithBackoff(fn, { maxRetries: 2, baseDelay: 1 })
+        retryWithBackoff(fn, {
+          retryClass: REPEATABLE,
+          maxRetries: 2,
+          baseDelay: 1,
+        })
       ).rejects.toThrow('fail');
 
       expect(fn).toHaveBeenCalledTimes(3); // Initial + 2 retries
     }, 10000); // Increase timeout to 10 seconds
 
+    it('needs the class: without it, it throws', async () => {
+      const fn = jest.fn().mockResolvedValue('ok');
+      await expect(
+        retryWithBackoff(fn, {} as unknown as { retryClass: 'repeatable' })
+      ).rejects.toThrow(/retryClass/);
+      expect(fn).not.toHaveBeenCalled();
+    });
+
+    it('a 4xx is never retried, a ONCE class retries no ambiguous failure', async () => {
+      const refused = Object.assign(new Error('bad'), {
+        status: 400,
+        responseData: { error: { code: 'VALIDATION_ERROR' } },
+      });
+      const four = jest.fn().mockRejectedValue(refused);
+      await expect(
+        retryWithBackoff(four, { retryClass: REPEATABLE, baseDelay: 1 })
+      ).rejects.toThrow('bad');
+      expect(four).toHaveBeenCalledTimes(1);
+
+      const reset = jest
+        .fn()
+        .mockRejectedValue(new Error('Network error: reset'));
+      await expect(
+        retryWithBackoff(reset, { retryClass: ONCE, baseDelay: 1 })
+      ).rejects.toThrow('reset');
+      expect(reset).toHaveBeenCalledTimes(1);
+    });
+
+    it('a typed error from a client call is classified too', async () => {
+      const fn = jest
+        .fn()
+        .mockRejectedValueOnce(
+          Object.assign(new ServiceUnavailableError('x'), {
+            code: 'PLACEMENT_UNAVAILABLE',
+          })
+        )
+        .mockResolvedValue('ok');
+      await expect(
+        retryWithBackoff(fn, { retryClass: ONCE, baseDelay: 1 })
+      ).resolves.toBe('ok');
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
+
     it('should apply exponential backoff correctly', async () => {
       // Test that function is called the correct number of times
-      const fn = jest.fn().mockRejectedValue(new Error('fail'));
+      const fn = jest.fn().mockRejectedValue(new Error('Network error: fail'));
 
       await expect(
-        retryWithBackoff(fn, { maxRetries: 3, baseDelay: 1 })
+        retryWithBackoff(fn, {
+          retryClass: REPEATABLE,
+          maxRetries: 3,
+          baseDelay: 1,
+        })
       ).rejects.toThrow('fail');
 
       expect(fn).toHaveBeenCalledTimes(4); // Initial + 3 retries
@@ -575,10 +629,11 @@ describe('Async Utilities', () => {
 
     it('should respect max delay cap', async () => {
       // Test that max retries is respected even with high retry count
-      const fn = jest.fn().mockRejectedValue(new Error('fail'));
+      const fn = jest.fn().mockRejectedValue(new Error('Network error: fail'));
 
       await expect(
         retryWithBackoff(fn, {
+          retryClass: REPEATABLE,
           maxRetries: 10,
           baseDelay: 1,
           maxDelay: 5000,
@@ -587,49 +642,6 @@ describe('Async Utilities', () => {
 
       expect(fn).toHaveBeenCalledTimes(11); // Initial + 10 retries
     }, 30000);
-
-    it('should apply retry condition filter', async () => {
-      const retryableError = new Error('retryable');
-      const nonRetryableError = new Error('non-retryable');
-
-      const fn = jest.fn().mockRejectedValue(nonRetryableError);
-
-      await expect(
-        retryWithBackoff(fn, {
-          maxRetries: 3,
-          baseDelay: 1,
-          retryCondition: error =>
-            (error as Error).message === retryableError.message,
-        })
-      ).rejects.toThrow('non-retryable');
-
-      // Should fail immediately without retries
-      expect(fn).toHaveBeenCalledTimes(1);
-    }, 10000);
-
-    it('should retry when condition is met', async () => {
-      jest.useFakeTimers();
-
-      const retryableError = new Error('retryable');
-      const fn = jest
-        .fn()
-        .mockRejectedValueOnce(retryableError)
-        .mockResolvedValue('success');
-
-      const promise = retryWithBackoff(fn, {
-        maxRetries: 2,
-        baseDelay: 1,
-        retryCondition: error => (error as Error).message === 'retryable',
-      });
-
-      await jest.runOnlyPendingTimersAsync();
-      const result = await promise;
-
-      expect(result).toBe('success');
-      expect(fn).toHaveBeenCalledTimes(2);
-
-      jest.useRealTimers();
-    }, 10000);
   });
 
   describe('sleep', () => {

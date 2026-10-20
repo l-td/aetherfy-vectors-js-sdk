@@ -14,7 +14,7 @@ no infrastructure to run.
 - **🌍 Global Performance** - Automatic replication across all three regions: `us-east-1`, `eu-central-1`, `ap-southeast-1`
 - **⚡ Intelligent Caching** - High cache hit rate, with responses served from cache where possible
 - **🛡️ Zero DevOps** - Fully managed infrastructure, no setup required
-- **🤝 Workspace Scoping** - Multi-agent tenancy, auto-detected inside deployed agents
+- **🤝 Workspaces** - every collection lives in one; inside a deployed agent the agent's own is used
 - **📊 Built-in Analytics** - Real-time performance metrics and insights
 - **🔧 Auto-Failover** - Seamless failover and disaster recovery
 - **🔒 Enterprise Security** - End-to-end encryption and compliance ready
@@ -42,7 +42,7 @@ vectors — Aetherfy stores and searches them, it does not generate them.
 ```typescript
 import { MemoryClient } from 'aetherfy-vectors';
 
-const memory = new MemoryClient(); // reads AETHERFY_API_KEY; workspace auto-detected
+const memory = new MemoryClient(); // inside an Aetherfy agent: its key and its workspace
 
 // --- A namespace: any named scope ---------------------------------------
 await memory.createNamespace('customer-42');
@@ -85,18 +85,20 @@ no collection slot and a plan's collection limit does not cap how many
 conversations you can have. One collection means one dimension for all of them,
 so `createThread` takes no options: they come from the client.
 
-That collection is `__threads__<workspace>` in a workspace and `__threads__`
-outside one: collection names are unique per account, so each workspace's
-conversations need a name of their own. It is managed by the SDK. Aetherfy
-refuses to move it to another workspace (a moved one would be read by no
-client of either workspace).
+That collection is `__threads__`, one in each workspace (collection names are
+unique per workspace). It is managed by the SDK, and Aetherfy refuses to move
+or rename it: it holds the conversations of every agent in its workspace, so
+moving it would hand them to another workspace's agents. An agent that moves
+to another workspace leaves its conversation history behind in the old one.
 
 ```typescript
 const memory = new MemoryClient({ threadVectorSize: 1536 }); // OpenAI small
 ```
 
 Deployed on Aetherfy, `new MemoryClient()` takes no arguments at all: the control
-plane injects `AETHERFY_API_KEY` and the workspace at deploy time.
+plane injects `AETHERFY_API_KEY` and `AETHERFY_WORKSPACE_ID` (the agent's
+workspace) at deploy time. Anywhere else, name a workspace:
+`new MemoryClient({ workspace: 'default' })`.
 
 Full memory API — iteration, bulk loading, metadata — under
 [Memory SDK](#-memory-sdk--iter-bulk-load-setmetadata) below.
@@ -115,7 +117,8 @@ import { AetherfyVectorsClient, DistanceMetric } from 'aetherfy-vectors';
 
 // Initialize client
 const client = new AetherfyVectorsClient({
-  apiKey: 'afy_live_your_api_key_here' // or use environment variable
+  apiKey: 'afy_live_your_api_key_here', // or use environment variable
+  workspace: 'default', // every collection lives in a workspace; every account starts with "default"
 });
 
 // Create a collection
@@ -157,6 +160,7 @@ The SDK supports multiple ways to provide your API key:
 ```typescript
 const client = new AetherfyVectorsClient({
   apiKey: 'afy_live_your_api_key_here',
+  workspace: 'default',
 });
 ```
 
@@ -172,7 +176,7 @@ export AETHERFY_VECTORS_API_KEY=afy_live_your_api_key_here
 
 ```typescript
 // No API key needed in constructor
-const client = new AetherfyVectorsClient();
+const client = new AetherfyVectorsClient({ workspace: 'default' });
 ```
 
 ### 3. Custom Endpoint
@@ -180,6 +184,7 @@ const client = new AetherfyVectorsClient();
 ```typescript
 const client = new AetherfyVectorsClient({
   apiKey: 'your_api_key',
+  workspace: 'default',
   endpoint: 'https://custom.vectors.endpoint.com',
   timeout: 45000, // Custom timeout in milliseconds
 });
@@ -200,6 +205,7 @@ factory rather than `new`, because the SDK has to call
 ```typescript
 const client = await AetherfyVectorsClient.create({
   apiKey: 'afy_test_...',
+  workspace: 'default',
   apiRegion: 'eu-central-1', // 'us-east-1' | 'eu-central-1' | 'ap-southeast-1'
 });
 ```
@@ -441,11 +447,15 @@ PRS violations throw `ValidationError` (400) or surface as 413
 
 ## 🤝 Multi-Agent Workspaces
 
-Workspaces let multiple agents share vector collections. A collection belongs to one workspace, and that decides where it is reachable from: agents in the same workspace see each other's collections, and agents in other workspaces (or outside any) cannot reach them.
+Every collection lives in exactly one workspace, and every account starts with
+one named `default`. A workspace decides where a collection is reachable from:
+agents in the same workspace see each other's collections, and an agent reaches
+another workspace only if the account owner granted it access.
 
-Collection names are unique per **account**, not per workspace: a workspace decides where a collection is reachable from, not what it may be called. `documents` in `invoice-pipeline` and `documents` outside any workspace cannot both exist; the second create answers 409 `COLLECTION_NAME_TAKEN`.
+Collection names are unique **per workspace**: `invoices` in `customer-a` and
+`invoices` in `customer-b` are two collections.
 
-### Creating a workspace-scoped client
+### Choosing the workspace
 
 ```typescript
 const client = new AetherfyVectorsClient({
@@ -453,6 +463,26 @@ const client = new AetherfyVectorsClient({
   workspace: 'invoice-pipeline', // All operations are scoped to this workspace
 });
 ```
+
+`workspace` defaults to `'auto'`: inside an agent deployed on Aetherfy, the
+agent's own workspace, by id, from `AETHERFY_WORKSPACE_ID` (the control plane
+injects it on every agent). A workspace rename never breaks an agent, because
+it is addressed by id.
+
+```typescript
+// Inside a deployed agent: its own workspace, nothing to configure.
+const client = new AetherfyVectorsClient();
+```
+
+There is no "no workspace". `workspace: null`, `''`, and `'auto'` outside an
+agent (where `AETHERFY_WORKSPACE_ID` is not set, including every browser) throw
+at construction, saying to pass a workspace name or run inside an agent.
+`client.workspace` is the name (undefined when built from the id) and
+`client.workspaceId` the id (undefined when given a name).
+
+`'auto'` is only the agent's home workspace. Code that works across several
+workspaces (one per customer, say) passes each workspace's name explicitly,
+one client per workspace.
 
 ### How scoping works
 
@@ -498,18 +528,79 @@ const results = await classifier.search('raw-invoices', queryVector, {
 });
 ```
 
-### No workspace
+### Workspace errors
 
 ```typescript
-// No workspace — the collection is reachable from outside any workspace
-const client = new AetherfyVectorsClient({ apiKey: 'afy_live_your_key' });
-await client.createCollection('my-global-collection', {
-  size: 768,
-  distance: DistanceMetric.COSINE,
-});
+import { WorkspaceNotFoundError } from 'aetherfy-vectors';
+
+try {
+  await client.getCollections();
+} catch (error) {
+  if (error instanceof WorkspaceNotFoundError) {
+    // No such workspace in this account. A typo is never read as "empty".
+    console.log(`Unknown workspace: ${error.workspace ?? error.workspaceId}`);
+  }
+}
 ```
 
-> **Tip:** Workspaces are created explicitly in the Aetherfy control plane before use (`afy workspaces create invoice-pipeline`). Agents deployed to a workspace automatically receive their workspace name via the `AETHERFY_WORKSPACE` environment variable. Pass `workspace: 'auto'` to opt into auto-detection.
+`collectionExists()` is false only when the workspace exists and the
+collection is not in it; an unknown workspace throws.
+
+### When a request is retried
+
+One rule, the same in the Python and JS SDKs (`src/retry-policy.ts`). Up to 3
+retries, waiting about 1 s, 2 s, then 4 s (each jittered to 50-100%), within
+a call's timeout.
+
+| Failure | Retried for |
+|---|---|
+| Refused before anything ran: 503 `WORKSPACE_LOOKUP_UNAVAILABLE`, `COLLECTION_LOOKUP_UNAVAILABLE`, `PLACEMENT_UNAVAILABLE`; a connection never made (DNS, refused, connect timeout); 429 with a Retry-After | every operation |
+| Ambiguous, the request may have run: a read timeout, a reset after sending, any other 5xx | only operations whose repeat gives the same result (below) |
+| Any other 4xx | never |
+
+| Operations | Class |
+|---|---|
+| `getCollections`, `getCollection`, `collectionExists`, `getSchema`, `analyzeSchema`, `search`, `retrieve`, `scroll`, `count`, `getUsageStats` | reads: repeatable |
+| `upsert`, `setPayload`, `overwritePayload`, `deletePayload`, `createFieldIndex`, `setSchema` | writes keyed by id: repeatable |
+| `createCollection`, `deleteCollection`, `delete` (points), `deleteSchema`, `deleteFieldIndex` | once: a repeat after a hidden success reports a false error, so an ambiguous failure is raised after one attempt |
+
+`setSchema` is repeatable because it is sent without `If-Match`: a repeat writes
+the same schema again. A conditional write would get a false 412 on a repeat
+after a hidden success, so it would be classed once.
+
+A connection "never made" is known from the SDK's own HTTP agents, which watch
+whether each socket ever connected (Node and Bun both give them). Where no
+such information exists (a custom agent, an adapter or runtime that gives no
+socket) a transport failure counts as "may have been sent": only repeatable
+operations are retried.
+
+When the retries run out, the last error is raised (`ServiceUnavailableError`, `RequestTimeoutError` or `NetworkError`).
+
+The client already retries under this rule. To retry more around your own
+operation, say whether repeating it gives the same result: `REPEATABLE` (a
+read, a write keyed by id) or `ONCE` (a create, a delete). The same failures
+are retried as above; a 4xx never is.
+
+```typescript
+import { retryWithBackoff, REPEATABLE } from 'aetherfy-vectors';
+
+const results = await retryWithBackoff(
+  () => client.search('collection', vector),
+  {
+    retryClass: REPEATABLE,
+    maxRetries: 3,
+    baseDelay: 1000,
+  }
+);
+```
+
+Renaming a collection, and moving one to another workspace, are done from the
+dashboard or the CLI (`afy collections update`), not from the SDK. Code still
+using the old name gets `CollectionNotFoundError`.
+
+> **Tip:** Create workspaces in the dashboard or with the CLI
+> (`afy workspaces create invoice-pipeline`). Agents deployed to a workspace
+> receive its id as `AETHERFY_WORKSPACE_ID`.
 
 ## 🤖 Running as an Agent
 
@@ -955,6 +1046,7 @@ The SDK works in browsers with important security considerations:
       // ⚠️ Only use test keys in browser - never production keys!
       const client = new AetherfyVectorsClient({
         apiKey: 'afy_test_demo_key_only', // Test key only!
+        workspace: 'default', // a browser has no agent workspace: name one
       });
 
       // The SDK will show security warnings in browser console
@@ -994,8 +1086,10 @@ import {
   AuthenticationError,
   RateLimitExceededError,
   ValidationError,
+  NotFoundError, // parent of every not-found error
   CollectionNotFoundError,
   PointNotFoundError,
+  WorkspaceNotFoundError,
   ServiceUnavailableError,
   RequestTimeoutError,
   NetworkError,
@@ -1004,8 +1098,6 @@ import {
   QuotaExceededError,
   SchemaNotFoundError,
   SchemaValidationError,
-  isAetherfyVectorsError,
-  isRetryableError,
 } from 'aetherfy-vectors';
 
 try {
@@ -1026,8 +1118,10 @@ try {
     console.error(
       `Quota '${error.quotaType}' exceeded: ${error.current}/${error.limit}`
     );
-  } else if (isAetherfyVectorsError(error) && isRetryableError(error)) {
-    // Retry with backoff…
+  } else if (error instanceof ServiceUnavailableError) {
+    // Already retried under the rule ("When a request is retried"). Calling
+    // again is safe only for a repeatable operation: an ambiguous failure of
+    // a delete or a create may have succeeded.
   }
 }
 ```
@@ -1045,22 +1139,6 @@ for (const batch of batches) {
   await client.upsert('collection', batch);
   console.log(`Processed batch of ${batch.length} points`);
 }
-```
-
-### Retry Logic
-
-```typescript
-import { retryWithBackoff } from 'aetherfy-vectors';
-
-const results = await retryWithBackoff(
-  () => client.search('collection', vector),
-  {
-    maxRetries: 3,
-    baseDelay: 1000,
-    backoffFactor: 2,
-    retryCondition: error => error.name === 'ServiceUnavailableError',
-  }
-);
 ```
 
 ### Environment Detection

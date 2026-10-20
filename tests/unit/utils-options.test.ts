@@ -5,6 +5,16 @@
 
 import { assertAllowedOptionKeys } from '../../src/utils/options';
 
+/** The error `fn` throws, or a test failure if it does not throw. */
+function thrownBy(fn: () => unknown): Error {
+  try {
+    fn();
+  } catch (e) {
+    return e as Error;
+  }
+  throw new Error('expected the call to throw');
+}
+
 describe('assertAllowedOptionKeys', () => {
   const ALLOWED = ['batchSize', 'filter', 'withPayload', 'withVectors'];
 
@@ -53,21 +63,17 @@ describe('assertAllowedOptionKeys', () => {
     // jest's .toThrow() takes string | RegExp | Constructable | Error, not
     // a callback — so capture the thrown error via try/catch and assert
     // separately. Same pattern as the "no guidance" test below.
-    let captured: Error | null = null;
-    try {
+    const captured = thrownBy(() =>
       assertAllowedOptionKeys(
         { batchSize: 100, limit: 50 }, // batchSize ok, limit unknown
         ALLOWED,
         'm'
-      );
-    } catch (e) {
-      captured = e as Error;
-    }
-    expect(captured).not.toBeNull();
+      )
+    );
     // Only `limit` is reported as unknown; batchSize appears solely in the
     // list of accepted options.
-    expect(captured!.message).toMatch(/unknown option\(s\): limit\. /);
-    expect(captured!.message).not.toMatch(/unknown option\(s\):[^.]*batchSize/);
+    expect(captured.message).toMatch(/unknown option\(s\): limit\. /);
+    expect(captured.message).not.toMatch(/unknown option\(s\):[^.]*batchSize/);
   });
 
   it('guidance line is appended when provided', () => {
@@ -82,15 +88,11 @@ describe('assertAllowedOptionKeys', () => {
   });
 
   it('no guidance → message ends after the accepted list (no trailing space)', () => {
-    let captured: Error | null = null;
-    try {
-      assertAllowedOptionKeys({ limit: 100 }, ALLOWED, 'm');
-    } catch (e) {
-      captured = e as Error;
-    }
-    expect(captured).not.toBeNull();
+    const captured = thrownBy(() =>
+      assertAllowedOptionKeys({ limit: 100 }, ALLOWED, 'm')
+    );
     expect(captured).toBeInstanceOf(TypeError);
-    expect(captured!.message).toBe(
+    expect(captured.message).toBe(
       'm: unknown option(s): limit. Accepted: batchSize, filter, withPayload, withVectors.'
     );
   });

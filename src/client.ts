@@ -26,7 +26,6 @@ import {
 } from './models';
 import {
   AetherfyVectorsError,
-  CollectionNotFoundError,
   PointNotFoundError,
   ValidationError,
   NetworkError,
@@ -35,10 +34,10 @@ import {
   PartialUpsertError,
   RequestTimeoutError,
   createErrorFromResponse,
-  isRetryableError,
 } from './exceptions';
 import { HttpResponse } from './http/types';
 import { retryWithBackoff, validatePointId } from './utils';
+import { OPERATIONS, Operation, backoff } from './retry-policy';
 import { assertAllowedOptionKeys, optionKeys } from './utils/options';
 import { serializeFilter } from './utils/filter';
 import { chunkPointsByBytes, MAX_REQUEST_BYTES } from './utils/chunking';
@@ -49,6 +48,51 @@ import { validateVectors } from './schema';
 // without the same change here does not compile. See src/utils/options.ts.
 // CLIENT_CONFIG_KEYS is exported for MemoryClient, which refuses these keys
 // beside a bring-your-own client (not part of the package's exports).
+/**
+ * The server's error code on an HttpClient-thrown error (its parsed body).
+ *
+ * The backend uses two body shapes:
+ *   - nested:  { error: { code, message } }
+ *   - flat:    { error_code, message }
+ * HttpClient stashes the parsed body on error.responseData; both shapes are
+ * read so SDK code does not care which one a path produced. Also used to
+ * disambiguate schema-read 404s (collection gone vs. no schema set).
+ */
+function serverErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const data = (error as { responseData?: Record<string, unknown> })
+    .responseData;
+  if (!data || typeof data !== 'object') return undefined;
+  const nested = (data.error as { code?: string } | undefined)?.code;
+  if (nested) return nested;
+  return data.error_code as string | undefined;
+}
+
+/**
+ * `built`, carrying the server's code from the error it replaces.
+ *
+ * Code that catches a server error and throws another in its place (a more
+ * specific class, a clearer message) builds the new one from the same
+ * answer, so a branch on `err.code` must see the server's code whichever
+ * class it arrives as: `throw carrying(new SchemaNotFoundError(name), error)`.
+ */
+function carrying<T extends AetherfyVectorsError>(built: T, from: unknown): T {
+  const code = serverErrorCode(from);
+  if (code !== undefined) built.code = code;
+  return built;
+}
+
+// Every collection lives in a workspace, so a client without one is refused
+// at construction rather than on its first request.
+const NO_WORKSPACE_MESSAGE =
+  'A workspace is required: every collection lives in one. Pass a workspace ' +
+  "name (workspace: 'my-workspace'), or run inside an Aetherfy agent and keep " +
+  "the default workspace: 'auto'.";
+const NO_WORKSPACE_MESSAGE_AUTO =
+  "workspace: 'auto' reads AETHERFY_WORKSPACE_ID, which is not set: it is set " +
+  'only inside an Aetherfy agent. Pass a workspace name ' +
+  "(workspace: 'my-workspace'), or run inside an Aetherfy agent.";
+
 export const CLIENT_CONFIG_KEYS = optionKeys<ClientConfig>({
   apiKey: true,
   endpoint: true,
@@ -159,13 +203,15 @@ export const INDEX_RESEND_PAUSE_MAX_MS = 10000;
  *   withPayload: true
  * });
  *
- * // Multi-agent workspace usage
+ * // Every collection lives in a workspace. Inside an Aetherfy agent the
+ * // default, workspace: 'auto', is the agent's workspace (by id, from
+ * // AETHERFY_WORKSPACE_ID); anywhere else, name one.
  * const workspaceClient = new AetherfyVectorsClient({
  *   apiKey: 'afy_live_your_api_key_here',
- *   workspace: 'auto'  // Auto-detects from AETHERFY_WORKSPACE env var
+ *   workspace: 'my-workspace'
  * });
  *
- * // All operations are automatically scoped to the workspace
+ * // All operations are scoped to the workspace
  * await workspaceClient.search('documents', queryVector);
  * await workspaceClient.upsert('metadata', points);
  * ```
@@ -196,14 +242,15 @@ export class AetherfyVectorsClient {
   /** The per-attempt request timeout this client was built with, in ms. */
   private readonly requestTimeoutMs: number;
   /**
-   * The active workspace, or `undefined` if workspace scoping is disabled.
-   * Set at construction time (either explicitly or via the
-   * AETHERFY_WORKSPACE env var when `workspace: 'auto'`). Read-only.
-   *
-   * Exposed so higher-level clients (e.g. MemoryClient) can surface the
-   * active workspace without reaching into internals.
+   * The workspace name, or `undefined` when the client addresses its
+   * workspace by id (`workspace: 'auto'`; see `workspaceId`). Read-only.
    */
   readonly workspace?: string;
+  /**
+   * The workspace id (`workspace: 'auto'`, from AETHERFY_WORKSPACE_ID), or
+   * `undefined` when the client was given a workspace name. Read-only.
+   */
+  readonly workspaceId?: string;
   private schemaCache: Map<
     string,
     { size: number; distance: string; etag?: string }
@@ -297,17 +344,9 @@ export class AetherfyVectorsClient {
       this.endpoint = AetherfyVectorsClient.DEFAULT_ENDPOINT;
     }
 
-    // Initialize workspace (auto-detect or explicit)
-    if (config.workspace === 'auto') {
-      // Auto-detect from environment variable (Node.js only)
-      /* c8 ignore next 3 */
-      this.workspace =
-        typeof process !== 'undefined'
-          ? process.env?.AETHERFY_WORKSPACE
-          : undefined;
-    } else if (config.workspace) {
-      this.workspace = config.workspace;
-    }
+    const resolved = AetherfyVectorsClient.resolveWorkspace(config);
+    this.workspace = resolved.workspace;
+    this.workspaceId = resolved.workspaceId;
 
     this.schemaCache = new Map();
     this.payloadSchemaCache = new Map();
@@ -352,6 +391,8 @@ export class AetherfyVectorsClient {
       CLIENT_CONFIG_KEYS,
       'AetherfyVectorsClient.create'
     );
+    // Refuse a missing workspace before discovery makes a request.
+    AetherfyVectorsClient.resolveWorkspace(config);
 
     // Validate eagerly — same semantics as Python's __init__.
     if (
@@ -398,16 +439,21 @@ export class AetherfyVectorsClient {
     } catch (err) {
       tempHttp.destroy();
       const msg = err instanceof Error ? err.message : 'unknown error';
-      throw new AetherfyVectorsError(
-        `Could not resolve apiRegion '${config.apiRegion}' via discovery: ${msg}. ` +
-          'Check that the default endpoint is reachable, or pass endpoint= directly.'
+      throw carrying(
+        new AetherfyVectorsError(
+          `Could not resolve apiRegion '${config.apiRegion}' via discovery: ${msg}. ` +
+            'Check that the default endpoint is reachable, or pass endpoint= directly.'
+        ),
+        err
       );
     }
     tempHttp.destroy();
     if (response.status !== 200) {
       throw new AetherfyVectorsError(
         `Region discovery returned ${response.status} from ${url}. ` +
-          'Check that your API key is valid for the discovery endpoint.'
+          'Check that your API key is valid for the discovery endpoint.',
+        undefined,
+        response.status
       );
     }
     const cache = (response.data as Record<string, string>) ?? {};
@@ -427,6 +473,35 @@ export class AetherfyVectorsClient {
     });
   }
 
+  /**
+   * The workspace: a name, or (for 'auto', the default) the agent's
+   * workspace id. Exactly one is set; there is no workspaceless client.
+   * undefined is "not given"; null and '' are refused. Decided before any
+   * request (create() calls it ahead of region discovery).
+   */
+  private static resolveWorkspace(config: ClientConfig): {
+    workspace?: string;
+    workspaceId?: string;
+  } {
+    const workspace: unknown =
+      config.workspace === undefined ? 'auto' : config.workspace;
+    if (workspace === 'auto') {
+      /* c8 ignore next 4 */
+      const id =
+        typeof process !== 'undefined'
+          ? process.env?.AETHERFY_WORKSPACE_ID
+          : undefined;
+      if (!id) {
+        throw new Error(NO_WORKSPACE_MESSAGE_AUTO);
+      }
+      return { workspaceId: id };
+    }
+    if (typeof workspace === 'string' && workspace) {
+      return { workspace };
+    }
+    throw new Error(NO_WORKSPACE_MESSAGE);
+  }
+
   /** Build a fully-qualified API URL from the endpoint host and a path. */
   private apiUrl(path: string): string {
     return AetherfyVectorsClient.buildApiUrl(this.endpoint, path);
@@ -440,17 +515,24 @@ export class AetherfyVectorsClient {
   }
 
   /**
-   * Local cache-key for a collection name, including workspace prefix when set.
-   * NOT used on the wire anymore — kept as a stable, unique key for
-   * schemaCache lookups (avoids collisions between same-name collections
-   * in different workspaces).
+   * The local cache-key prefix of this client's workspace: `name/`, or
+   * `id:<uuid>/` for 'auto'. Never sent on the wire.
+   * @private
+   */
+  private scopePrefix(): string {
+    return this.workspaceId !== undefined
+      ? `id:${this.workspaceId}/`
+      : `${this.workspace}/`;
+  }
+
+  /**
+   * Local cache-key for a collection name, never sent on the wire. The
+   * prefix keeps same-name collections in different workspaces, and the
+   * two ways of addressing a workspace, from ever sharing a cache entry.
    * @private
    */
   private scopeCollection(collection: string): string {
-    if (this.workspace) {
-      return `${this.workspace}/${collection}`;
-    }
-    return collection;
+    return `${this.scopePrefix()}${collection}`;
   }
 
   /**
@@ -458,19 +540,26 @@ export class AetherfyVectorsClient {
    * @private
    */
   private unscopeCollection(scopedName: string): string {
-    if (this.workspace && scopedName.startsWith(`${this.workspace}/`)) {
-      return scopedName.substring(this.workspace.length + 1);
-    }
-    return scopedName;
+    const prefix = this.scopePrefix();
+    return scopedName.startsWith(prefix)
+      ? scopedName.substring(prefix.length)
+      : scopedName;
   }
 
   /**
-   * Build the canonical URL path for a collection. Workspaced operations
-   * use the nested URL form `/workspaces/{ws}/collections/{name}` instead
-   * of the old slash-in-name encoding. Workspaceless calls continue to
-   * use the flat form.
+   * `/workspace-ids/{id}` for 'auto', else `/workspaces/{name}`.
+   * @private
+   */
+  private workspacePath(): string {
+    return this.workspaceId !== undefined
+      ? `/workspace-ids/${encodeURIComponent(this.workspaceId)}`
+      : `/workspaces/${encodeURIComponent(this.workspace ?? '')}`;
+  }
+
+  /**
+   * The URL path of a collection in this client's workspace.
    *
-   * @param collectionName Bare (unscoped) collection name from the caller.
+   * @param collectionName Bare collection name from the caller.
    * @param suffix         Optional path suffix appended after the
    *                       collection segment (e.g. `/points/query`).
    *                       Must already begin with `/` when non-empty.
@@ -481,23 +570,15 @@ export class AetherfyVectorsClient {
     suffix: string = ''
   ): string {
     const enc = encodeURIComponent(collectionName);
-    if (this.workspace) {
-      return `/workspaces/${encodeURIComponent(this.workspace)}/collections/${enc}${suffix}`;
-    }
-    return `/collections/${enc}${suffix}`;
+    return `${this.workspacePath()}/collections/${enc}${suffix}`;
   }
 
   /**
-   * Build the canonical vectordb URL path for the collections list/create
-   * endpoint. Workspaced requests use `/workspaces/{ws}/collections`,
-   * workspaceless use `/collections`.
+   * The list/create endpoint of this client's workspace.
    * @private
    */
   private buildCollectionsListPath(): string {
-    if (this.workspace) {
-      return `/workspaces/${encodeURIComponent(this.workspace)}/collections`;
-    }
-    return '/collections';
+    return `${this.workspacePath()}/collections`;
   }
 
   // Collection Management
@@ -539,8 +620,8 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      // Post-A/B: workspace lives in the URL, body name is bare. vectordb
-      // rejects any "/" in the body name.
+      // The workspace is in the URL; the body name is bare (vectordb
+      // rejects any "/" in it).
       const body: Record<string, unknown> = {
         name: collectionName,
         vectors: config,
@@ -555,7 +636,7 @@ export class AetherfyVectorsClient {
         body.regions = regions;
       }
 
-      const response = await this.executeWithRetry(async () =>
+      const response = await this.send('createCollection', async () =>
         this.httpClient.post<{ regions?: string[] }>(
           this.apiUrl(this.buildCollectionsListPath()),
           body
@@ -599,8 +680,10 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.httpClient.delete(
-        this.apiUrl(this.buildCollectionPath(collectionName))
+      const response = await this.send('deleteCollection', () =>
+        this.httpClient.delete(
+          this.apiUrl(this.buildCollectionPath(collectionName))
+        )
       );
 
       const ok = response.status === 200 || response.status === 204;
@@ -626,15 +709,14 @@ export class AetherfyVectorsClient {
    */
   async getCollections(): Promise<Collection[]> {
     try {
-      const response = await this.httpClient.get<{ collections: Collection[] }>(
-        this.apiUrl(this.buildCollectionsListPath())
+      const response = await this.send('getCollections', () =>
+        this.httpClient.get<{ collections: Collection[] }>(
+          this.apiUrl(this.buildCollectionsListPath())
+        )
       );
 
-      // Post-A/B: vectordb's GET /workspaces/{ws}/collections already
-      // returns only THIS workspace's collections, with bare names in
-      // PG (workspace_id is the join key, name has no slash). No
-      // client-side filtering or unscoping needed — names come back
-      // bare in both shapes.
+      // The workspace's list holds only its own collections, with bare
+      // names: nothing to filter or unscope.
       return response.data.collections || [];
     } catch (error: unknown) {
       throw this.handleError(error);
@@ -663,8 +745,10 @@ export class AetherfyVectorsClient {
     }
 
     try {
-      await this.httpClient.get(
-        this.apiUrl(this.buildCollectionPath(collectionName))
+      await this.send('collectionExists', () =>
+        this.httpClient.get(
+          this.apiUrl(this.buildCollectionPath(collectionName))
+        )
       );
       return true;
     } catch (error: unknown) {
@@ -673,11 +757,12 @@ export class AetherfyVectorsClient {
         typeof error === 'object' &&
         ('status' in error || 'statusCode' in error)
       ) {
-        const httpError = error as { status?: number; statusCode?: number };
-        if (httpError.status === 404 || httpError.statusCode === 404) {
+        // Only "this collection is not in the workspace" is a false; an
+        // unknown workspace (WORKSPACE_NOT_FOUND) or a refusal is thrown.
+        if (serverErrorCode(error) === 'COLLECTION_NOT_FOUND') {
           // No-op when cache is already empty (we got past the
           // fast-path check above), but the call keeps the contract
-          // "collection-scoped 404 → caches dropped" uniform.
+          // "collection gone → caches dropped" uniform.
           this.evictCachesIfNotFound(scopedName, error);
           return false;
         }
@@ -698,13 +783,13 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.httpClient.get<{ result: Collection }>(
-        this.apiUrl(this.buildCollectionPath(collectionName))
+      const response = await this.send('getCollection', () =>
+        this.httpClient.get<{ result: Collection }>(
+          this.apiUrl(this.buildCollectionPath(collectionName))
+        )
       );
 
-      // vectordb returns the bare collection name (PG stores name without
-      // workspace prefix). The pre-A/B `unscopeCollection` shim is no longer
-      // needed but kept above as a stable schemaCache key — no-op here.
+      // vectordb returns the bare collection name: nothing to unscope.
       return response.data.result;
     } catch (error: unknown) {
       this.evictCachesIfNotFound(scopedName, error);
@@ -723,8 +808,8 @@ export class AetherfyVectorsClient {
    * in one chunk; the chunker is transparent for small/medium upserts.
    *
    * Failure behaviour:
-   *   - Transient errors (network blips, 5xx, 429) are auto-retried per
-   *     chunk with exponential backoff inside `executeWithRetry`.
+   *   - Transient errors are retried per chunk under the retry rule
+   *     (retry-policy.ts; upsert is repeatable), with exponential backoff.
    *   - Permanent errors on a chunk after retries: if there's only one
    *     chunk, the specific error (Validation, ServiceUnavailable, etc.)
    *     is thrown directly — same as pre-chunking behaviour.
@@ -886,8 +971,8 @@ export class AetherfyVectorsClient {
 
   /**
    * Per-chunk upload. Mirrors the pre-chunking single-PUT logic exactly:
-   * If-Match headers from schema ETags, executeWithRetry for transient
-   * failures, per-status handling (412 schema-change retry, 400, 500+),
+   * If-Match headers from schema ETags, send() (the retry rule) for
+   * transient failures, per-status handling (412 schema-change retry, 400, 500+),
    * 404 cache self-heal. Returns true on 200; throws otherwise.
    *
    * Extracted so the multi-chunk loop can call it per-chunk and aggregate
@@ -912,7 +997,7 @@ export class AetherfyVectorsClient {
         headers['If-Match'] = payloadSchemaData.etag;
       }
 
-      const response = await this.executeWithRetry(async () =>
+      const response = await this.send('upsert', async () =>
         this.httpClient.put(
           this.apiUrl(
             this.buildCollectionPath(originalCollectionName, '/points')
@@ -938,7 +1023,7 @@ export class AetherfyVectorsClient {
 
         // Handle 412 Precondition Failed (schema changed)
         if (httpError.status === 412) {
-          this.clearSchemaCache(scopedName);
+          this.schemaCache.delete(scopedName);
           this.payloadSchemaCache.delete(scopedName);
 
           // Fetch updated schemas and re-validate
@@ -982,19 +1067,24 @@ export class AetherfyVectorsClient {
               retryHeaders['If-Match'] = updatedPayloadSchema.etag;
             }
 
-            const response = await this.httpClient.put(
-              this.apiUrl(
-                this.buildCollectionPath(originalCollectionName, '/points')
-              ),
-              { points: chunk },
-              retryHeaders
+            const response = await this.send('upsert', () =>
+              this.httpClient.put(
+                this.apiUrl(
+                  this.buildCollectionPath(originalCollectionName, '/points')
+                ),
+                { points: chunk },
+                retryHeaders
+              )
             );
 
             return response.status === 200;
           } catch {
             // If retry also fails, raise the original 412 error
-            throw new ValidationError(
-              `Collection schema has changed for '${originalCollectionName}'. Please retry your request.`
+            throw carrying(
+              new ValidationError(
+                `Collection schema has changed for '${originalCollectionName}'. Please retry your request.`
+              ),
+              error
             );
           }
         }
@@ -1011,7 +1101,7 @@ export class AetherfyVectorsClient {
             (responseData?.message as string) ||
             (responseData?.error as string) ||
             'Validation error occurred';
-          throw new ValidationError(errorMessage);
+          throw carrying(new ValidationError(errorMessage), error);
         }
 
         // Handle 500+ (server errors)
@@ -1024,8 +1114,13 @@ export class AetherfyVectorsClient {
             errorObj?.message ||
             (responseData?.message as string) ||
             'Unknown server error';
-          throw new AetherfyVectorsError(
-            `Server error occurred: ${errorMessage}`
+          throw carrying(
+            new AetherfyVectorsError(
+              `Server error occurred: ${errorMessage}`,
+              undefined,
+              httpError.status
+            ),
+            error
           );
         }
       }
@@ -1058,9 +1153,13 @@ export class AetherfyVectorsClient {
       : { points: pointsSelector };
 
     try {
-      const response = await this.httpClient.post(
-        this.apiUrl(this.buildCollectionPath(collectionName, '/points/delete')),
-        body
+      const response = await this.send('delete', () =>
+        this.httpClient.post(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/delete')
+          ),
+          body
+        )
       );
 
       return response.status === 200;
@@ -1108,16 +1207,17 @@ export class AetherfyVectorsClient {
     if (options.key !== undefined) body.key = options.key;
 
     try {
-      const response = await this.httpClient.post(
-        this.apiUrl(
-          this.buildCollectionPath(collectionName, '/points/payload')
-        ),
-        body
+      const response = await this.send('setPayload', () =>
+        this.httpClient.post(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/payload')
+          ),
+          body
+        )
       );
       return response.data;
     } catch (error: unknown) {
-      this.evictCachesIfNotFound(scopedName, error);
-      throw this.handleError(error);
+      throw this.payloadError(error, scopedName, collectionName, points);
     }
   }
 
@@ -1138,16 +1238,17 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.httpClient.put(
-        this.apiUrl(
-          this.buildCollectionPath(collectionName, '/points/payload')
-        ),
-        { payload, points }
+      const response = await this.send('overwritePayload', () =>
+        this.httpClient.put(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/payload')
+          ),
+          { payload, points }
+        )
       );
       return response.data;
     } catch (error: unknown) {
-      this.evictCachesIfNotFound(scopedName, error);
-      throw this.handleError(error);
+      throw this.payloadError(error, scopedName, collectionName, points);
     }
   }
 
@@ -1169,16 +1270,17 @@ export class AetherfyVectorsClient {
     try {
       // POST /points/payload/delete (not DELETE /points/payload) —
       // matches the underlying wire contract.
-      const response = await this.httpClient.post(
-        this.apiUrl(
-          this.buildCollectionPath(collectionName, '/points/payload/delete')
-        ),
-        { keys, points }
+      const response = await this.send('deletePayload', () =>
+        this.httpClient.post(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/payload/delete')
+          ),
+          { keys, points }
+        )
       );
       return response.data;
     } catch (error: unknown) {
-      this.evictCachesIfNotFound(scopedName, error);
-      throw this.handleError(error);
+      throw this.payloadError(error, scopedName, collectionName, points);
     }
   }
 
@@ -1293,12 +1395,21 @@ export class AetherfyVectorsClient {
 
       let response: HttpResponse<{ result?: unknown }>;
       try {
-        response = await this.httpClient.request<{ result?: unknown }>({
-          url: this.apiUrl(this.buildCollectionPath(collectionName, '/index')),
-          method: 'PUT',
-          body: { field_name: fieldName, field_schema: fieldSchema },
-          timeout: attemptTimeout,
-        });
+        response = await this.send(
+          'createFieldIndex',
+          () =>
+            this.httpClient.request<{ result?: unknown }>({
+              url: this.apiUrl(
+                this.buildCollectionPath(collectionName, '/index')
+              ),
+              method: 'PUT',
+              body: { field_name: fieldName, field_schema: fieldSchema },
+              // Each attempt, retries included, gets only the time left
+              // (as Python's per-attempt budget): none runs past deadline.
+              timeout: Math.min(attemptTimeout, deadline - this.now()),
+            }),
+          deadline
+        );
       } catch (error: unknown) {
         // Before the deadline, this is one create outliving its own HTTP
         // timeout, and that error stands. At the deadline, after an
@@ -1374,24 +1485,21 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      await this.httpClient.request({
-        url: this.apiUrl(
-          this.buildCollectionPath(
-            collectionName,
-            `/index/${encodeURIComponent(fieldName)}`
-          )
-        ),
-        method: 'DELETE',
-        timeout: Math.max(this.requestTimeoutMs, INDEX_ATTEMPT_TIMEOUT_MS),
-      });
+      await this.send('deleteFieldIndex', () =>
+        this.httpClient.request({
+          url: this.apiUrl(
+            this.buildCollectionPath(
+              collectionName,
+              `/index/${encodeURIComponent(fieldName)}`
+            )
+          ),
+          method: 'DELETE',
+          timeout: Math.max(this.requestTimeoutMs, INDEX_ATTEMPT_TIMEOUT_MS),
+        })
+      );
       return true;
     } catch (error: unknown) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'status' in error &&
-        error.status === 404
-      ) {
+      if (serverErrorCode(error) === 'COLLECTION_NOT_FOUND') {
         this.evictCachesIfNotFound(scopedName, error);
         return false;
       }
@@ -1422,13 +1530,9 @@ export class AetherfyVectorsClient {
     ) {
       throw new TypeError('partial must be a plain object');
     }
-    try {
-      return await this.setPayload(collectionName, partial, [pointId], {
-        key: 'metadata',
-      });
-    } catch (error: unknown) {
-      throw this.translatePointNotFound(error, collectionName, pointId);
-    }
+    return this.setPayload(collectionName, partial, [pointId], {
+      key: 'metadata',
+    });
   }
 
   /**
@@ -1446,27 +1550,32 @@ export class AetherfyVectorsClient {
       throw new TypeError('keys must be an array of strings');
     }
     const dotted = keys.map(k => `metadata.${k}`);
-    try {
-      return await this.deletePayload(collectionName, dotted, [pointId]);
-    } catch (error: unknown) {
-      throw this.translatePointNotFound(error, collectionName, pointId);
-    }
+    return this.deletePayload(collectionName, dotted, [pointId]);
   }
 
-  private translatePointNotFound(
+  /**
+   * A payload route's error, typed. vectordb re-wraps Qdrant's own 404 (a
+   * point that does not exist) as code NOT_FOUND; on these routes that is
+   * the point, so it is a PointNotFoundError. Every other error keeps its
+   * own type (COLLECTION_NOT_FOUND, WORKSPACE_NOT_FOUND, ...).
+   */
+  private payloadError(
     error: unknown,
+    scopedName: string,
     collectionName: string,
-    pointId: string | number
-  ): unknown {
-    if (
-      error instanceof AetherfyVectorsError &&
-      error.statusCode === 404 &&
-      !(error instanceof PointNotFoundError) &&
-      !(error instanceof CollectionNotFoundError)
-    ) {
-      return new PointNotFoundError(String(pointId), collectionName);
+    points: Array<string | number>
+  ): AetherfyVectorsError {
+    this.evictCachesIfNotFound(scopedName, error);
+    const typed = this.handleError(error);
+    if (typed.statusCode === 404 && typed.code === 'NOT_FOUND') {
+      const missing = new PointNotFoundError(
+        points.map(String).join(', '),
+        collectionName
+      );
+      missing.code = typed.code;
+      return missing;
     }
-    return error;
+    return typed;
   }
 
   /**
@@ -1497,19 +1606,21 @@ export class AetherfyVectorsClient {
       // previously dual-purpose (upsert vs retrieve, distinguished by
       // body shape). Backend now serves retrieve at /points/retrieve so
       // /points can be unambiguously upsert (and stream-parsed).
-      const response = await this.httpClient.post<{
-        result: Point[];
-      }>(
-        this.apiUrl(
-          this.buildCollectionPath(collectionName, '/points/retrieve')
-        ),
-        {
-          ids,
-          with_payload: options.withPayload ?? true,
-          // Wire field is singular (with_vector); the caller-facing
-          // option name `withVectors` is plural by JS convention.
-          with_vector: options.withVectors ?? false,
-        }
+      const response = await this.send('retrieve', () =>
+        this.httpClient.post<{
+          result: Point[];
+        }>(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/retrieve')
+          ),
+          {
+            ids,
+            with_payload: options.withPayload ?? true,
+            // Wire field is singular (with_vector); the caller-facing
+            // option name `withVectors` is plural by JS convention.
+            with_vector: options.withVectors ?? false,
+          }
+        )
       );
 
       return response.data.result || [];
@@ -1577,7 +1688,7 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.executeWithRetry(async () =>
+      const response = await this.send('search', async () =>
         this.httpClient.post<{ result: { points: SearchResult[] } }>(
           this.apiUrl(
             this.buildCollectionPath(collectionName, '/points/query')
@@ -1635,14 +1746,18 @@ export class AetherfyVectorsClient {
       body.filter = serializeFilter(options.scrollFilter, 'scroll');
 
     try {
-      const response = await this.httpClient.post<{
-        result: {
-          points: ScrollResult['points'];
-          next_page_offset: string | number | null;
-        };
-      }>(
-        this.apiUrl(this.buildCollectionPath(collectionName, '/points/scroll')),
-        body
+      const response = await this.send('scroll', () =>
+        this.httpClient.post<{
+          result: {
+            points: ScrollResult['points'];
+            next_page_offset: string | number | null;
+          };
+        }>(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/scroll')
+          ),
+          body
+        )
       );
 
       const result = response.data.result ?? {
@@ -1756,14 +1871,18 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.httpClient.post<{
-        result: { count: number };
-      }>(
-        this.apiUrl(this.buildCollectionPath(collectionName, '/points/count')),
-        {
-          filter: serializeFilter(options.countFilter, 'count'),
-          exact: options.exact ?? false,
-        }
+      const response = await this.send('count', () =>
+        this.httpClient.post<{
+          result: { count: number };
+        }>(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/points/count')
+          ),
+          {
+            filter: serializeFilter(options.countFilter, 'count'),
+            exact: options.exact ?? false,
+          }
+        )
       );
 
       return response.data.result.count;
@@ -1802,8 +1921,8 @@ export class AetherfyVectorsClient {
    */
   async getUsageStats(): Promise<UsageStats> {
     try {
-      const response = await this.httpClient.get<UsageStats>(
-        this.apiUrl('/analytics/usage')
+      const response = await this.send('getUsageStats', () =>
+        this.httpClient.get<UsageStats>(this.apiUrl('/analytics/usage'))
       );
 
       return response.data;
@@ -1844,8 +1963,10 @@ export class AetherfyVectorsClient {
    */
   clearSchemaCache(collectionName?: string): void {
     if (collectionName) {
-      this.schemaCache.delete(collectionName);
-      this.payloadSchemaCache.delete(collectionName);
+      // The caches are keyed by the workspace-scoped name.
+      const scopedName = this.scopeCollection(collectionName);
+      this.schemaCache.delete(scopedName);
+      this.payloadSchemaCache.delete(scopedName);
     } else {
       this.schemaCache.clear();
       this.payloadSchemaCache.clear();
@@ -1864,45 +1985,16 @@ export class AetherfyVectorsClient {
    * before rethrowing is enough: the next call goes back to the network
    * and gets the truth.
    *
-   * Don't call this on /schema/<name> 404s — there, 404 also covers the
+   * Don't call this on schema-read 404s — there, 404 also covers the
    * legitimate "no payload schema set" state on an existing collection.
    */
   private evictCachesIfNotFound(scopedName: string, error: unknown): void {
-    if (
-      error &&
-      typeof error === 'object' &&
-      ('status' in error || 'statusCode' in error)
-    ) {
-      const httpError = error as { status?: number; statusCode?: number };
-      if (httpError.status === 404 || httpError.statusCode === 404) {
-        this.schemaCache.delete(scopedName);
-        this.payloadSchemaCache.delete(scopedName);
-      }
+    // Only when the COLLECTION is gone: an unknown workspace says nothing
+    // about it.
+    if (serverErrorCode(error) === 'COLLECTION_NOT_FOUND') {
+      this.schemaCache.delete(scopedName);
+      this.payloadSchemaCache.delete(scopedName);
     }
-  }
-
-  /**
-   * Pull error.code out of an HttpClient-thrown error.
-   *
-   * The backend uses two response shapes:
-   *   - nested:  { error: { code, message } }
-   *   - flat:    { error_code, message }
-   * HttpClient stashes the parsed body on error.responseData. Both
-   * shapes are checked here so SDK code can read the code without
-   * caring which one the backend produced for a given path.
-   *
-   * Used to disambiguate /schema/<name> 404s where the same status
-   * covers two cases (collection gone vs. no schema set).
-   */
-  private errorCodeOf(error: unknown): string | undefined {
-    if (!error || typeof error !== 'object') return undefined;
-    const data = (error as { responseData?: Record<string, unknown> })
-      .responseData;
-    if (!data || typeof data !== 'object') return undefined;
-    const nested = (data.error as { code?: string } | undefined)?.code;
-    if (nested) return nested;
-    const flat = data.error_code as string | undefined;
-    return flat;
   }
 
   private getCachedSchema(
@@ -1914,24 +2006,26 @@ export class AetherfyVectorsClient {
   private async fetchAndCacheSchema(
     collectionName: string
   ): Promise<{ size: number; distance: string; etag: string }> {
-    // Caller passes the BARE collection name (no workspace slash).
-    // The wire URL uses the nested form when workspaced; the local
-    // schemaCache key uses the slash-form scopedName for collision-free
-    // lookups across workspaces with same-name collections.
+    // Caller passes the BARE collection name. The wire URL comes from
+    // buildCollectionPath; the local schemaCache key is the workspace-scoped
+    // name (scopeCollection), so same-name collections in different
+    // workspaces never share an entry.
     const scopedName = this.scopeCollection(collectionName);
-    const response = await this.httpClient.get<{
-      result: {
-        config: {
-          params: {
-            vectors: {
-              size: number;
-              distance: string;
+    const response = await this.send('getSchema', () =>
+      this.httpClient.get<{
+        result: {
+          config: {
+            params: {
+              vectors: {
+                size: number;
+                distance: string;
+              };
             };
           };
         };
-      };
-      schema_version: string;
-    }>(this.apiUrl(this.buildCollectionPath(collectionName)));
+        schema_version: string;
+      }>(this.apiUrl(this.buildCollectionPath(collectionName)))
+    );
 
     const result = response.data.result;
     const schemaVersion = response.data.schema_version;
@@ -2099,7 +2193,16 @@ export class AetherfyVectorsClient {
     if (error instanceof Error) {
       const message = error.message;
       if (message.includes('Network error')) {
-        return new NetworkError(message);
+        // HttpClient marks a socket that never connected (requestSent:
+        // false); the typed error carries it, so retryWithBackoff around a
+        // client call reads it as the client's own retries do.
+        const neverConnected =
+          (error as { requestSent?: unknown }).requestSent === false;
+        return new NetworkError(
+          message,
+          error,
+          neverConnected ? false : undefined
+        );
       }
     }
 
@@ -2108,10 +2211,25 @@ export class AetherfyVectorsClient {
     return new AetherfyVectorsError(message);
   }
 
-  private async executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
-    return retryWithBackoff(operation, {
+  /**
+   * Send one request under the retry rule (retry-policy.ts): a refusal
+   * before anything ran is retried for any operation, an ambiguous failure
+   * only for an operation whose repeat gives the same result, a 4xx never.
+   * The raw HttpClient error reaches the caller (the 412 path reads its
+   * `status`). With a `deadline` (on `this.now()`), no retry starts once it
+   * has passed, as the Python SDK's call deadline.
+   */
+  private async send<T>(
+    operation: Operation,
+    request: () => Promise<T>,
+    deadline?: number
+  ): Promise<T> {
+    return retryWithBackoff(request, {
+      retryClass: OPERATIONS[operation],
       maxRetries: 3,
-      retryCondition: error => isRetryableError(error),
+      baseDelay: backoff.baseDelayMs,
+      deadline,
+      now: () => this.now(),
     });
   }
 
@@ -2137,8 +2255,10 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      const response = await this.httpClient.get(
-        this.apiUrl(`/schema/${encodeURIComponent(scopedName)}`)
+      const response = await this.send('getSchema', () =>
+        this.httpClient.get(
+          this.apiUrl(this.buildCollectionPath(collectionName, '/schema'))
+        )
       );
 
       const data = response.data as {
@@ -2164,23 +2284,17 @@ export class AetherfyVectorsClient {
 
       return schema;
     } catch (error: unknown) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'status' in error &&
-        error.status === 404
-      ) {
-        // Backend disambiguates the two 404 cases via error.code:
-        //   COLLECTION_NOT_FOUND → collection is gone, evict caches
-        //   SCHEMA_NOT_DEFINED → collection exists but no schema (legit)
-        // Without the code (older backend or unstructured body) we
-        // treat 404 as "no schema set" without evicting, matching the
-        // pre-disambiguation behavior. Eviction only fires when the
-        // backend explicitly tells us the collection is gone.
-        if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
-          this.schemaCache.delete(scopedName);
-          this.payloadSchemaCache.delete(scopedName);
-        }
+      // Two 404s mean "no schema", told apart by error.code:
+      //   COLLECTION_NOT_FOUND → the collection is gone: evict caches
+      //   SCHEMA_NOT_DEFINED → the collection has no schema (legit)
+      // Any other 404 (an unknown workspace) is thrown.
+      const code = serverErrorCode(error);
+      if (code === 'COLLECTION_NOT_FOUND') {
+        this.schemaCache.delete(scopedName);
+        this.payloadSchemaCache.delete(scopedName);
+        return null;
+      }
+      if (code === 'SCHEMA_NOT_DEFINED') {
         return null;
       }
       throw this.handleError(error);
@@ -2225,12 +2339,14 @@ export class AetherfyVectorsClient {
 
     let response;
     try {
-      response = await this.httpClient.put(
-        this.apiUrl(`/schema/${encodeURIComponent(scopedName)}`),
-        body
+      response = await this.send('setSchema', () =>
+        this.httpClient.put(
+          this.apiUrl(this.buildCollectionPath(collectionName, '/schema')),
+          body
+        )
       );
     } catch (error: unknown) {
-      // PUT /schema/<name> on a non-existent collection 404s
+      // A schema PUT on a non-existent collection 404s
       // unambiguously (the schema endpoint requires the collection),
       // so a 404 here means the collection is gone — self-heal.
       this.evictCachesIfNotFound(scopedName, error);
@@ -2268,26 +2384,26 @@ export class AetherfyVectorsClient {
     const scopedName = this.scopeCollection(collectionName);
 
     try {
-      await this.httpClient.delete(
-        this.apiUrl(`/schema/${encodeURIComponent(scopedName)}`)
+      await this.send('deleteSchema', () =>
+        this.httpClient.delete(
+          this.apiUrl(this.buildCollectionPath(collectionName, '/schema'))
+        )
       );
     } catch (error: unknown) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'status' in error &&
-        error.status === 404
-      ) {
-        // Disambiguate via backend's error.code:
-        //   COLLECTION_NOT_FOUND → collection is gone, evict caches.
-        //   SCHEMA_NOT_DEFINED → collection exists, no schema set.
-        // Both surface as SchemaNotFoundError to the caller — the
-        // difference is whether we self-heal the local caches.
-        if (this.errorCodeOf(error) === 'COLLECTION_NOT_FOUND') {
-          this.schemaCache.delete(scopedName);
-          this.payloadSchemaCache.delete(scopedName);
-        }
-        throw new SchemaNotFoundError(collectionName);
+      // Disambiguate via the backend's error.code:
+      //   COLLECTION_NOT_FOUND → collection is gone, evict caches.
+      //   SCHEMA_NOT_DEFINED → collection exists, no schema set.
+      // Both surface as SchemaNotFoundError to the caller — the
+      // difference is whether we self-heal the local caches. Any other
+      // 404 (an unknown workspace) is thrown as it is.
+      const code = serverErrorCode(error);
+      if (code === 'COLLECTION_NOT_FOUND') {
+        this.schemaCache.delete(scopedName);
+        this.payloadSchemaCache.delete(scopedName);
+        throw carrying(new SchemaNotFoundError(collectionName), error);
+      }
+      if (code === 'SCHEMA_NOT_DEFINED') {
+        throw carrying(new SchemaNotFoundError(collectionName), error);
       }
       throw this.handleError(error);
     }
@@ -2326,9 +2442,13 @@ export class AetherfyVectorsClient {
 
     let response;
     try {
-      response = await this.httpClient.post(
-        this.apiUrl(`/schema/${encodeURIComponent(scopedName)}/analyze`),
-        { sample_size: sampleSize }
+      response = await this.send('analyzeSchema', () =>
+        this.httpClient.post(
+          this.apiUrl(
+            this.buildCollectionPath(collectionName, '/schema/analyze')
+          ),
+          { sample_size: sampleSize }
+        )
       );
     } catch (error: unknown) {
       this.evictCachesIfNotFound(scopedName, error);

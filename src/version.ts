@@ -15,4 +15,4 @@
  * package.json is the authority; `tests/unit/agent/packaging.test.ts` pins
  * this against it, and pins both consumers against this.
  */
-export const SDK_VERSION = '1.2.0';
+export const SDK_VERSION = '1.2.2';

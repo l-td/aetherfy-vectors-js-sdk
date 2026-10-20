@@ -33,7 +33,7 @@ import {
   generateId,
   THREAD_ID_KEY,
   THREAD_MARKER_KEY,
-  threadsCollectionName,
+  THREADS_COLLECTION,
 } from './models';
 import { Namespace } from './namespace';
 import { Thread } from './thread';
@@ -150,8 +150,7 @@ export class MemoryClient {
       }
       this._client = config.client;
     } else {
-      // Default to auto-detection of AETHERFY_WORKSPACE unless explicitly
-      // overridden. Mirrors Python SDK default.
+      // The workspace defaults to 'auto' in AetherfyVectorsClient itself.
       const {
         client: _ignored,
         threadVectorSize: _tvs,
@@ -159,24 +158,26 @@ export class MemoryClient {
         ...rest
       } = config;
       const cfg: ClientConfig = { ...rest };
-      if (cfg.workspace === undefined) cfg.workspace = 'auto';
       this._client = new AetherfyVectorsClient(cfg);
     }
   }
 
-  /** The active workspace, or undefined if workspace scoping is disabled. */
+  /** The workspace name, or undefined when it is addressed by id ('auto'). */
   get workspace(): string | undefined {
     return this._client.workspace;
   }
 
+  /** The workspace id ('auto'), or undefined when given a name. */
+  get workspaceId(): string | undefined {
+    return this._client.workspaceId;
+  }
+
   /**
-   * This workspace's threads collection (models.threadsCollectionName).
-   * Derived from this client's own workspace every time, so it can only ever
-   * name this workspace's collection: a threads collection of another
-   * workspace is never opened or adopted.
+   * This workspace's threads collection: `__threads__`, addressed in this
+   * client's own workspace, so another workspace's is never opened.
    */
   private get threads(): string {
-    return threadsCollectionName(this.workspace);
+    return THREADS_COLLECTION;
   }
 
   /**
@@ -184,7 +185,7 @@ export class MemoryClient {
    *
    * Use this as the low-level escape hatch for any operation not exposed
    * on MemoryClient. Every collection it reaches is in this client's
-   * workspace (collection NAMES are unique per account).
+   * workspace (collection names are unique per workspace).
    */
   get vectors(): AetherfyVectorsClient {
     return this._client;
