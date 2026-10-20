@@ -42,6 +42,8 @@ export {
   Point,
   SearchResult,
   Collection,
+  CreateCollectionOptions,
+  UpdateCollectionOptions,
   Filter,
 
   // Options interfaces
@@ -73,6 +75,9 @@ export {
   SchemaData,
 } from './models';
 
+// Storage modes
+export { StorageMode, DEFAULT_STORAGE_MODE } from './storage-modes';
+
 // Exception exports
 export {
   // Base error
@@ -91,6 +96,7 @@ export {
   CollectionInUseError,
   CollectionInOtherRegionError,
   AgentWorkspaceForbiddenError,
+  StorageModeNotInPlanError,
   WorkspaceNotFoundError,
   NotFoundError,
   QuotaExceededError,

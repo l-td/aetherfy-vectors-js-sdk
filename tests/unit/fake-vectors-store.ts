@@ -23,15 +23,29 @@
  */
 
 import {
+  AetherfyVectorsError,
+  ConflictError,
+  StorageModeNotInPlanError,
+  ValidationError,
+} from '../../src/exceptions';
+import { StorageMode } from '../../src/storage-modes';
+import {
   Collection,
+  CreateCollectionOptions,
   DistanceMetric,
   Filter,
   Point,
   ScrollPoint,
   SearchResult,
   VectorConfig,
+  UpdateCollectionOptions,
   VectorConfigInput,
 } from '../../src/models';
+
+// vectordb's STORAGE_MODE_COOLDOWN_SECONDS (backend/utils/storageModes.js).
+// Copied, not imported: the server is another repo, and
+// tests/unit/storage-mode.test.ts pins the behaviour.
+const COOLDOWN_SECONDS = 900;
 
 /** The filter conditions this double supports (a Qdrant subset). */
 interface Cond {
@@ -136,8 +150,17 @@ export class FakeVectorsClient {
   }
   readonly collections = new Map<
     string,
-    { config: VectorConfig; points: Map<string | number, Stored> }
+    {
+      config: VectorConfig;
+      points: Map<string | number, Stored>;
+      mode: StorageMode;
+      modeChangedAt: number | null;
+    }
   >();
+  /** A test advances this to cross the storage-mode cooldown. */
+  now = 0;
+  /** The storage modes the fake's plan allows; a test narrows it. */
+  planModes: string[] = ['exact', 'balanced', 'fast'];
   readonly indexes: Array<[string, string, unknown]> = [];
   /**
    * Flip to make every read behave as if the mustNot clause had been
@@ -149,15 +172,82 @@ export class FakeVectorsClient {
 
   async createCollection(
     name: string,
-    vectors: VectorConfigInput
+    vectors: VectorConfigInput,
+    options: CreateCollectionOptions = {}
   ): Promise<Collection> {
     if (this.collections.has(name)) throw new Error(`${name} already exists`);
     const config: VectorConfig = {
       size: vectors.size,
       distance: (vectors.distance ?? DistanceMetric.COSINE) as DistanceMetric,
     };
-    this.collections.set(name, { config, points: new Map() });
-    return { name, config } as Collection;
+    const mode = this.validMode(options.storageMode) ?? StorageMode.EXACT;
+    this.checkInPlan(mode);
+    this.collections.set(name, {
+      config,
+      points: new Map(),
+      mode,
+      modeChangedAt: null,
+    });
+    return { name, config, storageMode: mode } as Collection;
+  }
+
+  // vectordb's answers, in the order it gives them: an unknown mode is a 400
+  // before anything is read, a mode outside the plan a 403.
+  private validMode(value: string | undefined): StorageMode | undefined {
+    if (value === undefined) return undefined;
+    if (!(Object.values(StorageMode) as string[]).includes(value)) {
+      throw new ValidationError(
+        'storage_mode must be one of: exact, balanced, fast',
+        'storage_mode'
+      );
+    }
+    return value as StorageMode;
+  }
+
+  private checkInPlan(mode: StorageMode): void {
+    if (!this.planModes.includes(mode)) {
+      const error = new StorageModeNotInPlanError(
+        `The '${mode}' storage mode is not part of your plan.`,
+        {
+          storageMode: mode,
+          plan: 'starter',
+          requiredPlan: 'performance',
+          allowedModes: this.planModes,
+        }
+      );
+      error.code = 'STORAGE_MODE_NOT_IN_PLAN';
+      throw error;
+    }
+  }
+
+  async updateCollection(
+    name: string,
+    options: UpdateCollectionOptions = {}
+  ): Promise<boolean> {
+    const col = this.collection(name);
+    const mode = this.validMode(options.storageMode);
+    if (mode === undefined) return true;
+    this.checkInPlan(mode);
+    if (mode === col.mode) return true; // a no-op: no cooldown consumed
+    if (
+      col.modeChangedAt !== null &&
+      this.now - col.modeChangedAt < COOLDOWN_SECONDS
+    ) {
+      const error: AetherfyVectorsError = new ConflictError(
+        'The storage mode was changed less than 15 minutes ago.',
+        409,
+        {
+          retry_after_seconds:
+            COOLDOWN_SECONDS - (this.now - col.modeChangedAt),
+          cooldown_seconds: COOLDOWN_SECONDS,
+        }
+      );
+      error.code = 'STORAGE_MODE_CHANGE_TOO_SOON';
+      throw error;
+    }
+    col.mode = mode;
+    col.modeChangedAt = this.now;
+    return true;
   }
 
   async collectionExists(name: string): Promise<boolean> {
@@ -171,6 +261,7 @@ export class FakeVectorsClient {
       config: col.config,
       points_count: col.points.size,
       status: 'green',
+      storageMode: col.mode,
     } as Collection;
   }
 

@@ -194,7 +194,7 @@ const client = new AetherfyVectorsClient({
 
 `apiRegion` pins which **regional API endpoint** the client connects to —
 a transport/routing override, NOT where collections live (for collection
-placement see `createCollection(..., regions)`). Production agents have
+placement see `createCollection(name, config, { regions })`). Production agents have
 `AETHERFY_VECTORS_URL` injected by the control-plane — that's the URL they
 reach the regional backend through, and it takes precedence over
 `apiRegion`. For local development (no env var injected), you can pin a
@@ -226,7 +226,7 @@ and a warning is logged — production-agent protection rule.
 ### Unknown options throw
 
 Every options object the SDK takes — the client constructor and `create()`,
-`search`, `retrieve`, `scroll`, `scrollIter`, `count`, `setPayload`, the
+`createCollection`, `updateCollection`, `search`, `retrieve`, `scroll`, `scrollIter`, `count`, `setPayload`, the
 `MemoryClient` constructor, the `Namespace` / `Thread` methods,
 `retryWithBackoff`, `HttpClient` and `fanOut` — accepts exactly the keys its TypeScript type declares. Any
 other key throws a `TypeError` naming the key, the method and the accepted
@@ -552,17 +552,18 @@ One rule, the same in the Python and JS SDKs (`src/retry-policy.ts`). Up to 3
 retries, waiting about 1 s, 2 s, then 4 s (each jittered to 50-100%), within
 a call's timeout.
 
-| Failure | Retried for |
-|---|---|
-| Refused before anything ran: 503 `WORKSPACE_LOOKUP_UNAVAILABLE`, `COLLECTION_LOOKUP_UNAVAILABLE`, `PLACEMENT_UNAVAILABLE`; a connection never made (DNS, refused, connect timeout); 429 with a Retry-After | every operation |
-| Ambiguous, the request may have run: a read timeout, a reset after sending, any other 5xx | only operations whose repeat gives the same result (below) |
-| Any other 4xx | never |
+| Failure                                                                                                                                                                                                    | Retried for                                                |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Refused before anything ran: 503 `WORKSPACE_LOOKUP_UNAVAILABLE`, `COLLECTION_LOOKUP_UNAVAILABLE`, `PLACEMENT_UNAVAILABLE`; a connection never made (DNS, refused, connect timeout); 429 with a Retry-After | every operation                                            |
+| Ambiguous, the request may have run: a read timeout, a reset after sending, any other 5xx                                                                                                                  | only operations whose repeat gives the same result (below) |
+| Any other 4xx                                                                                                                                                                                              | never                                                      |
 
-| Operations | Class |
-|---|---|
-| `getCollections`, `getCollection`, `collectionExists`, `getSchema`, `analyzeSchema`, `search`, `retrieve`, `scroll`, `count`, `getUsageStats` | reads: repeatable |
-| `upsert`, `setPayload`, `overwritePayload`, `deletePayload`, `createFieldIndex`, `setSchema` | writes keyed by id: repeatable |
-| `createCollection`, `deleteCollection`, `delete` (points), `deleteSchema`, `deleteFieldIndex` | once: a repeat after a hidden success reports a false error, so an ambiguous failure is raised after one attempt |
+| Operations                                                                                                                                    | Class                                                                                                            |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `getCollections`, `getCollection`, `collectionExists`, `getSchema`, `analyzeSchema`, `search`, `retrieve`, `scroll`, `count`, `getUsageStats` | reads: repeatable                                                                                                |
+| `upsert`, `setPayload`, `overwritePayload`, `deletePayload`, `createFieldIndex`, `setSchema`                                                  | writes keyed by id: repeatable                                                                                   |
+| `updateCollection`                                                                                                                            | repeatable: a repeat after a hidden success asks for the mode the collection now has, which does nothing         |
+| `createCollection`, `deleteCollection`, `delete` (points), `deleteSchema`, `deleteFieldIndex`                                                 | once: a repeat after a hidden success reports a false error, so an ambiguous failure is raised after one attempt |
 
 `setSchema` is repeatable because it is sent without `If-Match`: a repeat writes
 the same schema again. A conditional write would get a false 412 on a repeat
@@ -805,6 +806,61 @@ await client.setSchema('products', analysis.suggestedSchema, 'warn');
 
 Schema violations throw `SchemaValidationError` with a detailed per-field errors array. If the server reports a stale schema (`412 Precondition Failed`), the SDK auto-refreshes the cache and retries. Use `refreshSchema(name)` or `clearSchemaCache(name?)` for manual control.
 
+## 🎚️ Storage modes
+
+A collection's **storage mode** is a preset for how its vectors are stored
+and searched. You pick one of three names; the service applies the settings.
+
+| Mode                  | What it does                                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `exact` (the default) | Full-precision vectors in memory, and search reads them. The layout every collection had before modes existed.                             |
+| `balanced`            | Searches a compact 8-bit copy of each vector and keeps the originals on disk to rescore the best candidates. Far less memory than `exact`. |
+| `fast`                | The same compact copy, with the originals kept in memory too. Uses **more** memory than `exact`, not less.                                 |
+
+```typescript
+import { StorageMode } from 'aetherfy-vectors';
+
+const collection = await client.createCollection(
+  'docs',
+  { size: 1536, distance: DistanceMetric.COSINE },
+  { storageMode: StorageMode.BALANCED } // or the string 'balanced'
+);
+console.log(collection.storageMode); // StorageMode.BALANCED
+
+// Change it later. The collection stays usable while its storage is rewritten
+// in the background (its status reads 'yellow' until that finishes).
+await client.updateCollection('docs', { storageMode: 'fast' });
+```
+
+- Quantized modes lose some recall. Searching with oversampling and rescoring
+  recovers most of it:
+  `client.search('docs', query, { limit: 10, searchParams: { quantization: { rescore: true, oversampling: 2.0 } } })`.
+  How much is lost depends on the embedding model: test it on your own data
+  before you rely on it.
+- A collection can change mode once every 15 minutes. A change inside that
+  window throws `ConflictError` with `code` `STORAGE_MODE_CHANGE_TOO_SOON`;
+  the seconds left are `error.details.retry_after_seconds` (`details` is the error object). It is not retried
+  for you, because waiting inside the call cannot help. Asking for the mode a
+  collection already has does nothing and does not start the wait.
+- Your plan also limits the storage-mode changes your whole account can make per
+  period (a day, week or month, UTC). Past it, `updateCollection` throws
+  `RateLimitExceededError` with `code` `STORAGE_MODE_CHANGE_LIMIT_REACHED`;
+  `error.details` carries `limit`, `period`, `resets_at` and
+  `retry_after_seconds`. It is not retried for you either.
+- Re-creating a collection that exists never changes its mode, and the returned
+  `Collection` shows the mode it has, not the one you asked for.
+- `updateCollection(name, { description })` changes the description too;
+  `description: null` clears it. Pass at least one of the two.
+- `getCollection` and `getCollections` return `storageMode` (camelCase);
+  the wire's `storage_mode` is not kept on the object.
+- `exact` and `balanced` are available on every plan; `fast` on the
+  Performance plan and above. Asking for a mode your plan does not have throws
+  `StorageModeNotInPlanError` (`code` `STORAGE_MODE_NOT_IN_PLAN`), with
+  `storageMode`, `plan`, `requiredPlan` and `allowedModes` on it. It is not
+  retried. If your plan changes to one without a mode, your collections in that
+  mode are switched to `exact`; they keep working, and the switch does not use
+  your changes per period or start the 15-minute wait.
+
 ## 🔧 Core Operations
 
 ### Collection Management
@@ -825,9 +881,17 @@ console.log(collection.name, collection.regions);
 await client.createCollection(
   'eu-only',
   { size: 768, distance: DistanceMetric.COSINE },
-  'EU-resident collection',
-  ['eu-central-1']
+  { description: 'EU-resident collection', regions: ['eu-central-1'] }
 );
+
+// Choose how the vectors are stored and searched (see Storage modes),
+// and change it later. Returns true once the change is applied.
+await client.createCollection(
+  'docs',
+  { size: 1536, distance: DistanceMetric.COSINE },
+  { storageMode: StorageMode.BALANCED }
+);
+await client.updateCollection('docs', { storageMode: 'fast' });
 
 // List all collections
 const collections = await client.getCollections();
@@ -1141,29 +1205,30 @@ client.destroy();
 
 ### AetherfyVectorsClient
 
-| Method                                                   | Description                                                                        | Returns                   |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------- |
-| `createCollection(name, config, description?, regions?)` | Create a new collection (returns the created Collection, incl. resolved `regions`) | `Promise<Collection>`     |
-| `deleteCollection(name)`                                 | Delete a collection                                                                | `Promise<boolean>`        |
-| `getCollections()`                                       | List all collections                                                               | `Promise<Collection[]>`   |
-| `collectionExists(name)`                                 | Check if collection exists                                                         | `Promise<boolean>`        |
-| `getCollection(name)`                                    | Get collection info                                                                | `Promise<Collection>`     |
-| `createFieldIndex(collection, field, schema?, options?)` | Create a payload index on one field (default `'keyword'`); resolves once built     | `Promise<boolean>`        |
-| `deleteFieldIndex(collection, field)`                    | Drop a payload index; false only when the collection does not exist                | `Promise<boolean>`        |
-| `upsert(collection, points)`                             | Insert/update vectors                                                              | `Promise<boolean>`        |
-| `delete(collection, selector)`                           | Delete vectors                                                                     | `Promise<boolean>`        |
-| `retrieve(collection, ids, options)`                     | Get vectors by ID                                                                  | `Promise<Point[]>`        |
-| `search(collection, vector, options)`                    | Similarity search                                                                  | `Promise<SearchResult[]>` |
-| `count(collection, options)`                             | Count vectors                                                                      | `Promise<number>`         |
-| `getSchema(collection)`                                  | Get payload schema                                                                 | `Promise<Schema \| null>` |
-| `setSchema(collection, schema, mode?, desc?)`            | Define/update schema                                                               | `Promise<string>` (ETag)  |
-| `deleteSchema(collection)`                               | Remove schema                                                                      | `Promise<boolean>`        |
-| `analyzeSchema(collection, sampleSize?)`                 | Infer schema from data                                                             | `Promise<AnalysisResult>` |
-| `refreshSchema(collection)`                              | Force schema cache refresh                                                         | `Promise<void>`           |
-| `clearSchemaCache(collection?)`                          | Clear schema cache                                                                 | `void`                    |
-| `getUsageStats()`                                        | Account usage                                                                      | `Promise<UsageStats>`     |
-| `testConnection()`                                       | Test API connection                                                                | `Promise<boolean>`        |
-| `destroy()`                                              | Close HTTP connections                                                             | `void`                    |
+| Method                                                   | Description                                                                    | Returns                   |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------- |
+| `createCollection(name, config, options?)`               | Create a new collection; `options`: `description`, `regions`, `storageMode`    | `Promise<Collection>`     |
+| `updateCollection(name, options)`                        | Change `description` or `storageMode`                                          | `Promise<boolean>`        |
+| `deleteCollection(name)`                                 | Delete a collection                                                            | `Promise<boolean>`        |
+| `getCollections()`                                       | List all collections                                                           | `Promise<Collection[]>`   |
+| `collectionExists(name)`                                 | Check if collection exists                                                     | `Promise<boolean>`        |
+| `getCollection(name)`                                    | Get collection info                                                            | `Promise<Collection>`     |
+| `createFieldIndex(collection, field, schema?, options?)` | Create a payload index on one field (default `'keyword'`); resolves once built | `Promise<boolean>`        |
+| `deleteFieldIndex(collection, field)`                    | Drop a payload index; false only when the collection does not exist            | `Promise<boolean>`        |
+| `upsert(collection, points)`                             | Insert/update vectors                                                          | `Promise<boolean>`        |
+| `delete(collection, selector)`                           | Delete vectors                                                                 | `Promise<boolean>`        |
+| `retrieve(collection, ids, options)`                     | Get vectors by ID                                                              | `Promise<Point[]>`        |
+| `search(collection, vector, options)`                    | Similarity search                                                              | `Promise<SearchResult[]>` |
+| `count(collection, options)`                             | Count vectors                                                                  | `Promise<number>`         |
+| `getSchema(collection)`                                  | Get payload schema                                                             | `Promise<Schema \| null>` |
+| `setSchema(collection, schema, mode?, desc?)`            | Define/update schema                                                           | `Promise<string>` (ETag)  |
+| `deleteSchema(collection)`                               | Remove schema                                                                  | `Promise<boolean>`        |
+| `analyzeSchema(collection, sampleSize?)`                 | Infer schema from data                                                         | `Promise<AnalysisResult>` |
+| `refreshSchema(collection)`                              | Force schema cache refresh                                                     | `Promise<void>`           |
+| `clearSchemaCache(collection?)`                          | Clear schema cache                                                             | `void`                    |
+| `getUsageStats()`                                        | Account usage                                                                  | `Promise<UsageStats>`     |
+| `testConnection()`                                       | Test API connection                                                            | `Promise<boolean>`        |
+| `destroy()`                                              | Close HTTP connections                                                         | `void`                    |
 
 ### Distance Metrics
 

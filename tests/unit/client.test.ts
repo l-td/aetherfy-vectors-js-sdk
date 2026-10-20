@@ -151,7 +151,7 @@ describe('AetherfyVectorsClient', () => {
           size: 128,
           distance: DistanceMetric.COSINE,
         },
-        'Test collection for embeddings'
+        { description: 'Test collection for embeddings' }
       );
 
       expect(result.name).toBe('test-collection');
@@ -225,8 +225,7 @@ describe('AetherfyVectorsClient', () => {
       const result = await client.createCollection(
         'subset-regions',
         { size: 128, distance: DistanceMetric.COSINE },
-        undefined,
-        ['us-east-1']
+        { regions: ['us-east-1'] }
       );
 
       expect(result.regions).toEqual(['us-east-1']);
@@ -253,8 +252,7 @@ describe('AetherfyVectorsClient', () => {
       const result = await client.createCollection(
         'empty-regions',
         { size: 128, distance: DistanceMetric.COSINE },
-        undefined,
-        []
+        { regions: [] }
       );
 
       expect(result.name).toBe('empty-regions');
