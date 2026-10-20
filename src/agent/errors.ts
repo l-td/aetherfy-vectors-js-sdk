@@ -352,6 +352,7 @@ export const CONNECTION_NEEDS_REAUTH = 'CONNECTION_NEEDS_REAUTH';
 export const CONNECTION_PROVIDER_UNAVAILABLE =
   'CONNECTION_PROVIDER_UNAVAILABLE';
 export const CONNECTION_REQUIRES_AGENT_KEY = 'CONNECTION_REQUIRES_AGENT_KEY';
+export const CONNECTION_NAME_AMBIGUOUS = 'CONNECTION_NAME_AMBIGUOUS';
 
 /**
  * The control plane refused a connection token.
@@ -399,6 +400,27 @@ export class ConnectionNotFound extends ConnectionTokenError {
     super(message, { status: 404, code: CONNECTION_NOT_FOUND, detail });
     this.name = 'ConnectionNotFound';
     Object.setPrototypeOf(this, ConnectionNotFound.prototype);
+  }
+}
+
+/**
+ * `409 CONNECTION_NAME_AMBIGUOUS` — two or more workspaces this agent is
+ * granted (at a level that lets it use their connections) hold a connection of
+ * this name, and the agent has neither an own nor a home workspace connection
+ * of it to take precedence. Aetherfy never picks one: `workspaces` lists them.
+ * Connect the name on the agent itself, or rename one of them, on the
+ * dashboard.
+ */
+export class ConnectionNameAmbiguous extends ConnectionTokenError {
+  /** The names of the workspaces that tie, sorted. */
+  public readonly workspaces: string[];
+
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 409, code: CONNECTION_NAME_AMBIGUOUS, detail });
+    this.name = 'ConnectionNameAmbiguous';
+    const listed = detail?.workspaces;
+    this.workspaces = Array.isArray(listed) ? listed.map(String) : [];
+    Object.setPrototypeOf(this, ConnectionNameAmbiguous.prototype);
   }
 }
 

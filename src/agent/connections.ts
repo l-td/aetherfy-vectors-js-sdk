@@ -27,10 +27,12 @@
 import {
   AgentError,
   CONNECTION_NEEDS_REAUTH,
+  CONNECTION_NAME_AMBIGUOUS,
   CONNECTION_NOT_FOUND,
   CONNECTION_PROVIDER_UNAVAILABLE,
   CONNECTION_REQUIRES_AGENT_KEY,
   ConnectionAccessDenied,
+  ConnectionNameAmbiguous,
   ConnectionNeedsReauth,
   ConnectionNotFound,
   ConnectionTokenError,
@@ -102,6 +104,8 @@ function detailOf(body: unknown): Record<string, unknown> {
  * @throws {ConnectionNotFound} `404 CONNECTION_NOT_FOUND`. An agent's key does
  *   NOT get this for an unknown or unpermitted name (see the last entry); it is
  *   only the answer for a connection removed while the request was checked.
+ * @throws {ConnectionNameAmbiguous} Two workspaces this agent is granted both hold
+ *   the name and it has no own or home connection of it; `workspaces` lists them.
  * @throws {ConnectionNeedsReauth} The provider refused the grant; reconnect it.
  * @throws {ConnectionUnavailable} The provider did not answer; retry shortly.
  * @throws {ConnectionAccessDenied} The key is not this agent's own.
@@ -181,6 +185,9 @@ export async function connection(
   // ConnectionTokenError reporting exactly what came back.
   if (status === 404 && code === CONNECTION_NOT_FOUND) {
     throw new ConnectionNotFound(message, detail);
+  }
+  if (status === 409 && code === CONNECTION_NAME_AMBIGUOUS) {
+    throw new ConnectionNameAmbiguous(message, detail);
   }
   if (status === 409 && code === CONNECTION_NEEDS_REAUTH) {
     cache.delete(name);

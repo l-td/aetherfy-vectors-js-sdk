@@ -64,6 +64,7 @@ import { SDK_VERSION } from '../version';
 
 export {
   ConnectionAccessDenied,
+  ConnectionNameAmbiguous,
   ConnectionNeedsReauth,
   ConnectionNotFound,
   ConnectionTokenError,

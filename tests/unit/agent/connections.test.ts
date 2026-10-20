@@ -16,6 +16,7 @@ import { clearConnectionCache } from '../../../src/agent/connections';
 import {
   AgentError,
   ConnectionAccessDenied,
+  ConnectionNameAmbiguous,
   ConnectionNeedsReauth,
   ConnectionNotFound,
   ConnectionTokenError,
@@ -194,6 +195,26 @@ describe('connection()', () => {
       403,
       'AUTH_AGENT_KEY_OUT_OF_SCOPE',
     ]);
+  });
+
+  it('lists the workspaces that tie on an ambiguous name', async () => {
+    nock(HOST)
+      .post(PATH)
+      .reply(409, {
+        detail: {
+          code: 'CONNECTION_NAME_AMBIGUOUS',
+          message: 'in more than one workspace',
+          workspaces: ['alpha', 'bravo'],
+        },
+      });
+    const error = await connection('google').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConnectionNameAmbiguous);
+    expect((error as ConnectionNameAmbiguous).workspaces).toEqual([
+      'alpha',
+      'bravo',
+    ]);
+    // The code, not the status, picks the type: needs_reauth is also a 409.
+    expect(error).not.toBeInstanceOf(ConnectionNeedsReauth);
   });
 
   it('reports an unrecognised pairing as it came', async () => {
