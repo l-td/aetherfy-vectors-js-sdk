@@ -2,10 +2,7 @@
  * Data models and types for Aetherfy Vectors SDK
  */
 
-import type {
-  PerformanceMode,
-  PerformanceModeInput,
-} from './performance-modes';
+import type { PerformanceMode } from './performance-modes';
 
 /**
  * Distance metrics supported by Aetherfy Vectors
@@ -138,17 +135,18 @@ export interface CreateCollectionOptions {
    */
   regions?: string[];
   /**
-   * How the collection's vectors are stored and searched. Omit for `exact`.
+   * How the collection's vectors are stored and searched: a `PerformanceMode`
+   * or its name. Omit for `exact`. Checked at runtime: anything else throws.
    */
-  performanceMode?: PerformanceModeInput;
+  performanceMode?: string;
 }
 
 /** Options of `updateCollection`; pass at least one. */
 export interface UpdateCollectionOptions {
   /** The new description (max 500 characters); `null` clears it */
   description?: string | null;
-  /** The mode to move the collection to */
-  performanceMode?: PerformanceModeInput;
+  /** The mode to move the collection to: a `PerformanceMode` or its name */
+  performanceMode?: string;
 }
 
 /**

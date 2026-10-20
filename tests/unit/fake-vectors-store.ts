@@ -27,10 +27,7 @@ import {
   ConflictError,
   ValidationError,
 } from '../../src/exceptions';
-import {
-  PerformanceMode,
-  PerformanceModeInput,
-} from '../../src/performance-modes';
+import { PerformanceMode } from '../../src/performance-modes';
 import {
   Collection,
   CreateCollectionOptions,
@@ -195,9 +192,7 @@ export class FakeVectorsClient {
 
   // vectordb's answers, in the order it gives them: an unknown mode is a 400
   // before anything is read, compact below the floor a 422.
-  private validMode(
-    value: PerformanceModeInput | undefined
-  ): PerformanceMode | undefined {
+  private validMode(value: string | undefined): PerformanceMode | undefined {
     if (value === undefined) return undefined;
     if (!(Object.values(PerformanceMode) as string[]).includes(value)) {
       throw new ValidationError(

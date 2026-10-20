@@ -24,14 +24,6 @@ export enum PerformanceMode {
   COMPACT = 'compact',
 }
 
-/** A mode as the caller may write it: the enum member or its name. */
-export type PerformanceModeInput =
-  | PerformanceMode
-  | 'exact'
-  | 'balanced'
-  | 'fast'
-  | 'compact';
-
 /** What a collection created without `performanceMode` gets. */
 export const DEFAULT_PERFORMANCE_MODE = PerformanceMode.EXACT;
 

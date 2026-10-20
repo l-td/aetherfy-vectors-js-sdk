@@ -76,11 +76,7 @@ export {
 } from './models';
 
 // Performance modes
-export {
-  PerformanceMode,
-  PerformanceModeInput,
-  DEFAULT_PERFORMANCE_MODE,
-} from './performance-modes';
+export { PerformanceMode, DEFAULT_PERFORMANCE_MODE } from './performance-modes';
 
 // Exception exports
 export {
