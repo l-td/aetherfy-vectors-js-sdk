@@ -626,16 +626,6 @@ export function createErrorFromResponse(
 
   switch (status) {
     case 400:
-      if (errorCode === 'COLLECTION_LIMIT_EXCEEDED') {
-        return stamp(
-          new QuotaExceededError(
-            message,
-            'collections',
-            nestedError?.current as number | undefined,
-            nestedError?.limit as number | undefined
-          )
-        );
-      }
       return stamp(
         new ValidationError(
           message,
@@ -645,6 +635,24 @@ export function createErrorFromResponse(
       );
 
     case 403:
+      if (errorCode === 'PLAN_LIMIT_EXCEEDED') {
+        // The plan-limit answer, the control plane's shape: `limit` NAMES the
+        // axis (`max_collections`), `current` is the count in use and the
+        // plan's number sits under the axis' own name.
+        const axis = nestedError?.limit;
+        const planValue =
+          typeof axis === 'string' ? nestedError?.[axis] : undefined;
+        return stamp(
+          new QuotaExceededError(
+            message,
+            typeof axis === 'string' ? axis.replace(/^max_/, '') : 'plan',
+            typeof nestedError?.current === 'number'
+              ? nestedError.current
+              : undefined,
+            typeof planValue === 'number' ? planValue : undefined
+          )
+        );
+      }
       if (errorCode === 'AGENT_KEY_WORKSPACE_FORBIDDEN') {
         const workspace = nestedError?.workspace;
         return stamp(
