@@ -9,6 +9,7 @@
 import nock from 'nock';
 import { AetherfyVectorsClient } from '../../src/client';
 import {
+  RateLimitExceededError,
   ServiceUnavailableError,
   createErrorFromResponse,
 } from '../../src/exceptions';
@@ -120,12 +121,39 @@ describe('waiting it', () => {
     expect(clock.waits).toEqual([2000, 5000]);
   });
 
-  it('the wait is capped', async () => {
-    await retryWithBackoff(failingThenOk(busy(3600)), {
+  it('an ask within the cap is waited exactly', async () => {
+    await retryWithBackoff(failingThenOk(busy(30)), {
       retryClass: REPEATABLE,
       maxDelay: 30_000,
     });
     expect(clock.waits).toEqual([30_000]);
+  });
+
+  it('an ask beyond the cap is not cut to it and not retried', async () => {
+    // Retrying at the cap would arrive before the time the server named.
+    const fn = failingThenOk(busy(3600));
+    const error = await retryWithBackoff(fn, {
+      retryClass: REPEATABLE,
+      maxDelay: 30_000,
+    }).catch(e => e);
+    expect(error).toBeInstanceOf(ServiceUnavailableError);
+    expect(error.retryAfter).toBe(3600);
+    expect(clock.waits).toEqual([]);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('the cap is the callers maxDelay', async () => {
+    const refused = await retryWithBackoff(failingThenOk(busy(10)), {
+      retryClass: REPEATABLE,
+      maxDelay: 5000,
+    }).catch(e => e);
+    expect(refused.retryAfter).toBe(10);
+    expect(clock.waits).toEqual([]);
+    await retryWithBackoff(failingThenOk(busy(10)), {
+      retryClass: REPEATABLE,
+      maxDelay: 10_000,
+    });
+    expect(clock.waits).toEqual([10_000]);
   });
 
   it('a wait past the deadline is not taken', async () => {
@@ -223,5 +251,111 @@ describe('through the client', () => {
     await expect(client.count('docs')).resolves.toBe(4);
     expect(clock.waits).toHaveLength(1);
     expect(clock.waits[0]).not.toBe(6000);
+  });
+});
+
+describe('a 429', () => {
+  const limited = (retryAfter?: number) =>
+    new RateLimitExceededError('slow down', retryAfter);
+
+  it('carries the header it was built with, else the body field', () => {
+    expect(
+      (
+        createErrorFromResponse(
+          { error: { code: 'RATE_LIMIT_EXCEEDED', message: 'slow' } },
+          429,
+          'Too Many Requests',
+          undefined,
+          4
+        ) as RateLimitExceededError
+      ).retryAfter
+    ).toBe(4);
+    expect(
+      (
+        createErrorFromResponse(
+          { retryAfter: 9, error: { code: 'RATE_LIMIT_EXCEEDED' } },
+          429,
+          'Too Many Requests'
+        ) as RateLimitExceededError
+      ).retryAfter
+    ).toBe(9);
+    expect(
+      (
+        createErrorFromResponse(
+          { message: 'x' },
+          429,
+          'Too Many Requests'
+        ) as RateLimitExceededError
+      ).retryAfter
+    ).toBeUndefined();
+  });
+
+  it('waits the ask, not the backoff', async () => {
+    await retryWithBackoff(failingThenOk(limited(8)), {
+      retryClass: REPEATABLE,
+    });
+    expect(clock.waits).toEqual([8000]);
+  });
+
+  it('an ask beyond the cap is not retried', async () => {
+    const error = await retryWithBackoff(failingThenOk(limited(300)), {
+      retryClass: REPEATABLE,
+      maxDelay: 30_000,
+    }).catch(e => e);
+    expect(error).toBeInstanceOf(RateLimitExceededError);
+    expect(error.retryAfter).toBe(300);
+    expect(clock.waits).toEqual([]);
+  });
+
+  it('an ask past the deadline is not taken', async () => {
+    await expect(
+      retryWithBackoff(failingThenOk(limited(10)), {
+        retryClass: REPEATABLE,
+        deadline: clock.now() + 5000,
+        now: clock.now,
+      })
+    ).rejects.toBeInstanceOf(RateLimitExceededError);
+    expect(clock.waits).toEqual([]);
+  });
+
+  it('without a retryAfter it is not retried (the rule is unchanged)', async () => {
+    const fn = failingThenOk(limited(undefined));
+    await expect(
+      retryWithBackoff(fn, { retryClass: REPEATABLE })
+    ).rejects.toBeInstanceOf(RateLimitExceededError);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('the raw error of the HTTP layer carries it too', async () => {
+    const raw = Object.assign(new Error('slow'), {
+      status: 429,
+      responseData: { error: { code: 'RATE_LIMIT_EXCEEDED' } },
+      retryAfter: 3,
+    });
+    await retryWithBackoff(failingThenOk(raw), { retryClass: REPEATABLE });
+    expect(clock.waits).toEqual([3000]);
+  });
+
+  it('through the client, the header is waited for', async () => {
+    clock.restore();
+    clock = fakeClock(30_000);
+    const client = new AetherfyVectorsClient({
+      apiKey: 'afy_test_1234567890123456',
+      workspace: 'home',
+      enableConnectionPooling: false,
+    });
+    const path = '/api/v1/workspaces/home/collections/docs/points/count';
+    nock(BASE)
+      .post(path)
+      .reply(
+        429,
+        { error: { code: 'RATE_LIMIT_EXCEEDED', message: 'slow' } },
+        { 'Retry-After': '7' }
+      );
+    nock(BASE)
+      .post(path)
+      .reply(200, { result: { count: 4 } });
+    await expect(client.count('docs')).resolves.toBe(4);
+    expect(clock.waits).toEqual([7000]);
   });
 });

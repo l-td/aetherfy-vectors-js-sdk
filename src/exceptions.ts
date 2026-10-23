@@ -214,8 +214,9 @@ export class RateLimitExceededError extends AetherfyVectorsError {
  *
  * `retryAfter` is the number of seconds the server asked to wait (its
  * `Retry-After` header), or undefined when it sent none or an unreadable one.
- * The SDK's own retry waits it, up to a cap and never past the call's
- * deadline.
+ * The SDK's own retry waits it when it is within the cap (30 s) and the
+ * call's deadline; a longer ask is never cut short: the error is thrown with
+ * `retryAfter` for the caller to decide.
  */
 export class ServiceUnavailableError extends AetherfyVectorsError {
   public readonly retryAfter?: number;
@@ -609,9 +610,9 @@ export class WorkspaceNotFoundError extends NotFoundError {
  * 429 STORAGE_LIMIT_EXCEEDED. Not a `PermissionDeniedError`: the key may do
  * this, the account is at its cap.
  *
- * - `quotaType`: what ran out (`collections`, `storage`, ...).
  * - `limit`: the limit's name as the server sends it (`max_collections`), or
- *   undefined where it names none (storage).
+ *   undefined for the storage quota, which is told apart by its `code`
+ *   (`STORAGE_LIMIT_EXCEEDED`).
  * - `allowed`: the plan's number, `false` for a feature the plan does not
  *   include, `null` where the plan has no cap (undefined only if the server
  *   sent none).
@@ -620,7 +621,6 @@ export class WorkspaceNotFoundError extends NotFoundError {
  * - `upgradeUrl`: where to raise the cap, or undefined.
  */
 export class QuotaExceededError extends AetherfyVectorsError {
-  public readonly quotaType: string;
   public readonly current?: number;
   public readonly limit?: string;
   public readonly allowed?: number | false | null;
@@ -628,7 +628,6 @@ export class QuotaExceededError extends AetherfyVectorsError {
 
   constructor(
     message: string,
-    quotaType: string,
     fields: {
       current?: number;
       limit?: string;
@@ -641,7 +640,6 @@ export class QuotaExceededError extends AetherfyVectorsError {
   ) {
     super(message, requestId, statusCode, details);
     this.name = 'QuotaExceededError';
-    this.quotaType = quotaType;
     this.current = fields.current;
     this.limit = fields.limit;
     this.allowed = fields.allowed;
@@ -652,7 +650,6 @@ export class QuotaExceededError extends AetherfyVectorsError {
   toJSON(): Record<string, unknown> {
     return {
       ...super.toJSON(),
-      quotaType: this.quotaType,
       current: this.current,
       limit: this.limit,
       allowed: this.allowed,
@@ -836,7 +833,7 @@ function countOf(value: unknown): number | undefined {
  * Utility function to create appropriate error from HTTP response.
  *
  * `retryAfter` is the seconds the response's `Retry-After` header asked to
- * wait (already read by the HTTP layer); only a 502/503/504 carries it.
+ * wait (already read by the HTTP layer); a 429 and a 502/503/504 carry it.
  */
 export function createErrorFromResponse(
   responseData: Record<string, unknown>,
@@ -935,7 +932,6 @@ export function createErrorFromResponse(
         return stamp(
           new QuotaExceededError(
             message,
-            axis !== undefined ? axis.replace(/^max_/, '') : 'plan',
             {
               current: countOf(nestedError?.current),
               limit: axis,
@@ -1100,7 +1096,6 @@ export function createErrorFromResponse(
         return stamp(
           new QuotaExceededError(
             message,
-            'storage',
             {
               current: countOf(bytes?.current_bytes),
               allowed: countOf(bytes?.limit_bytes),
@@ -1111,8 +1106,13 @@ export function createErrorFromResponse(
           )
         );
       }
+      // The time the server asked for: the header (read by the HTTP layer),
+      // else the body's own field.
       return stamp(
-        new RateLimitExceededError(message, responseData?.retryAfter as number)
+        new RateLimitExceededError(
+          message,
+          retryAfter ?? countOf(responseData?.retryAfter)
+        )
       );
 
     case 502:

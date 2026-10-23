@@ -2,7 +2,7 @@
  * Guards the README's error-object promises against the classes that throw.
  *
  * WHY THIS EXISTS: the README tells integrators what a caught error carries —
- * `error.retryAfter`, `error.quotaType`, `error.errors`. Nothing tied those
+ * `error.retryAfter`, `error.limit`, `error.errors`. Nothing tied those
  * claims to the classes. The README could document a property no constructor
  * ever assigns and every suite in this repository would stay green while the
  * reader's handler logged `undefined`. Publication makes the README the npm
@@ -175,7 +175,7 @@ const EXPECTED_CLAIMS: string[] = [
   'PermissionDeniedError.message',
   'QuotaExceededError.allowed',
   'QuotaExceededError.current',
-  'QuotaExceededError.quotaType',
+  'QuotaExceededError.limit',
   'QuotaExceededError.upgradeUrl',
   'RateLimitExceededError.retryAfter',
   'ResultTooLarge.maxBytes',

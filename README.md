@@ -1109,7 +1109,7 @@ try {
     // plan's number (false for a feature the plan lacks, null for no cap),
     // `current` the usage now (undefined for a yes/no feature).
     console.error(
-      `Quota '${error.quotaType}' exceeded: ${error.current}/${error.allowed}; see ${error.upgradeUrl}`
+      `Quota ${error.limit} exceeded: ${error.current}/${error.allowed}; see ${error.upgradeUrl}`
     );
   } else if (error instanceof ServiceUnavailableError) {
     // Already retried under the rule ("When a request is retried"). Calling

@@ -64,7 +64,6 @@ describe('the plan limit on a collection create', () => {
     expect(error).toBeInstanceOf(QuotaExceededError);
     expect(error.code).toBe('PLAN_LIMIT_EXCEEDED');
     expect(error.statusCode).toBe(403);
-    expect(error.quotaType).toBe('collections');
     expect(error.limit).toBe('max_collections');
     expect(error.allowed).toBe(3);
     expect(error.current).toBe(3);
@@ -84,7 +83,6 @@ describe('the plan limit on a collection create', () => {
       .createNamespace('kb')
       .catch(e => e);
     expect(error).toBeInstanceOf(QuotaExceededError);
-    expect(error.quotaType).toBe('collections');
     expect(error.limit).toBe('max_collections');
     expect(error.allowed).toBe(3);
     expect(error.current).toBe(3);
@@ -116,7 +114,6 @@ describe('every kind of allowed, and a missing current', () => {
       'Forbidden'
     ) as QuotaExceededError;
     expect(error).toBeInstanceOf(QuotaExceededError);
-    expect(error.quotaType).toBe('webhooks');
     expect(error.limit).toBe('webhooks');
     expect(error.allowed).toBe(false);
     expect(error.current).toBeUndefined();
@@ -128,7 +125,6 @@ describe('every kind of allowed, and a missing current', () => {
       403,
       'Forbidden'
     ) as QuotaExceededError;
-    expect(error.quotaType).toBe('workspaces');
     expect(error.limit).toBe('max_workspaces');
     expect(error.allowed).toBe(1);
   });
@@ -175,7 +171,6 @@ describe('the storage quota', () => {
       'Too Many Requests'
     ) as QuotaExceededError;
     expect(error).toBeInstanceOf(QuotaExceededError);
-    expect(error.quotaType).toBe('storage');
     expect(error.current).toBe(536870912);
     expect(error.allowed).toBe(536870912);
     expect(error.limit).toBeUndefined();
@@ -187,5 +182,28 @@ describe('a plan limit is not a permission error', () => {
     const error = createErrorFromResponse(PLAN_LIMIT, 403, 'Forbidden');
     expect(error).toBeInstanceOf(QuotaExceededError);
     expect(error).not.toBeInstanceOf(PermissionDeniedError);
+  });
+});
+
+describe('one name for the limit', () => {
+  it('has no quotaType, and the storage quota has no limit', () => {
+    const plan = createErrorFromResponse(PLAN_LIMIT, 403, 'Forbidden');
+    expect((plan as QuotaExceededError).limit).toBe('max_collections');
+    expect('quotaType' in plan).toBe(false);
+
+    const storage = createErrorFromResponse(
+      {
+        error: {
+          code: 'STORAGE_LIMIT_EXCEEDED',
+          message: 'full',
+          details: { current_bytes: 5, limit_bytes: 5 },
+        },
+      },
+      429,
+      'Too Many Requests'
+    );
+    expect(storage.code).toBe('STORAGE_LIMIT_EXCEEDED');
+    expect((storage as QuotaExceededError).limit).toBeUndefined();
+    expect('quotaType' in storage).toBe(false);
   });
 });

@@ -13,14 +13,15 @@ because they are true.
   allowed, current }`: `limit` names the limit (`max_collections`), `allowed` is
   the plan's number (`false` for a feature the plan lacks, `null` for no cap),
   `current` the usage now (absent for a yes/no feature) and `upgrade_url` where
-  to raise the cap. `QuotaExceededError` carries `quotaType` (the limit without
-  its `max_` prefix), `limit`, `allowed`, `current` and `upgradeUrl`.
+  to raise the cap. `QuotaExceededError` carries `limit`, `allowed`, `current`
+  and `upgradeUrl`. There is no separate `quotaType`: `limit` is the one name of
+  what ran out, and the storage quota (`429 STORAGE_LIMIT_EXCEEDED`) is told
+  apart by its `code`, with `limit` undefined.
   `MemoryClient.createNamespace` throws it when the collection it creates hits
   the limit. **The constructor and `limit` changed**: `limit` is the limit's
   name (a string), no longer the plan's number (read `allowed`), and the
   constructor takes the numbers as an object:
-  `new QuotaExceededError(message, quotaType, { current, limit, allowed,
-  upgradeUrl })`.
+  `new QuotaExceededError(message, { current, limit, allowed, upgradeUrl })`.
 - **BREAKING: the `400 COLLECTION_LIMIT_EXCEEDED` mapping is removed.** The
   server no longer sends that code; a 400 with it is a `ValidationError` like
   any other 400.
@@ -61,11 +62,17 @@ because they are true.
   upsert's 400 goes through the same mapping as every other call, so it arrives
   as one of these too.
 - `Filter.minShould`.
-- **A 503's `Retry-After` is honoured.** `ServiceUnavailableError.retryAfter`
-  carries the seconds the server asked for (a number or an HTTP date;
-  undefined when absent or unreadable), and a retried request waits that long
-  instead of its own backoff: at most 30 seconds, and never past the call's own
-  deadline. An absent or unreadable header keeps the exponential backoff.
+- **`Retry-After` is honoured, on a 503 and on a 429.**
+  `ServiceUnavailableError.retryAfter` and `RateLimitExceededError.retryAfter`
+  carry the seconds the server asked for (a number or an HTTP date; for a 429
+  the body's `retryAfter` is the fallback; undefined when absent or
+  unreadable). A retried request waits exactly that long instead of its own
+  backoff, and a 429 that carries one is waited for as well (it used to wait
+  the jittered backoff and could come back before the server was ready). An ask
+  longer than the retry cap (30 seconds, or the `maxDelay` the caller set) is
+  not cut to the cap: nothing is retried and the error is thrown with its
+  `retryAfter`, for the caller to decide. The call's own deadline still
+  applies. An absent or unreadable header keeps the exponential backoff.
 
 ### Fixed
 

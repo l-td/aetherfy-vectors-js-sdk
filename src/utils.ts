@@ -472,12 +472,16 @@ export async function retryWithBackoff<T>(
         throw error;
       }
 
-      // A wait the server asked for (Retry-After on a 5xx) is waited as
-      // asked: not jittered, capped at maxDelay. Otherwise the backoff.
+      // A wait the server asked for (Retry-After on a 5xx or a 429) is
+      // waited as asked, not jittered. Otherwise the backoff.
       const asked = serverAskedWaitMs(error);
       let wait: number;
       if (asked !== undefined) {
-        wait = Math.min(asked, maxDelay);
+        // A retry before the time the server named is refused again, so an
+        // ask beyond the cap is not cut to it: nothing is retried and the
+        // error, carrying retryAfter, goes to the caller.
+        if (asked > maxDelay) throw error;
+        wait = asked;
       } else {
         const delay = Math.min(
           baseDelay * Math.pow(backoffFactor, attempt),

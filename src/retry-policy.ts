@@ -26,10 +26,12 @@
  *
  * Attempts and backoff: 3 retries after the first attempt, waiting about 1,
  * 2, then 4 s, each jittered to 50-100% (utils.retryWithBackoff). A 502/503/504
- * that carries a Retry-After header is waited for that many seconds instead
- * (`serverAskedWaitMs`): not jittered, capped at the backoff's maximum, and
- * never past the call's own deadline. A missing or unreadable header keeps
- * the backoff.
+ * or a 429 that carries a Retry-After is waited for exactly that many seconds
+ * instead (`serverAskedWaitMs`), not jittered. A retry before that time would
+ * be refused again, so an ask beyond the backoff's maximum (30 s, or the
+ * caller's `maxDelay`) is not cut to it: nothing is retried and the error is
+ * thrown with its `retryAfter`. The call's own deadline applies as ever. A
+ * missing or unreadable header keeps the backoff.
  *
  * | Operation          | Class      | Why                                          |
  * |--------------------|------------|----------------------------------------------|
@@ -145,17 +147,26 @@ export function parseRetryAfter(
 }
 
 /**
- * How long the server asked a 5xx retry to wait, in ms, or undefined when it
- * asked nothing. Reads both shapes, like `refusedBeforeAnything`: HttpClient's
- * raw error (`status`, `retryAfter`) and the typed `ServiceUnavailableError`.
+ * How long the server asked a retry to wait, in ms, or undefined when it asked
+ * nothing: a 502/503/504 or a 429. Reads both shapes, like
+ * `refusedBeforeAnything`: HttpClient's raw error (`status`, `retryAfter`) and
+ * the typed `ServiceUnavailableError` / `RateLimitExceededError`.
  */
 export function serverAskedWaitMs(error: unknown): number | undefined {
   let seconds: unknown;
-  if (error instanceof ServiceUnavailableError) {
+  if (
+    error instanceof ServiceUnavailableError ||
+    error instanceof RateLimitExceededError
+  ) {
     seconds = error.retryAfter;
   } else if (!(error instanceof AetherfyVectorsError)) {
     const e = shapeOf(error);
-    if (e.status === 502 || e.status === 503 || e.status === 504) {
+    if (
+      e.status === 429 ||
+      e.status === 502 ||
+      e.status === 503 ||
+      e.status === 504
+    ) {
       seconds = e.retryAfter;
     }
   }
@@ -220,8 +231,8 @@ export function refusedBeforeAnything(error: unknown): boolean {
     return REFUSED_BEFORE_ANYTHING_CODES.has(serverCode(e) ?? '');
   }
   if (e.status === 429) {
-    const retryAfter = e.responseData?.retryAfter;
-    return retryAfter !== undefined && retryAfter !== null;
+    // HttpClient reads the header, else the body's field, into `retryAfter`.
+    return typeof e.retryAfter === 'number';
   }
   // HttpClient saw the socket never connect.
   return isTransport(e) && e.requestSent === false;

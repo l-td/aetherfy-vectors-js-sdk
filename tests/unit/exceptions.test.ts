@@ -237,7 +237,7 @@ describe('Custom Exceptions', () => {
     });
 
     it('should create QuotaExceededError', () => {
-      const error = new QuotaExceededError('Quota exceeded', 'points', {
+      const error = new QuotaExceededError('Quota exceeded', {
         current: 1000,
         limit: 'max_points',
         allowed: 900,
@@ -245,7 +245,6 @@ describe('Custom Exceptions', () => {
       });
       expect(error.message).toBe('Quota exceeded');
       expect(error.name).toBe('QuotaExceededError');
-      expect(error.quotaType).toBe('points');
       expect(error.current).toBe(1000);
       expect(error.limit).toBe('max_points');
       expect(error.allowed).toBe(900);
@@ -255,7 +254,7 @@ describe('Custom Exceptions', () => {
     });
 
     it('should serialize QuotaExceededError to JSON', () => {
-      const error = new QuotaExceededError('Quota exceeded', 'points', {
+      const error = new QuotaExceededError('Quota exceeded', {
         current: 1000,
         limit: 'max_points',
         allowed: false,
@@ -267,7 +266,6 @@ describe('Custom Exceptions', () => {
         requestId: undefined,
         statusCode: undefined,
         details: undefined,
-        quotaType: 'points',
         current: 1000,
         limit: 'max_points',
         allowed: false,
@@ -377,7 +375,6 @@ describe('Custom Exceptions', () => {
       expect(error.message).toBe(
         'Storage limit exceeded. Your free plan allows 512 MB.'
       );
-      expect((error as QuotaExceededError).quotaType).toBe('storage');
       expect((error as QuotaExceededError).current).toBe(536870912);
       expect((error as QuotaExceededError).allowed).toBe(536870912);
       expect((error as QuotaExceededError).limit).toBeUndefined();
@@ -462,7 +459,6 @@ describe('Custom Exceptions', () => {
       expect(error.message).toBe(
         'Collection limit reached. Your free plan allows 3 collections.'
       );
-      expect((error as QuotaExceededError).quotaType).toBe('collections');
       expect((error as QuotaExceededError).current).toBe(3);
       expect((error as QuotaExceededError).limit).toBe('max_collections');
       expect((error as QuotaExceededError).allowed).toBe(3);
@@ -597,7 +593,7 @@ describe('Custom Exceptions', () => {
         new NetworkError(),
         new ConflictError(),
         new CollectionInUseError('test', ['agent-a']),
-        new QuotaExceededError('Points', 'points', { current: 1000 }),
+        new QuotaExceededError('Points', { current: 1000 }),
       ];
 
       errors.forEach(error => {
