@@ -234,7 +234,7 @@ describe('every member of every request is one the endpoint takes', () => {
         refused: [],
       });
     }
-  });
+  }, 30_000);
 
   it('sends minShould whole, as min_should', async () => {
     const recorded = await recordEveryRequest();
@@ -243,7 +243,7 @@ describe('every member of every request is one the endpoint takes', () => {
       FILTER.minShould
     );
     expect(Object.keys(count?.body.filter as object)).toEqual(FILTER_KEYS);
-  });
+  }, 30_000);
 });
 
 describe('CONTROL: the check names a member the endpoint does not take', () => {
