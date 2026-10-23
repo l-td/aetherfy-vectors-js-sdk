@@ -484,3 +484,29 @@ describe('the run id in the path', () => {
     );
   });
 });
+
+describe('Retry-After on a refusal', () => {
+  const refused = (status: number, headers: Record<string, string>) =>
+    new Response(JSON.stringify({ detail: { message: 'slow down' } }), {
+      status,
+      headers: { 'Content-Type': 'application/json', ...headers },
+    });
+
+  it.each([429, 503])(
+    'a %i read carries the time the control plane asked for',
+    async status => {
+      fetchMock.mockResolvedValue(refused(status, { 'Retry-After': '9' }));
+      const error = await result(RUN_ID).catch(e => e);
+      expect(error).toBeInstanceOf(RunReadError);
+      expect(error.status).toBe(status);
+      expect(error.retryAfter).toBe(9);
+      expect(fetchMock).toHaveBeenCalledTimes(1); // never retried by the helper
+    }
+  );
+
+  it('a read refusal without the header has no time', async () => {
+    fetchMock.mockResolvedValue(refused(503, {}));
+    const error = await result(RUN_ID).catch(e => e);
+    expect(error.retryAfter).toBeUndefined();
+  });
+});

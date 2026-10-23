@@ -349,6 +349,7 @@ describe('spawn()', () => {
     // body is lost, the status is not.
     fetchMock.mockResolvedValue({
       status: 202,
+      headers: new Headers(),
       text: async () => {
         throw new TypeError('terminated');
       },
@@ -381,4 +382,57 @@ describe('spawn()', () => {
       await expect(spawn('nightly-rollup')).rejects.toThrow(variable);
     }
   );
+});
+
+describe('Retry-After on a refusal', () => {
+  const refused = (status: number, headers: Record<string, string>) =>
+    new Response(JSON.stringify({ detail: { message: 'busy' } }), {
+      status,
+      headers: { 'Content-Type': 'application/json', ...headers },
+    });
+
+  it('a 429 carries the time the control plane asked for', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: {
+            code: 'AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED',
+            message: 'full',
+            limit: 'max_in_flight_runs',
+            in_flight_count: 5,
+            max_in_flight_runs: 5,
+          },
+        }),
+        { status: 429, headers: { 'Retry-After': '12' } }
+      )
+    );
+    const error = await spawn('worker').catch(e => e);
+    expect(error).toBeInstanceOf(TooManyRunsInFlight);
+    expect(error.retryAfter).toBe(12);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // never retried by the helper
+  });
+
+  it('a 503 carries the time too', async () => {
+    fetchMock.mockResolvedValue(refused(503, { 'Retry-After': '5' }));
+    const error = await spawn('worker').catch(e => e);
+    expect(error).toBeInstanceOf(SpawnError);
+    expect(error.status).toBe(503);
+    expect(error.retryAfter).toBe(5);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['', 'soon', '-3', 'NaN'])(
+    'an unreadable header (%p) is no time',
+    async value => {
+      fetchMock.mockResolvedValue(refused(503, { 'Retry-After': value }));
+      const error = await spawn('worker').catch(e => e);
+      expect(error.retryAfter).toBeUndefined();
+    }
+  );
+
+  it('a refusal without the header has no time', async () => {
+    fetchMock.mockResolvedValue(refused(503, {}));
+    const error = await spawn('worker').catch(e => e);
+    expect(error.retryAfter).toBeUndefined();
+  });
 });

@@ -438,7 +438,7 @@ export async function spawn(
   );
   const url = spawnUrl();
 
-  const { status, body } = await requestJson('POST', url, {
+  const { status, body, retryAfter } = await requestJson('POST', url, {
     apiKey,
     userAgent: userAgent(),
     body: { child_agent_id: child, payload: spawnPayload ?? {} },
@@ -494,9 +494,10 @@ export async function spawn(
       limit: stringOrNull(detail, 'limit'),
       maxInFlightRuns: numberOf(detail, 'max_in_flight_runs'),
       detail,
+      retryAfter,
     });
   }
-  throw new SpawnError(message, { status, code, detail });
+  throw new SpawnError(message, { status, code, detail, retryAfter });
 }
 
 /**
@@ -696,7 +697,7 @@ async function readRun(
   options: { timeoutMs?: number; retryConnectionErrors?: boolean } = {}
 ): Promise<Run> {
   const apiKey = requireEnv('AETHERFY_API_KEY', 'the key a run is read with');
-  const { status, body } = await requestJson('GET', url, {
+  const { status, body, retryAfter } = await requestJson('GET', url, {
     apiKey,
     userAgent: userAgent(),
     timeoutMs: options.timeoutMs,
@@ -748,7 +749,7 @@ async function readRun(
   if (status === 422 && code === DEPLOYMENT_WAIT_TIMEOUT_INVALID) {
     throw new WaitTimeoutInvalid(message, detail);
   }
-  throw new RunReadError(message, { status, code, detail });
+  throw new RunReadError(message, { status, code, detail, retryAfter });
 }
 
 /**

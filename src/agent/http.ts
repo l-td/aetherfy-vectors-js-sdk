@@ -13,6 +13,7 @@
  * where it stops being the customer's problem.
  */
 
+import { parseRetryAfter } from '../retry-policy';
 import { AgentTransportError } from './errors';
 
 /** Version-stamped so a platform-side log can tell which helper release ran. */
@@ -24,6 +25,13 @@ export interface JsonResponse {
   status: number;
   /** Parsed JSON, or null when the body was empty or not JSON at all. */
   body: unknown;
+  /**
+   * The seconds the response's `Retry-After` header asked to wait (a number or
+   * an HTTP date), or undefined when it sent none or an unreadable one. Nothing
+   * here waits it: a request repeated before that time is refused again, and
+   * deciding whether to repeat is the caller's.
+   */
+  retryAfter?: number;
 }
 
 export interface RequestOptions {
@@ -103,7 +111,11 @@ export async function requestJson(
       lastError = error;
       continue;
     }
-    return { status: response.status, body: await readJson(response) };
+    return {
+      status: response.status,
+      body: await readJson(response),
+      retryAfter: parseRetryAfter(response.headers.get('retry-after')),
+    };
   }
 
   const reason =

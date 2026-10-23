@@ -98,6 +98,12 @@ export class SpawnError extends AgentError {
   public readonly status?: number;
   public readonly code?: string;
   public readonly detail: Record<string, unknown>;
+  /**
+   * The seconds the control plane's `Retry-After` header asked to wait, or
+   * undefined. A spawn repeated before that time is refused again; this helper
+   * never retries a spawn itself.
+   */
+  public readonly retryAfter?: number;
 
   constructor(
     message: string,
@@ -105,6 +111,7 @@ export class SpawnError extends AgentError {
       status?: number;
       code?: string;
       detail?: Record<string, unknown>;
+      retryAfter?: number;
     } = {}
   ) {
     super(message);
@@ -112,6 +119,7 @@ export class SpawnError extends AgentError {
     this.status = options.status;
     this.code = options.code;
     this.detail = options.detail ?? {};
+    this.retryAfter = options.retryAfter;
     Object.setPrototypeOf(this, SpawnError.prototype);
   }
 }
@@ -151,6 +159,9 @@ export class PayloadTooLarge extends SpawnError {
  * cap is full.
  *
  * Retryable, unlike the other two: wait for runs to finish and spawn again.
+ * `retryAfter` is the seconds the control plane's `Retry-After` header asked to
+ * wait, or undefined; a spawn repeated before that time is refused again. This
+ * helper never retries a spawn itself.
  *
  * THE CAP IS THE ACCOUNT'S, NOT THE AGENT'S, and it is set by the plan.
  * `limit` names WHICH plan limit was hit — a stable string the platform
@@ -175,12 +186,14 @@ export class TooManyRunsInFlight extends SpawnError {
       limit?: string | null;
       maxInFlightRuns?: number | null;
       detail?: Record<string, unknown>;
+      retryAfter?: number;
     } = {}
   ) {
     super(message, {
       status: 429,
       code: AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED,
       detail: options.detail,
+      retryAfter: options.retryAfter,
     });
     this.name = 'TooManyRunsInFlight';
     // Absent and explicitly-null both surface as null, so the two languages
@@ -267,6 +280,11 @@ export class RunReadError extends AgentError {
   public readonly status?: number;
   public readonly code?: string;
   public readonly detail: Record<string, unknown>;
+  /**
+   * The seconds the control plane's `Retry-After` header asked to wait, or
+   * undefined. This helper never retries a read itself.
+   */
+  public readonly retryAfter?: number;
 
   constructor(
     message: string,
@@ -274,6 +292,7 @@ export class RunReadError extends AgentError {
       status?: number;
       code?: string;
       detail?: Record<string, unknown>;
+      retryAfter?: number;
     } = {}
   ) {
     super(message);
@@ -281,6 +300,7 @@ export class RunReadError extends AgentError {
     this.status = options.status;
     this.code = options.code;
     this.detail = options.detail ?? {};
+    this.retryAfter = options.retryAfter;
     Object.setPrototypeOf(this, RunReadError.prototype);
   }
 }
