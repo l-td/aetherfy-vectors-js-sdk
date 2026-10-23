@@ -1,31 +1,43 @@
 /**
- * The plan limit's answer (403 PLAN_LIMIT_EXCEEDED, the control plane's
- * shape) reaches the typed QuotaExceededError through the real client and the
- * real HTTP stack, including the memory SDK's createNamespace.
+ * A plan limit (403 PLAN_LIMIT_EXCEEDED) reaches the typed QuotaExceededError
+ * through the real client and the real HTTP stack, including the memory SDK's
+ * createNamespace.
  *
- * The body is the one vectordb sends (routes/proxy.js, the collection limit):
- * `limit` names the axis, `current` is the count in use and the plan's number
- * sits under the axis' own name.
+ * The body is `{ code, message, upgrade_url, limit, allowed, current }` inside
+ * `error`: `limit` names the limit, `allowed` is the plan's number (or `false`
+ * for a feature the plan lacks, or `null` for no cap) and `current` is the
+ * usage now (absent for a yes/no feature).
  */
 import nock from 'nock';
 import { AetherfyVectorsClient } from '../../src/client';
-import { QuotaExceededError } from '../../src/exceptions';
+import {
+  PermissionDeniedError,
+  QuotaExceededError,
+  createErrorFromResponse,
+} from '../../src/exceptions';
 import { MemoryClient } from '../../src/memory';
 import { DistanceMetric } from '../../src/models';
 
 const BASE = 'https://vectors.aetherfy.com';
 const WS_PATH = '/api/v1/workspaces/home';
+const UPGRADE_URL = 'https://app.aetherfy.com/dashboard/settings/billing';
 
-const PLAN_LIMIT = {
-  error: {
-    code: 'PLAN_LIMIT_EXCEEDED',
-    message: 'Collection limit reached. Your free plan allows 3 collections.',
-    limit: 'max_collections',
-    current: 3,
-    max_collections: 3,
-    upgrade_url: '/billing/upgrade',
-  },
-};
+function planLimit(
+  fields: Record<string, unknown> = {},
+  limit: string = 'max_collections'
+) {
+  return {
+    error: {
+      code: 'PLAN_LIMIT_EXCEEDED',
+      message: 'Collection limit reached. Your free plan allows 3 collections.',
+      upgrade_url: UPGRADE_URL,
+      limit,
+      ...fields,
+    },
+  };
+}
+
+const PLAN_LIMIT = planLimit({ allowed: 3, current: 3 });
 
 function client(): AetherfyVectorsClient {
   return new AetherfyVectorsClient({
@@ -35,24 +47,29 @@ function client(): AetherfyVectorsClient {
   });
 }
 
+const create = (c: AetherfyVectorsClient) =>
+  c.createCollection('docs', { size: 3, distance: DistanceMetric.COSINE });
+
 afterEach(() => {
   nock.cleanAll();
 });
 
 describe('the plan limit on a collection create', () => {
-  it('createCollection throws QuotaExceededError with the axis, the count and the plan number', async () => {
+  it('createCollection throws QuotaExceededError with the limit, the plan number and the count', async () => {
     const scope = nock(BASE)
       .post(`${WS_PATH}/collections`)
       .reply(403, PLAN_LIMIT);
-    const error = await client()
-      .createCollection('docs', { size: 3, distance: DistanceMetric.COSINE })
-      .catch(e => e);
+    const error = await create(client()).catch(e => e);
     expect(scope.isDone()).toBe(true);
     expect(error).toBeInstanceOf(QuotaExceededError);
     expect(error.code).toBe('PLAN_LIMIT_EXCEEDED');
+    expect(error.statusCode).toBe(403);
     expect(error.quotaType).toBe('collections');
+    expect(error.limit).toBe('max_collections');
+    expect(error.allowed).toBe(3);
     expect(error.current).toBe(3);
-    expect(error.limit).toBe(3);
+    expect(error.upgradeUrl).toBe(UPGRADE_URL);
+    expect(error.details.limit).toBe('max_collections');
     expect(error.message).toBe(PLAN_LIMIT.error.message);
   });
 
@@ -68,41 +85,107 @@ describe('the plan limit on a collection create', () => {
       .catch(e => e);
     expect(error).toBeInstanceOf(QuotaExceededError);
     expect(error.quotaType).toBe('collections');
+    expect(error.limit).toBe('max_collections');
+    expect(error.allowed).toBe(3);
     expect(error.current).toBe(3);
-    expect(error.limit).toBe(3);
+  });
+});
+
+describe('every kind of allowed, and a missing current', () => {
+  it.each([
+    ['a number', 3, 3],
+    ['zero', 0, 0],
+    ['a feature the plan lacks', false, false],
+    ['no cap', null, null],
+  ])('allowed is %s', (_name, sent, expected) => {
+    const error = createErrorFromResponse(
+      planLimit({ allowed: sent, current: 2 }),
+      403,
+      'Forbidden'
+    ) as QuotaExceededError;
+    expect(error).toBeInstanceOf(QuotaExceededError);
+    expect(error.allowed).toBe(expected);
   });
 
-  it('another plan axis maps the same way', async () => {
-    nock(BASE)
-      .post(`${WS_PATH}/collections`)
-      .reply(403, {
-        error: {
-          code: 'PLAN_LIMIT_EXCEEDED',
-          message: 'limit',
-          limit: 'max_workspaces',
-          current: 1,
-          max_workspaces: 1,
-        },
-      });
-    const error = await client()
-      .createCollection('docs', { size: 3, distance: DistanceMetric.COSINE })
-      .catch(e => e);
+  it('a yes/no feature has no current', () => {
+    const body = planLimit({ allowed: false }, 'webhooks');
+    expect('current' in body.error).toBe(false);
+    const error = createErrorFromResponse(
+      body,
+      403,
+      'Forbidden'
+    ) as QuotaExceededError;
     expect(error).toBeInstanceOf(QuotaExceededError);
-    expect(error.quotaType).toBe('workspaces');
-    expect(error.limit).toBe(1);
-  });
-
-  it('a body without the numbers still maps, with them undefined', async () => {
-    nock(BASE)
-      .post(`${WS_PATH}/collections`)
-      .reply(403, {
-        error: { code: 'PLAN_LIMIT_EXCEEDED', message: 'limit' },
-      });
-    const error = await client()
-      .createCollection('docs', { size: 3, distance: DistanceMetric.COSINE })
-      .catch(e => e);
-    expect(error).toBeInstanceOf(QuotaExceededError);
+    expect(error.quotaType).toBe('webhooks');
+    expect(error.limit).toBe('webhooks');
+    expect(error.allowed).toBe(false);
     expect(error.current).toBeUndefined();
+  });
+
+  it('another limit maps the same way', () => {
+    const error = createErrorFromResponse(
+      planLimit({ allowed: 1, current: 1 }, 'max_workspaces'),
+      403,
+      'Forbidden'
+    ) as QuotaExceededError;
+    expect(error.quotaType).toBe('workspaces');
+    expect(error.limit).toBe('max_workspaces');
+    expect(error.allowed).toBe(1);
+  });
+
+  it('a body without the fields still maps, with them undefined', () => {
+    const error = createErrorFromResponse(
+      { error: { code: 'PLAN_LIMIT_EXCEEDED', message: 'limit' } },
+      403,
+      'Forbidden'
+    ) as QuotaExceededError;
+    expect(error).toBeInstanceOf(QuotaExceededError);
     expect(error.limit).toBeUndefined();
+    expect(error.allowed).toBeUndefined();
+    expect(error.current).toBeUndefined();
+    expect(error.upgradeUrl).toBeUndefined();
+  });
+
+  it.each(['3', true, [3], { n: 3 }])(
+    'an allowed or current of another type (%p) is not carried',
+    bad => {
+      const error = createErrorFromResponse(
+        planLimit({ allowed: bad, current: bad }),
+        403,
+        'Forbidden'
+      ) as QuotaExceededError;
+      expect(error).toBeInstanceOf(QuotaExceededError);
+      expect(error.allowed).toBeUndefined();
+      expect(error.current).toBeUndefined();
+    }
+  );
+});
+
+describe('the storage quota', () => {
+  it('reads the numbers from error.details', () => {
+    const error = createErrorFromResponse(
+      {
+        error: {
+          code: 'STORAGE_LIMIT_EXCEEDED',
+          message: 'Storage limit exceeded.',
+          details: { current_bytes: 536870912, limit_bytes: 536870912 },
+        },
+      },
+      429,
+      'Too Many Requests'
+    ) as QuotaExceededError;
+    expect(error).toBeInstanceOf(QuotaExceededError);
+    expect(error.quotaType).toBe('storage');
+    expect(error.current).toBe(536870912);
+    expect(error.allowed).toBe(536870912);
+    expect(error.limit).toBeUndefined();
+  });
+});
+
+describe('a plan limit is not a permission error', () => {
+  it('the key may do this; the account is at its cap', () => {
+    const error = createErrorFromResponse(PLAN_LIMIT, 403, 'Forbidden');
+    expect(error).toBeInstanceOf(QuotaExceededError);
+    expect(error).not.toBeInstanceOf(PermissionDeniedError);
   });
 });

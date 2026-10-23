@@ -1,7 +1,13 @@
 import { Point, DistanceMetric } from './models';
 import { AetherfyVectorsError, ValidationError } from './exceptions';
 import { assertAllowedOptionKeys, optionKeys } from './utils/options';
-import { ONCE, REPEATABLE, RetryClass, shouldRetryClass } from './retry-policy';
+import {
+  ONCE,
+  REPEATABLE,
+  RetryClass,
+  serverAskedWaitMs,
+  shouldRetryClass,
+} from './retry-policy';
 
 /**
  * Environment detection utilities
@@ -466,18 +472,26 @@ export async function retryWithBackoff<T>(
         throw error;
       }
 
-      const delay = Math.min(
-        baseDelay * Math.pow(backoffFactor, attempt),
-        maxDelay
-      );
-
-      // Add jitter to prevent thundering herd
-      const jitteredDelay = delay * (0.5 + Math.random() * 0.5);
-      if (deadline !== undefined && now() + jitteredDelay >= deadline) {
+      // A wait the server asked for (Retry-After on a 5xx) is waited as
+      // asked: not jittered, capped at maxDelay. Otherwise the backoff.
+      const asked = serverAskedWaitMs(error);
+      let wait: number;
+      if (asked !== undefined) {
+        wait = Math.min(asked, maxDelay);
+      } else {
+        const delay = Math.min(
+          baseDelay * Math.pow(backoffFactor, attempt),
+          maxDelay
+        );
+        // Add jitter to prevent thundering herd
+        wait = delay * (0.5 + Math.random() * 0.5);
+      }
+      // Never a wait that ends at or past the call's own deadline.
+      if (deadline !== undefined && now() + wait >= deadline) {
         throw error;
       }
 
-      await sleep(jitteredDelay);
+      await sleep(wait);
     }
   }
 

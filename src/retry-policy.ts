@@ -25,7 +25,11 @@
  * 3. Everything else (4xx) is never retried.
  *
  * Attempts and backoff: 3 retries after the first attempt, waiting about 1,
- * 2, then 4 s, each jittered to 50-100% (utils.retryWithBackoff).
+ * 2, then 4 s, each jittered to 50-100% (utils.retryWithBackoff). A 502/503/504
+ * that carries a Retry-After header is waited for that many seconds instead
+ * (`serverAskedWaitMs`): not jittered, capped at the backoff's maximum, and
+ * never past the call's own deadline. A missing or unreadable header keeps
+ * the backoff.
  *
  * | Operation          | Class      | Why                                          |
  * |--------------------|------------|----------------------------------------------|
@@ -118,6 +122,48 @@ export const REPEATABLE_DESPITE_ITS_NAME: Readonly<
     're-creating an existing index with the same schema returns at once',
 };
 
+/**
+ * The seconds a `Retry-After` header value asks to wait, or undefined when it
+ * is unreadable. The header is a number of seconds or an HTTP date; anything
+ * else (absent, empty, negative, not a string) is undefined and the caller
+ * falls back to its own backoff. `now` (epoch ms) is for tests.
+ */
+export function parseRetryAfter(
+  value: unknown,
+  now: number = Date.now()
+): number | undefined {
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim();
+  if (text === '') return undefined;
+  if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(text)) {
+    const seconds = Number(text);
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+  }
+  const when = Date.parse(text);
+  if (Number.isNaN(when)) return undefined;
+  return Math.max((when - now) / 1000, 0);
+}
+
+/**
+ * How long the server asked a 5xx retry to wait, in ms, or undefined when it
+ * asked nothing. Reads both shapes, like `refusedBeforeAnything`: HttpClient's
+ * raw error (`status`, `retryAfter`) and the typed `ServiceUnavailableError`.
+ */
+export function serverAskedWaitMs(error: unknown): number | undefined {
+  let seconds: unknown;
+  if (error instanceof ServiceUnavailableError) {
+    seconds = error.retryAfter;
+  } else if (!(error instanceof AetherfyVectorsError)) {
+    const e = shapeOf(error);
+    if (e.status === 502 || e.status === 503 || e.status === 504) {
+      seconds = e.retryAfter;
+    }
+  }
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0
+    ? seconds * 1000
+    : undefined;
+}
+
 /** 503s the server answers at its edge, before running anything. */
 export const REFUSED_BEFORE_ANYTHING_CODES: ReadonlySet<string> = new Set([
   'WORKSPACE_LOOKUP_UNAVAILABLE',
@@ -127,6 +173,7 @@ export const REFUSED_BEFORE_ANYTHING_CODES: ReadonlySet<string> = new Set([
 
 interface FailureShape {
   status?: number;
+  retryAfter?: unknown;
   responseData?: Record<string, unknown>;
   message?: unknown;
   requestSent?: unknown;

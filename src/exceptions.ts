@@ -55,13 +55,136 @@ export class AetherfyVectorsError extends Error {
 }
 
 /**
- * Authentication-related errors (401, 403)
+ * The API key is missing, wrong or revoked (HTTP 401). A 403 is never this
+ * error: there the key is fine and the request is not allowed
+ * (`PermissionDeniedError`).
  */
 export class AuthenticationError extends AetherfyVectorsError {
   constructor(message: string = 'Invalid or missing API key') {
     super(message);
     this.name = 'AuthenticationError';
     Object.setPrototypeOf(this, AuthenticationError.prototype);
+  }
+}
+
+/**
+ * The key is valid, and this request is not allowed (HTTP 403).
+ *
+ * Thrown for any 403 whose `code` the SDK has no more specific class for;
+ * `code` and `details` carry what the server said. The specific classes below
+ * all extend it, so one `instanceof PermissionDeniedError` handles every
+ * refusal of a valid key. `QuotaExceededError` is not one of them: the key may
+ * do this, the account is at its cap.
+ */
+export class PermissionDeniedError extends AetherfyVectorsError {
+  constructor(
+    message: string = 'This request is not allowed',
+    requestId?: string,
+    details?: Record<string, unknown>
+  ) {
+    super(message, requestId, 403, details);
+    this.name = 'PermissionDeniedError';
+    Object.setPrototypeOf(this, PermissionDeniedError.prototype);
+  }
+}
+
+/**
+ * An agent's key holds a lower access level in the workspace than the request
+ * needs (403 AGENT_ACCESS_LEVEL_INSUFFICIENT). `level` is the level the key
+ * holds and `requiredLevel` the level the request needed, each `read`,
+ * `read_write` or `full`; `workspace` names the workspace, or is null when it
+ * was addressed by id. Not retryable: the account owner raises the level.
+ */
+export class AccessLevelInsufficientError extends PermissionDeniedError {
+  public readonly workspace: string | null;
+  public readonly level: string | null;
+  public readonly requiredLevel: string | null;
+
+  constructor(
+    message: string,
+    fields: {
+      workspace: string | null;
+      level: string | null;
+      requiredLevel: string | null;
+    },
+    requestId?: string,
+    details?: Record<string, unknown>
+  ) {
+    super(message, requestId, details);
+    this.name = 'AccessLevelInsufficientError';
+    this.workspace = fields.workspace;
+    this.level = fields.level;
+    this.requiredLevel = fields.requiredLevel;
+    Object.setPrototypeOf(this, AccessLevelInsufficientError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      workspace: this.workspace,
+      level: this.level,
+      requiredLevel: this.requiredLevel,
+    };
+  }
+}
+
+/**
+ * An agent's key tried to remove data from a protected collection (403
+ * COLLECTION_PROTECTED), which no agent key may do whatever its access level.
+ * `collectionName` names the collection.
+ */
+export class CollectionProtectedError extends PermissionDeniedError {
+  public readonly collectionName: string | null;
+
+  constructor(
+    message: string,
+    collectionName: string | null,
+    requestId?: string,
+    details?: Record<string, unknown>
+  ) {
+    super(message, requestId, details);
+    this.name = 'CollectionProtectedError';
+    this.collectionName = collectionName;
+    Object.setPrototypeOf(this, CollectionProtectedError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      collectionName: this.collectionName,
+    };
+  }
+}
+
+/**
+ * An agent's key called something only an account key may call (403
+ * AUTH_AGENT_KEY_OUT_OF_SCOPE): the account-level routes, or renaming a
+ * collection. `agentId` is the agent whose key it was and `requiredScope` the
+ * scope the call needs, or null where it needs an account key.
+ */
+export class AgentKeyOutOfScopeError extends PermissionDeniedError {
+  public readonly agentId: string | null;
+  public readonly requiredScope: string | null;
+
+  constructor(
+    message: string,
+    fields: { agentId: string | null; requiredScope: string | null },
+    requestId?: string,
+    details?: Record<string, unknown>
+  ) {
+    super(message, requestId, details);
+    this.name = 'AgentKeyOutOfScopeError';
+    this.agentId = fields.agentId;
+    this.requiredScope = fields.requiredScope;
+    Object.setPrototypeOf(this, AgentKeyOutOfScopeError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      agentId: this.agentId,
+      requiredScope: this.requiredScope,
+    };
   }
 }
 
@@ -87,14 +210,39 @@ export class RateLimitExceededError extends AetherfyVectorsError {
 }
 
 /**
- * Service unavailable errors (503, 502, 504)
+ * Service unavailable errors (503, 502, 504).
+ *
+ * `retryAfter` is the number of seconds the server asked to wait (its
+ * `Retry-After` header), or undefined when it sent none or an unreadable one.
+ * The SDK's own retry waits it, up to a cap and never past the call's
+ * deadline.
  */
 export class ServiceUnavailableError extends AetherfyVectorsError {
-  constructor(message: string = 'Service temporarily unavailable') {
+  public readonly retryAfter?: number;
+
+  constructor(
+    message: string = 'Service temporarily unavailable',
+    retryAfter?: number
+  ) {
     super(message);
     this.name = 'ServiceUnavailableError';
+    this.retryAfter = retryAfter;
     Object.setPrototypeOf(this, ServiceUnavailableError.prototype);
   }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      retryAfter: this.retryAfter,
+    };
+  }
+}
+
+/** What an error keeps of the answer it was built from. */
+export interface ErrorMeta {
+  requestId?: string;
+  statusCode?: number;
+  details?: Record<string, unknown>;
 }
 
 /**
@@ -107,9 +255,10 @@ export class ValidationError extends AetherfyVectorsError {
   constructor(
     message: string = 'Invalid request parameters',
     field?: string,
-    violations?: string[]
+    violations?: string[],
+    meta: ErrorMeta = {}
   ) {
-    super(message);
+    super(message, meta.requestId, meta.statusCode, meta.details);
     this.name = 'ValidationError';
     this.field = field;
     this.violations = violations;
@@ -121,6 +270,70 @@ export class ValidationError extends AetherfyVectorsError {
       ...super.toJSON(),
       field: this.field,
       violations: this.violations,
+    };
+  }
+}
+
+/**
+ * The request carries a member the API does not take (400
+ * INVALID_REQUEST_FIELD): an unknown top-level member of a request body, or
+ * one the endpoint does not support. `field` is the member's path in the
+ * body, `key` the member itself and `suggestion` the nearest valid member, or
+ * undefined when nothing is close.
+ */
+export class InvalidRequestFieldError extends ValidationError {
+  public readonly key?: string;
+  public readonly suggestion?: string;
+
+  constructor(
+    message: string,
+    fields: { field?: string; key?: string; suggestion?: string } = {},
+    meta: ErrorMeta = {}
+  ) {
+    super(message, fields.field, undefined, meta);
+    this.name = 'InvalidRequestFieldError';
+    this.key = fields.key;
+    this.suggestion = fields.suggestion;
+    Object.setPrototypeOf(this, InvalidRequestFieldError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      key: this.key,
+      suggestion: this.suggestion,
+    };
+  }
+}
+
+/**
+ * A filter carries a key the API does not know (400 INVALID_FILTER). `field`
+ * is the key's JSON path (`filter.must[0].mach`), `key` the unknown key and
+ * `suggestion` the nearest valid key, or undefined when nothing is close. The
+ * sibling of `InvalidRequestFieldError`, which is the same answer for a member
+ * of the request body outside any filter.
+ */
+export class InvalidFilterError extends ValidationError {
+  public readonly key?: string;
+  public readonly suggestion?: string;
+
+  constructor(
+    message: string,
+    fields: { field?: string; key?: string; suggestion?: string } = {},
+    meta: ErrorMeta = {}
+  ) {
+    super(message, fields.field, undefined, meta);
+    this.name = 'InvalidFilterError';
+    this.key = fields.key;
+    this.suggestion = fields.suggestion;
+    Object.setPrototypeOf(this, InvalidFilterError.prototype);
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      ...super.toJSON(),
+      key: this.key,
+      suggestion: this.suggestion,
     };
   }
 }
@@ -323,19 +536,23 @@ export class CollectionInOtherRegionError extends AetherfyVectorsError {
  * `afy access <agent> --add <workspace>`, and it takes effect within 60
  * seconds.
  */
-export class AgentWorkspaceForbiddenError extends AetherfyVectorsError {
+export class AgentWorkspaceForbiddenError extends PermissionDeniedError {
   public readonly workspace: string | null;
 
-  constructor(workspace: string | null, message?: string) {
+  constructor(
+    workspace: string | null,
+    message?: string,
+    requestId?: string,
+    details?: Record<string, unknown>
+  ) {
     const where = workspace ? `workspace '${workspace}'` : 'this workspace';
     const add = workspace ? workspace : '<workspace>';
     super(
       (message || `This agent's API key cannot use ${where}.`) +
         ` Ask the account owner to grant this agent access to ${where}: ` +
         `the agent's page in the dashboard, or \`afy access <agent> --add ${add}\`.`,
-      undefined,
-      403,
-      { workspace }
+      requestId,
+      details ?? { workspace }
     );
     this.name = 'AgentWorkspaceForbiddenError';
     this.workspace = workspace;
@@ -388,24 +605,47 @@ export class WorkspaceNotFoundError extends NotFoundError {
 }
 
 /**
- * Quota exceeded errors
+ * A plan limit or the storage quota is reached: 403 PLAN_LIMIT_EXCEEDED or
+ * 429 STORAGE_LIMIT_EXCEEDED. Not a `PermissionDeniedError`: the key may do
+ * this, the account is at its cap.
+ *
+ * - `quotaType`: what ran out (`collections`, `storage`, ...).
+ * - `limit`: the limit's name as the server sends it (`max_collections`), or
+ *   undefined where it names none (storage).
+ * - `allowed`: the plan's number, `false` for a feature the plan does not
+ *   include, `null` where the plan has no cap (undefined only if the server
+ *   sent none).
+ * - `current`: the usage now, or undefined for a yes/no feature (the server
+ *   sends none).
+ * - `upgradeUrl`: where to raise the cap, or undefined.
  */
 export class QuotaExceededError extends AetherfyVectorsError {
   public readonly quotaType: string;
   public readonly current?: number;
-  public readonly limit?: number;
+  public readonly limit?: string;
+  public readonly allowed?: number | false | null;
+  public readonly upgradeUrl?: string;
 
   constructor(
     message: string,
     quotaType: string,
-    current?: number,
-    limit?: number
+    fields: {
+      current?: number;
+      limit?: string;
+      allowed?: number | false | null;
+      upgradeUrl?: string;
+    } = {},
+    requestId?: string,
+    statusCode?: number,
+    details?: Record<string, unknown>
   ) {
-    super(message);
+    super(message, requestId, statusCode, details);
     this.name = 'QuotaExceededError';
     this.quotaType = quotaType;
-    this.current = current;
-    this.limit = limit;
+    this.current = fields.current;
+    this.limit = fields.limit;
+    this.allowed = fields.allowed;
+    this.upgradeUrl = fields.upgradeUrl;
     Object.setPrototypeOf(this, QuotaExceededError.prototype);
   }
 
@@ -415,6 +655,8 @@ export class QuotaExceededError extends AetherfyVectorsError {
       quotaType: this.quotaType,
       current: this.current,
       limit: this.limit,
+      allowed: this.allowed,
+      upgradeUrl: this.upgradeUrl,
     };
   }
 }
@@ -574,14 +816,34 @@ export class PartialUpsertError extends AetherfyVectorsError {
   }
 }
 
+/** A string field of an error body, or undefined when absent or not a string. */
+function textOf(
+  body: Record<string, unknown> | undefined,
+  key: string
+): string | undefined {
+  const value = body?.[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+/** A number the server counted with, or undefined. */
+function countOf(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
 /**
- * Utility function to create appropriate error from HTTP response
+ * Utility function to create appropriate error from HTTP response.
+ *
+ * `retryAfter` is the seconds the response's `Retry-After` header asked to
+ * wait (already read by the HTTP layer); only a 502/503/504 carries it.
  */
 export function createErrorFromResponse(
   responseData: Record<string, unknown>,
   status: number,
   statusText: string,
-  requestId?: string
+  requestId?: string,
+  retryAfter?: number
 ): AetherfyVectorsError {
   // Canonical vectordb error envelope:
   //   { "error": { "code", "message", ...extras } }
@@ -625,43 +887,118 @@ export function createErrorFromResponse(
   const details = responseData?.details;
 
   switch (status) {
-    case 400:
+    case 400: {
+      if (errorCode === 'INVALID_FILTER') {
+        return stamp(
+          new InvalidFilterError(
+            message,
+            {
+              field: textOf(nestedError, 'field'),
+              key: textOf(nestedError, 'key'),
+              suggestion: textOf(nestedError, 'suggestion'),
+            },
+            { requestId, statusCode: status, details: nestedError }
+          )
+        );
+      }
+      if (errorCode === 'INVALID_REQUEST_FIELD') {
+        return stamp(
+          new InvalidRequestFieldError(
+            message,
+            {
+              field: textOf(nestedError, 'field'),
+              key: textOf(nestedError, 'key'),
+              suggestion: textOf(nestedError, 'suggestion'),
+            },
+            { requestId, statusCode: status, details: nestedError }
+          )
+        );
+      }
       return stamp(
         new ValidationError(
           message,
-          responseData?.field as string | undefined,
-          responseData?.violations as string[] | undefined
+          nestedError?.field as string | undefined,
+          nestedError?.violations as string[] | undefined
         )
       );
+    }
 
-    case 403:
+    case 403: {
+      // By code first, then by status: a 403 is "the key is valid and this is
+      // not allowed", never "the key is wrong" (that is the 401 below).
       if (errorCode === 'PLAN_LIMIT_EXCEEDED') {
-        // The plan-limit answer, the control plane's shape: `limit` NAMES the
-        // axis (`max_collections`), `current` is the count in use and the
-        // plan's number sits under the axis' own name.
-        const axis = nestedError?.limit;
-        const planValue =
-          typeof axis === 'string' ? nestedError?.[axis] : undefined;
+        // `limit` NAMES the limit (`max_collections`), `allowed` is the plan's
+        // number (false: the plan lacks the feature; null: no cap) and
+        // `current` the usage now (absent for a yes/no feature).
+        const axis = textOf(nestedError, 'limit');
+        const allowed = nestedError?.allowed;
         return stamp(
           new QuotaExceededError(
             message,
-            typeof axis === 'string' ? axis.replace(/^max_/, '') : 'plan',
-            typeof nestedError?.current === 'number'
-              ? nestedError.current
-              : undefined,
-            typeof planValue === 'number' ? planValue : undefined
+            axis !== undefined ? axis.replace(/^max_/, '') : 'plan',
+            {
+              current: countOf(nestedError?.current),
+              limit: axis,
+              allowed:
+                countOf(allowed) ??
+                (allowed === false || allowed === null ? allowed : undefined),
+              upgradeUrl: textOf(nestedError, 'upgrade_url'),
+            },
+            requestId,
+            status,
+            nestedError
           )
         );
       }
       if (errorCode === 'AGENT_KEY_WORKSPACE_FORBIDDEN') {
-        const workspace = nestedError?.workspace;
         return stamp(
           new AgentWorkspaceForbiddenError(
-            typeof workspace === 'string' ? workspace : null
+            textOf(nestedError, 'workspace') ?? null,
+            undefined,
+            requestId,
+            nestedError
           )
         );
       }
-      return stamp(new AuthenticationError(message));
+      if (errorCode === 'AGENT_ACCESS_LEVEL_INSUFFICIENT') {
+        return stamp(
+          new AccessLevelInsufficientError(
+            message,
+            {
+              workspace: textOf(nestedError, 'workspace') ?? null,
+              level: textOf(nestedError, 'level') ?? null,
+              requiredLevel: textOf(nestedError, 'required_level') ?? null,
+            },
+            requestId,
+            nestedError
+          )
+        );
+      }
+      if (errorCode === 'COLLECTION_PROTECTED') {
+        return stamp(
+          new CollectionProtectedError(
+            message,
+            textOf(nestedError, 'collection_name') ?? null,
+            requestId,
+            nestedError
+          )
+        );
+      }
+      if (errorCode === 'AUTH_AGENT_KEY_OUT_OF_SCOPE') {
+        return stamp(
+          new AgentKeyOutOfScopeError(
+            message,
+            {
+              agentId: textOf(nestedError, 'agent_id') ?? null,
+              requiredScope: textOf(nestedError, 'required_scope') ?? null,
+            },
+            requestId,
+            nestedError
+          )
+        );
+      }
+      return stamp(new PermissionDeniedError(message, requestId, nestedError));
+    }
 
     case 401:
       return stamp(new AuthenticationError(message));
@@ -754,12 +1091,23 @@ export function createErrorFromResponse(
 
     case 429:
       if (errorCode === 'STORAGE_LIMIT_EXCEEDED') {
+        // The numbers are nested: error.details.{current_bytes, limit_bytes}.
+        const bytes =
+          nestedError?.details !== null &&
+          typeof nestedError?.details === 'object'
+            ? (nestedError.details as Record<string, unknown>)
+            : undefined;
         return stamp(
           new QuotaExceededError(
             message,
             'storage',
-            nestedError?.current as number | undefined,
-            nestedError?.limit as number | undefined
+            {
+              current: countOf(bytes?.current_bytes),
+              allowed: countOf(bytes?.limit_bytes),
+            },
+            requestId,
+            status,
+            nestedError
           )
         );
       }
@@ -770,7 +1118,7 @@ export function createErrorFromResponse(
     case 502:
     case 503:
     case 504:
-      return stamp(new ServiceUnavailableError(message));
+      return stamp(new ServiceUnavailableError(message, retryAfter));
 
     default:
       return stamp(

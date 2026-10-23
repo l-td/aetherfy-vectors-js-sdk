@@ -16,7 +16,7 @@
 
 import { defined } from './defined';
 import { AetherfyVectorsClient } from '../../src/client';
-import { PointNotFoundError } from '../../src/exceptions';
+import { InvalidFilterError, PointNotFoundError } from '../../src/exceptions';
 import {
   DEFAULT_VECTOR_SIZE,
   MemoryClient,
@@ -528,15 +528,34 @@ describe('a caller filter cannot widen the scope', () => {
     expect(narrowed.map(h => h.payload?.content)).toEqual(['keep']);
   });
 
-  it('a caller clause typo still fails loudly', async () => {
+  it('a caller clause typo is forwarded and refused by the API', async () => {
+    // The merge neither drops an unknown clause nor judges it: it reaches the
+    // API, which answers 400 INVALID_FILTER (the double answers the same way).
     const { a } = await twoThreads();
-    await expect(
-      a.count({
+    const error = await a
+      .count({
         filter: {
-          must_not: [{ key: 'role', match: { value: 'user' } }],
+          mustnot: [{ key: 'role', match: { value: 'user' } }],
         } as never,
       })
-    ).rejects.toThrow('must_not');
+      .catch(e => e);
+    expect(error).toBeInstanceOf(InvalidFilterError);
+    expect(error.key).toBe('mustnot');
+  });
+
+  it('a caller minShould is accepted and cannot widen the scope', async () => {
+    const { a } = await twoThreads();
+    const other = { key: THREAD_ID_KEY, match: { value: 'b' } };
+    const own = { key: THREAD_ID_KEY, match: { value: 'a' } };
+    await expect(
+      a.count({ filter: { minShould: { conditions: [other], min_count: 1 } } })
+    ).resolves.toBe(0);
+    const total = await a.count();
+    await expect(
+      a.count({
+        filter: { minShould: { conditions: [own, other], min_count: 1 } },
+      })
+    ).resolves.toBe(total);
   });
 });
 

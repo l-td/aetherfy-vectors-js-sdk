@@ -16,10 +16,9 @@
  * EVERY THREAD IN A WORKSPACE SHARES ONE COLLECTION (`__threads__`), and a
  * thread is a FILTER over it: `thread_id` is stamped on every point and
  * every read and write this class issues carries the matching clause. The
- * clause is assembled here, never from a caller-supplied string, because
- * the proxy forwards filters verbatim and a misspelled key fails OPEN — a
- * successful response with every thread's points in it. A caller's own
- * filter is COMBINED with the thread clause, never substituted for it.
+ * clause is assembled here, never from a caller-supplied string: the scope
+ * must not depend on anything a caller typed. A caller's own filter is
+ * COMBINED with the thread clause, never substituted for it.
  *
  * One MARKER point per thread (written by `createThread`) is what makes an
  * empty thread exist. It is not a message and must never read as one, so
@@ -131,12 +130,10 @@ export class Thread extends Scope {
    * arrays. Since Aetherfy composes the three clause arrays as a
    * conjunction (everything in `must` holds AND at least one `should`
    * holds AND nothing in `mustNot` holds), no caller clause — `should`
-   * included — can widen the result past this thread.
+   * and `minShould` included — can widen the result past this thread.
    *
-   * Clause names outside must / mustNot / should are left for
-   * `serializeFilter` downstream to reject, so a caller typo at the clause
-   * level still fails loudly rather than being merged in as an unknown
-   * key.
+   * Any other clause name is carried over as written, so the API refuses it
+   * (`InvalidFilterError`) instead of the merge dropping it.
    */
   protected override combineFilter(filter?: Filter): Filter {
     const caller = (filter ?? {}) as Record<string, unknown>;
@@ -171,11 +168,8 @@ export class Thread extends Scope {
    * True iff `point` is a thread's marker rather than a message.
    *
    * The filter already excludes markers server-side. This is the second,
-   * independent guard, and it earns its place because the FIRST one fails
-   * open: the proxy forwards a filter verbatim and never validates it, so
-   * a mistyped clause returns a successful response with unfiltered
-   * results. A marker reading as a message would put an empty `role` and
-   * an empty `content` into a caller's conversation.
+   * independent guard: a marker reading as a message would put an empty
+   * `role` and an empty `content` into a caller's conversation.
    */
   private static isMarker(point: {
     payload?: Record<string, unknown>;
@@ -207,13 +201,9 @@ export class Thread extends Scope {
   /**
    * Address these ids AND this thread, in one request.
    *
-   * `has_id` is a first-class Qdrant condition — it is in the pinned
-   * client's generated schema (@qdrant/js-client-rest 1.15.0, the version
-   * the fleet runs) alongside FieldCondition in the Condition union. That
-   * matters because the proxy forwards a filter verbatim and an
-   * unrecognised key would quietly do nothing: here, silently dropping the
-   * `has_id` clause would widen a single-point delete to the whole thread.
-   * It is not an unverified guess.
+   * `has_id` is a first-class condition, and the API refuses a filter key
+   * it does not know, so the clause cannot be silently dropped and widen a
+   * single-point delete to the whole thread.
    *
    * Scoping this way rather than checking ids client-side first means the
    * ENGINE enforces the boundary, so a later caller who reaches past the

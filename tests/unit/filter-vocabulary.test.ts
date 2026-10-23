@@ -1,24 +1,23 @@
 /**
  * Wire-level contract for the Filter clause vocabulary.
  *
- * Before this suite the SDK forwarded the caller's filter object to the
- * engine verbatim. `must` and `should` survived that only because they are
- * spelled identically in the SDK's camelCase vocabulary and the engine's
- * snake_case one. `mustNot` did not: the engine has no such key, so an
- * exclusion clause was silently dropped — no error, no warning, and the
- * points the caller meant to exclude came back in the results.
+ * `must` and `should` are spelled identically in the SDK's camelCase
+ * vocabulary and the API's snake_case one; `mustNot` and `minShould` are not,
+ * and a `mustNot` forwarded as written used to be dropped by the engine
+ * without a word.
  *
  * Three things are pinned here, and each maps to a way the bug could return:
  *
- *   1. SERIALIZATION. All three clauses reach the body under their wire
+ *   1. SERIALIZATION. All four clauses reach the body under their wire
  *      names, in a fixed order. Order is part of the contract: the server
  *      cache key is derived from the request body BYTES.
  *
- *   2. LOUD FAILURE. An unrecognized clause throws. TypeScript's
- *      excess-property check only fires on fresh object literals, so a
- *      pre-built variable, an `as any` cast, or any untyped JS caller can
- *      reach the wire with `{ mustnot: [...] }`. Silent forwarding is what
- *      hid the original defect.
+ *   2. LOUD FAILURE, FROM THE API. The SDK keeps no list of clause names: a
+ *      key it does not translate is sent as written and the API refuses an
+ *      unknown one (400 INVALID_FILTER, the key's path and the nearest valid
+ *      key), which the SDK throws as InvalidFilterError. A list kept here
+ *      could only lag the API: it refused `min_should` for as long as it
+ *      existed.
  *
  *   3. COMPILE-LEVEL SHAPE. The uncast `mustNot` literal must typecheck,
  *      and the wire spelling `must_not` must NOT. The docs previously told
@@ -33,6 +32,7 @@
 import nock from 'nock';
 import { TEST_WORKSPACE_ID } from '../setup';
 import { AetherfyVectorsClient } from '../../src/client';
+import { InvalidFilterError } from '../../src/exceptions';
 import { Filter } from '../../src/models';
 import { serializeFilter } from '../../src/utils/filter';
 
@@ -120,22 +120,26 @@ describe('Filter clause vocabulary — wire contract', () => {
       expect(serializeFilter(null, 'search')).toBeUndefined();
     });
 
-    it('throws on a typo’d clause rather than dropping it', () => {
-      expect(() =>
+    it('sends a typo’d clause as written, for the API to judge', () => {
+      // The API answers it with 400 INVALID_FILTER, the key's path and the
+      // nearest valid key (invalid-filter.test.ts): the SDK keeps no list of
+      // clause names that could lag it.
+      expect(
         serializeFilter({ mustnot: MUST_NOT } as unknown as Filter, 'search')
-      ).toThrow(/unknown filter clause\(s\): mustnot/);
+      ).toEqual({ mustnot: MUST_NOT });
     });
 
-    it('throws on the wire spelling and names the SDK spelling', () => {
-      expect(() =>
+    it('sends the wire spelling as written: it is a valid key', () => {
+      expect(
         serializeFilter({ must_not: MUST_NOT } as unknown as Filter, 'search')
-      ).toThrow(/mustNot/);
+      ).toEqual({ must_not: MUST_NOT });
     });
 
-    it('names the method that was called', () => {
-      expect(() =>
-        serializeFilter({ nope: [] } as unknown as Filter, 'count')
-      ).toThrow(/^count: unknown filter clause/);
+    it('accepts minShould, which the API takes', () => {
+      const minShould = { conditions: SHOULD, min_count: 1 };
+      expect(serializeFilter({ minShould }, 'count')).toEqual({
+        min_should: minShould,
+      });
     });
 
     it('rejects a non-object filter', () => {
@@ -207,21 +211,35 @@ describe('Filter clause vocabulary — wire contract', () => {
       );
     });
 
-    it('a typo reaching search throws instead of shipping a dropped clause', async () => {
+    it('a typo reaching search is sent as written and the API refuses it', async () => {
       const client = makeClient();
+      let sent: Record<string, unknown> | undefined;
       const scope = nock(BASE)
         .post(
-          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/query`
+          `/api/v1/workspace-ids/${TEST_WORKSPACE_ID}/collections/test-collection/points/query`,
+          b => {
+            sent = b as Record<string, unknown>;
+            return true;
+          }
         )
-        .reply(200, { result: { points: [] } });
+        .reply(400, {
+          error: {
+            code: 'INVALID_FILTER',
+            message: "Unrecognised filter key 'mustnot'.",
+            field: 'filter.mustnot',
+            key: 'mustnot',
+            suggestion: 'must_not',
+          },
+        });
 
       await expect(
         client.search('test-collection', QUERY_VECTOR, {
           queryFilter: { mustnot: MUST_NOT } as unknown as Filter,
         })
-      ).rejects.toThrow(/unknown filter clause/);
+      ).rejects.toBeInstanceOf(InvalidFilterError);
 
-      expect(scope.isDone()).toBe(false);
+      expect(scope.isDone()).toBe(true);
+      expect(sent?.filter).toEqual({ mustnot: MUST_NOT });
       nock.cleanAll();
     });
   });

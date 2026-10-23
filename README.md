@@ -1060,7 +1060,9 @@ import {
   AetherfyVectorsClient,
   AetherfyVectorsError, // base class — catch this for a generic fallback
   AuthenticationError,
+  PermissionDeniedError, // parent of every 403 refusal
   RateLimitExceededError,
+  InvalidFilterError,
   ValidationError,
   NotFoundError, // parent of every not-found error
   CollectionNotFoundError,
@@ -1080,9 +1082,21 @@ try {
   await client.search('collection', vector);
 } catch (error) {
   if (error instanceof AuthenticationError) {
-    console.error('Invalid API key');
+    console.error('Invalid API key'); // 401 only: the key itself is wrong
+  } else if (error instanceof PermissionDeniedError) {
+    // 403: the key is valid and this request is not allowed. Subclasses say
+    // why: AccessLevelInsufficientError (workspace, level, requiredLevel),
+    // CollectionProtectedError (collectionName), AgentWorkspaceForbiddenError
+    // (workspace) and AgentKeyOutOfScopeError (agentId).
+    console.error('Not allowed:', error.message);
   } else if (error instanceof RateLimitExceededError) {
     console.error(`Rate limited. Retry after: ${error.retryAfter}s`);
+  } else if (error instanceof InvalidFilterError) {
+    // 400: a filter key the API does not know (before ValidationError, its
+    // parent). The message names the key's path (`filter.must[0].mach`).
+    console.error(
+      `Bad filter key '${error.key}'; did you mean '${error.suggestion}'?`
+    );
   } else if (error instanceof ValidationError) {
     console.error('Invalid request:', error.message);
   } else if (error instanceof CollectionNotFoundError) {
@@ -1091,8 +1105,11 @@ try {
     // `errors` is one entry per rejected point: { index, id, errors: [{ field, code, message }] }
     console.error('Schema violations:', error.errors);
   } else if (error instanceof QuotaExceededError) {
+    // A plan limit: `limit` names it ('max_collections'), `allowed` is the
+    // plan's number (false for a feature the plan lacks, null for no cap),
+    // `current` the usage now (undefined for a yes/no feature).
     console.error(
-      `Quota '${error.quotaType}' exceeded: ${error.current}/${error.limit}`
+      `Quota '${error.quotaType}' exceeded: ${error.current}/${error.allowed}; see ${error.upgradeUrl}`
     );
   } else if (error instanceof ServiceUnavailableError) {
     // Already retried under the rule ("When a request is retried"). Calling

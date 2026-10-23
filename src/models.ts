@@ -155,9 +155,10 @@ export interface UsageStats {
  *
  * Written in the SDK's camelCase vocabulary; `serializeFilter`
  * (src/utils/filter.ts) translates it to the wire vocabulary on the way
- * out, so `mustNot` reaches the engine as `must_not`. Write the wire
- * spelling here and the SDK throws rather than forwarding a clause the
- * engine will ignore.
+ * out, so `mustNot` reaches the API as `must_not`. A key the SDK does not
+ * translate is sent as written, and the API refuses one it does not know
+ * (400 INVALID_FILTER, thrown as `InvalidFilterError`, with the key's path
+ * and the nearest valid key).
  */
 export interface Filter {
   /** Conditions that must be true. Wire key: `must`. */
@@ -166,6 +167,14 @@ export interface Filter {
   mustNot?: Array<Record<string, unknown>>;
   /** Conditions where at least one should be true. Wire key: `should`. */
   should?: Array<Record<string, unknown>>;
+  /**
+   * At least `min_count` of `conditions` must be true:
+   * `{ conditions: [...], min_count: 2 }`. Wire key: `min_should`.
+   */
+  minShould?: {
+    conditions: Array<Record<string, unknown>>;
+    min_count: number;
+  };
 }
 
 /**
@@ -197,7 +206,8 @@ export interface SearchOptions {
    * params-varying call can never hit an entry stored under different params.
    *
    * Keys are passed through untranslated (snake_case, as the engine expects)
-   * and are not validated here; the API and Qdrant own the schema.
+   * and are not validated here: the API checks them and answers an unknown
+   * one with `InvalidRequestFieldError`.
    */
   searchParams?: Record<string, unknown>;
 }

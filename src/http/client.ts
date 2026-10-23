@@ -14,6 +14,7 @@ const WATCHED = Symbol('aetherfy.watchedSocket');
 const CONNECTED = Symbol('aetherfy.connectedSocket');
 
 import { SDK_VERSION } from '../version';
+import { parseRetryAfter } from '../retry-policy';
 import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
 
 // Derived from the types by optionKeys(): see src/utils/options.ts.
@@ -206,7 +207,8 @@ export class HttpClient {
         throw this.createError(
           data as unknown as ErrorResponse,
           response.status,
-          response.statusText
+          response.statusText,
+          response.headers as Record<string, unknown> | undefined
         );
       }
 
@@ -401,7 +403,8 @@ export class HttpClient {
   private createError(
     responseData: ErrorResponse,
     status: number,
-    statusText: string
+    statusText: string,
+    headers?: Record<string, unknown>
   ): Error {
     const errorField = responseData?.error;
     const nestedMessage =
@@ -411,11 +414,15 @@ export class HttpClient {
     const message =
       responseData?.message || nestedMessage || statusText || 'Unknown error';
     const error = new Error(message);
+    // The seconds a Retry-After header asked to wait; only a 5xx refusal's.
+    const retryAfter =
+      status >= 500 ? parseRetryAfter(headers?.['retry-after']) : undefined;
     Object.assign(error, {
       status,
       statusText,
       responseData,
       requestId: responseData?.requestId,
+      ...(retryAfter !== undefined ? { retryAfter } : {}),
     });
     return error;
   }

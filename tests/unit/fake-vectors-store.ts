@@ -9,12 +9,11 @@
  * evaluates must / mustNot / should the way the engine does, so a test can
  * assert on surviving DATA rather than on recorded calls.
  *
- * Deliberately STRICTER than nothing and LOOSER than Qdrant: it supports
- * exactly the condition shapes the documented Aetherfy filter vocabulary has
- * (match and range, under the three clause arrays). An unknown condition shape
- * throws here rather than silently matching everything — the fail-open
- * behaviour of the real proxy is the hazard being defended against, so a
- * stand-in that reproduced it would hide the defect instead of catching it.
+ * Deliberately LOOSER than the engine: it supports exactly the condition
+ * shapes the memory layer uses (match, range and has_id, under the four clause
+ * keys). A clause key it does not know is refused the way the API refuses it
+ * (400 INVALID_FILTER, as InvalidFilterError), and an unknown condition shape
+ * throws rather than silently matching everything.
  *
  * Note the clause spelling: this double speaks the JS SDK's OUTBOUND
  * vocabulary (`mustNot`), because the memory layer hands filters to the client
@@ -22,6 +21,7 @@
  * `must_not` one layer further down.
  */
 
+import { InvalidFilterError } from '../../src/exceptions';
 import {
   Collection,
   DistanceMetric,
@@ -85,15 +85,15 @@ function matchCondition(
 }
 
 /**
- * Evaluate a filter the way Aetherfy documents it: the three clause arrays
- * compose as a conjunction — everything in `must` holds AND at least one
- * `should` holds AND nothing in `mustNot` holds.
+ * Evaluate a filter the way Aetherfy documents it: the clause arrays compose
+ * as a conjunction — everything in `must` holds AND at least one `should`
+ * holds AND nothing in `mustNot` holds AND at least `min_count` of
+ * `minShould`'s conditions hold.
  *
- * `failOpenOnMustNot` reproduces the ONE failure mode the docs promise: the
- * proxy forwards a filter verbatim and never validates it, so a mistyped
- * clause "is passed along and quietly does nothing — a successful response
- * with unfiltered results rather than a 400". Set it to exercise the
- * client-side guards that exist precisely because the filter can fail open.
+ * `failOpenOnMustNot` makes the `mustNot` clause match nothing, as if the
+ * engine had lost it. Set it to exercise the SDK's own second guard (a
+ * thread's marker point must never read as a message), which does not rely on
+ * the filter alone.
  */
 export function matches(
   payload: Record<string, unknown>,
@@ -104,10 +104,14 @@ export function matches(
   if (!filter) return true;
   const f = filter as unknown as Record<string, Cond[]>;
   const unknown = Object.keys(f).filter(
-    k => k !== 'must' && k !== 'mustNot' && k !== 'should'
+    k => k !== 'must' && k !== 'mustNot' && k !== 'should' && k !== 'minShould'
   );
   if (unknown.length > 0) {
-    throw new Error(`unknown filter clause(s): ${unknown.sort().join(', ')}`);
+    const key = unknown.sort()[0];
+    throw new InvalidFilterError(`Unrecognised filter key '${key}'.`, {
+      field: `filter.${key}`,
+      key,
+    });
   }
   if (!(f.must ?? []).every(c => matchCondition(payload, c, pointId))) {
     return false;
@@ -124,6 +128,17 @@ export function matches(
     !should.some(c => matchCondition(payload, c, pointId))
   ) {
     return false;
+  }
+  const minShould = (
+    filter as unknown as {
+      minShould?: { conditions: Cond[]; min_count: number };
+    }
+  ).minShould;
+  if (minShould) {
+    const held = minShould.conditions.filter(c =>
+      matchCondition(payload, c, pointId)
+    ).length;
+    if (held < minShould.min_count) return false;
   }
   return true;
 }

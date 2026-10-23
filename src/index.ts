@@ -94,6 +94,12 @@ export {
   WorkspaceNotFoundError,
   NotFoundError,
   QuotaExceededError,
+  PermissionDeniedError,
+  AccessLevelInsufficientError,
+  CollectionProtectedError,
+  AgentKeyOutOfScopeError,
+  InvalidFilterError,
+  InvalidRequestFieldError,
   SchemaNotFoundError,
   SchemaValidationError,
   PartialUpsertError,
@@ -148,6 +154,7 @@ export {
 // The retry rule's operation classes, for retryWithBackoff (retry-policy.ts).
 export { REPEATABLE, ONCE } from './retry-policy';
 export type { RetryClass } from './retry-policy';
+export type { ErrorMeta } from './exceptions';
 
 // HTTP client types (for advanced usage)
 export type {

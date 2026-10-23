@@ -1089,19 +1089,11 @@ export class AetherfyVectorsClient {
           }
         }
 
-        // Handle 400 (validation error from backend)
+        // Handle 400 (validation error from backend): the one mapping every
+        // error goes through, so INVALID_REQUEST_FIELD (a member the upsert
+        // does not take, such as update_filter) arrives as its own class.
         if (httpError.status === 400) {
-          const responseData = httpError.responseData;
-          // Try nested error object first, then flat error/message
-          const errorObj = responseData?.error as
-            | { message?: string }
-            | undefined;
-          const errorMessage =
-            errorObj?.message ||
-            (responseData?.message as string) ||
-            (responseData?.error as string) ||
-            'Validation error occurred';
-          throw carrying(new ValidationError(errorMessage), error);
+          throw this.handleError(error);
         }
 
         // Handle 500+ (server errors)
@@ -1701,8 +1693,11 @@ export class AetherfyVectorsClient {
             with_payload: options.withPayload ?? true,
             with_vector: options.withVectors ?? false,
             score_threshold: options.scoreThreshold,
-            // Untranslated pass-through: the API and Qdrant own the schema,
-            // so the SDK enumerates nothing. Last key, and `undefined` when
+            // Untranslated pass-through: the SDK keeps no list of parameter
+            // names. The API checks them and answers an unknown one with a
+            // 400 INVALID_REQUEST_FIELD naming its path (thrown as
+            // InvalidRequestFieldError), so a misspelt parameter is never
+            // ignored silently. Last key, and `undefined` when
             // unset — JSON.stringify omits it, keeping the default body
             // byte-for-byte what it was (server cache keys are body-derived).
             params: options.searchParams,
@@ -2180,12 +2175,14 @@ export class AetherfyVectorsClient {
         responseData: Record<string, unknown>;
         statusText: string;
         requestId?: string;
+        retryAfter?: number;
       };
       return createErrorFromResponse(
         httpError.responseData,
         httpError.status,
         httpError.statusText,
-        httpError.requestId
+        httpError.requestId,
+        httpError.retryAfter
       );
     }
 

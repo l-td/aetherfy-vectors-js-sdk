@@ -164,15 +164,19 @@ const BASE_PROPERTY_ALLOWLIST: Record<string, string> = {};
  */
 const EXPECTED_CLAIMS: string[] = [
   'CollectionNotFoundError.collectionName',
+  'InvalidFilterError.key',
+  'InvalidFilterError.suggestion',
   // The agent helper's two error sections. They were in the README from the
   // release that added `aetherfy-vectors/agent` and were INVISIBLE here until
   // the specifier match learned about subpaths — the eight lines below are what
   // this guard was silently not checking.
   'PayloadTooLarge.maxBytes',
   'PayloadTooLarge.payloadBytes',
+  'PermissionDeniedError.message',
+  'QuotaExceededError.allowed',
   'QuotaExceededError.current',
-  'QuotaExceededError.limit',
   'QuotaExceededError.quotaType',
+  'QuotaExceededError.upgradeUrl',
   'RateLimitExceededError.retryAfter',
   'ResultTooLarge.maxBytes',
   'ResultTooLarge.resultBytes',
@@ -644,20 +648,21 @@ describe('README error-object properties', () => {
     // recognise: the claims silently disappear and everything still passes.
     // Deleting one branch is that failure in miniature.
     const original = readme();
-    const branch = [
-      '  } else if (error instanceof QuotaExceededError) {',
-      '    console.error(',
-      "      `Quota '${error.quotaType}' exceeded: ${error.current}/${error.limit}`",
-      '    );',
-      '',
-    ].join('\n');
-    expect(original).toContain(branch);
+    const start = original.indexOf(
+      '  } else if (error instanceof QuotaExceededError) {\n'
+    );
+    expect(start).not.toBe(-1);
+    // The whole branch: up to the next `} else if` / closing of the chain.
+    const end = original.indexOf('\n  } else if', start + 1);
+    expect(end).toBeGreaterThan(start);
+    const branch = original.slice(start, end + 1);
+    expect(branch).toContain('error.allowed');
 
     const shrunk = original.replace(branch, () => '');
     expect(shrunk).not.toBe(original);
 
     const parsed = census(shrunk);
-    // The mutation LANDED — the three QuotaExceededError promises are gone.
+    // The mutation LANDED — the QuotaExceededError promises are gone.
     expect(parsed.some(c => c.startsWith('QuotaExceededError.'))).toBe(false);
     expect(parsed).not.toEqual(EXPECTED_CLAIMS);
   });

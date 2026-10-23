@@ -237,26 +237,29 @@ describe('Custom Exceptions', () => {
     });
 
     it('should create QuotaExceededError', () => {
-      const error = new QuotaExceededError(
-        'Quota exceeded',
-        'points',
-        1000,
-        900
-      );
+      const error = new QuotaExceededError('Quota exceeded', 'points', {
+        current: 1000,
+        limit: 'max_points',
+        allowed: 900,
+        upgradeUrl: 'https://app.aetherfy.com/dashboard/settings/billing',
+      });
       expect(error.message).toBe('Quota exceeded');
       expect(error.name).toBe('QuotaExceededError');
       expect(error.quotaType).toBe('points');
       expect(error.current).toBe(1000);
-      expect(error.limit).toBe(900);
+      expect(error.limit).toBe('max_points');
+      expect(error.allowed).toBe(900);
+      expect(error.upgradeUrl).toBe(
+        'https://app.aetherfy.com/dashboard/settings/billing'
+      );
     });
 
     it('should serialize QuotaExceededError to JSON', () => {
-      const error = new QuotaExceededError(
-        'Quota exceeded',
-        'points',
-        1000,
-        900
-      );
+      const error = new QuotaExceededError('Quota exceeded', 'points', {
+        current: 1000,
+        limit: 'max_points',
+        allowed: false,
+      });
       const json = error.toJSON();
       expect(json).toEqual({
         name: 'QuotaExceededError',
@@ -266,7 +269,9 @@ describe('Custom Exceptions', () => {
         details: undefined,
         quotaType: 'points',
         current: 1000,
-        limit: 900,
+        limit: 'max_points',
+        allowed: false,
+        upgradeUrl: undefined,
       });
     });
 
@@ -361,8 +366,7 @@ describe('Custom Exceptions', () => {
           error: {
             code: 'STORAGE_LIMIT_EXCEEDED',
             message: 'Storage limit exceeded. Your free plan allows 512 MB.',
-            current: 536870912,
-            limit: 536870912,
+            details: { current_bytes: 536870912, limit_bytes: 536870912 },
           },
         },
         429,
@@ -375,7 +379,8 @@ describe('Custom Exceptions', () => {
       );
       expect((error as QuotaExceededError).quotaType).toBe('storage');
       expect((error as QuotaExceededError).current).toBe(536870912);
-      expect((error as QuotaExceededError).limit).toBe(536870912);
+      expect((error as QuotaExceededError).allowed).toBe(536870912);
+      expect((error as QuotaExceededError).limit).toBeUndefined();
     });
 
     it('should create ServiceUnavailableError for 503 status', () => {
@@ -442,10 +447,10 @@ describe('Custom Exceptions', () => {
             code: 'PLAN_LIMIT_EXCEEDED',
             message:
               'Collection limit reached. Your free plan allows 3 collections.',
+            upgrade_url: 'https://app.aetherfy.com/dashboard/settings/billing',
             limit: 'max_collections',
+            allowed: 3,
             current: 3,
-            max_collections: 3,
-            upgrade_url: '/billing/upgrade',
           },
         },
         403,
@@ -459,7 +464,8 @@ describe('Custom Exceptions', () => {
       );
       expect((error as QuotaExceededError).quotaType).toBe('collections');
       expect((error as QuotaExceededError).current).toBe(3);
-      expect((error as QuotaExceededError).limit).toBe(3);
+      expect((error as QuotaExceededError).limit).toBe('max_collections');
+      expect((error as QuotaExceededError).allowed).toBe(3);
     });
 
     it('a 400 COLLECTION_LIMIT_EXCEEDED is no longer a quota error', () => {
@@ -591,7 +597,7 @@ describe('Custom Exceptions', () => {
         new NetworkError(),
         new ConflictError(),
         new CollectionInUseError('test', ['agent-a']),
-        new QuotaExceededError('Points', 'points', 1000, 500),
+        new QuotaExceededError('Points', 'points', { current: 1000 }),
       ];
 
       errors.forEach(error => {

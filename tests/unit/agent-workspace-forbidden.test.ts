@@ -8,8 +8,10 @@
  */
 import {
   AetherfyVectorsError,
+  AgentKeyOutOfScopeError,
   AgentWorkspaceForbiddenError,
   AuthenticationError,
+  PermissionDeniedError,
   ServiceUnavailableError,
 } from '../../src';
 import { createErrorFromResponse } from '../../src/exceptions';
@@ -45,7 +47,7 @@ describe('AGENT_KEY_WORKSPACE_FORBIDDEN', () => {
     expect(err.message).toContain('afy access <agent> --add <workspace>');
   });
 
-  it('CONTROL: another 403 is still the authentication error it was', () => {
+  it('CONTROL: another 403 is its own permission error, not this one', () => {
     const err = createErrorFromResponse(
       {
         error: {
@@ -57,7 +59,9 @@ describe('AGENT_KEY_WORKSPACE_FORBIDDEN', () => {
       403,
       'Forbidden'
     );
-    expect(err).toBeInstanceOf(AuthenticationError);
+    expect(err).toBeInstanceOf(AgentKeyOutOfScopeError);
+    expect(err).toBeInstanceOf(PermissionDeniedError);
+    expect(err).not.toBeInstanceOf(AuthenticationError);
     expect(err).not.toBeInstanceOf(AgentWorkspaceForbiddenError);
     expect(err.code).toBe('AUTH_AGENT_KEY_OUT_OF_SCOPE');
   });

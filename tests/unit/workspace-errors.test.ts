@@ -16,7 +16,7 @@ type CacheInternals = {
 import { AetherfyVectorsClient } from '../../src/client';
 import {
   AetherfyVectorsError,
-  AuthenticationError,
+  AgentKeyOutOfScopeError,
   CollectionNotFoundError,
   ConflictError,
   createErrorFromResponse,
@@ -116,7 +116,7 @@ describe('each code maps to a typed error carrying it', () => {
         required_scope: null,
         documentation_url: 'https://docs.aetherfy.com/platform/api-keys',
       }),
-      AuthenticationError,
+      AgentKeyOutOfScopeError,
     ],
     [503, body('WORKSPACE_LOOKUP_UNAVAILABLE'), ServiceUnavailableError],
     [
@@ -402,7 +402,7 @@ describe('an unknown workspace never reads as "not there"', () => {
 
 it('getUsageStats with an agent key is the typed scope refusal', async () => {
   // GET /analytics/usage is account-only: an agent key gets 403
-  // AUTH_AGENT_KEY_OUT_OF_SCOPE (vectordb utils/agentRoutePolicy.js).
+  // AUTH_AGENT_KEY_OUT_OF_SCOPE.
   nock(BASE)
     .get('/api/v1/analytics/usage')
     .reply(
@@ -417,10 +417,11 @@ it('getUsageStats with an agent key is the typed scope refusal', async () => {
     .getUsageStats()
     .catch(e => e);
 
-  expect(err).toBeInstanceOf(AuthenticationError);
+  expect(err).toBeInstanceOf(AgentKeyOutOfScopeError);
   expect((err as AetherfyVectorsError).code).toBe(
     'AUTH_AGENT_KEY_OUT_OF_SCOPE'
   );
+  expect((err as AgentKeyOutOfScopeError).agentId).toBe('a1');
 });
 
 // ===========================================================================

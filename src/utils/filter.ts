@@ -3,34 +3,27 @@ import { Filter } from '../models';
 /**
  * Filter clause translation: SDK vocabulary -> wire vocabulary.
  *
- * Why this exists: the JS SDK speaks camelCase (`mustNot`, `withPayload`,
- * `scoreThreshold`) and the API speaks snake_case. Every other option on
- * every other method is translated explicitly at the call site — but the
- * filter object used to be forwarded to the engine VERBATIM. `must` and
- * `should` survived that by accident (they are spelled identically in both
- * vocabularies); `mustNot` did not. The engine has no `mustNot` key, so a
- * `mustNot` clause was dropped on the floor: no error, no warning, and the
- * points the caller meant to exclude came back in the results.
- *
- * The Python SDK never had the bug — `Filter.to_dict()` emits `must_not`
- * (aetherfy_vectors/models.py) — so this closes a cross-SDK behavior split
- * as well.
+ * Why this exists: the JS SDK speaks camelCase (`mustNot`, `minShould`,
+ * `withPayload`, `scoreThreshold`) and the API speaks snake_case. Every other
+ * option on every other method is translated explicitly at the call site, and
+ * so is the filter: `must` and `should` are spelled identically in both
+ * vocabularies, `mustNot` and `minShould` are not.
  *
  * Two properties are load-bearing:
  *
- *   1. Unknown keys throw. The 958a600 discipline: a filter clause that the
- *      SDK does not recognize is a caller mistake, and silently forwarding
- *      it is how `mustNot` stayed invisible for so long. TypeScript's
- *      excess-property check only fires on fresh object literals, so a
- *      pre-built variable, an `as any` cast, or any untyped JS caller can
- *      reach here with `{ must_not: [...] }` or `{ mustnot: [...] }`. They
- *      fail loudly instead.
+ *   1. The SDK judges no key. The API checks every key of a filter and
+ *      answers an unknown one with a 400 INVALID_FILTER naming the key's path
+ *      and the nearest valid key (thrown as `InvalidFilterError`), so a
+ *      clause name the SDK does not translate (`must_not` written by hand, a
+ *      typo, a clause added to the API tomorrow) is sent as written and
+ *      judged there. A list of valid names kept here could only lag the API:
+ *      the previous one refused `min_should` for as long as it existed.
  *
- *   2. Output key order is fixed (must, must_not, should) rather than
- *      caller insertion order. Server cache keys are derived from the
- *      request body BYTES, so two callers writing the same three clauses in
- *      different orders would otherwise occupy two cache entries. A fixed
- *      order collapses them onto one.
+ *   2. Output key order is fixed (must, must_not, should, min_should, then any
+ *      other key in the caller's order) rather than caller insertion order.
+ *      Server cache keys are derived from the request body BYTES, so two
+ *      callers writing the same clauses in different orders would otherwise
+ *      occupy two cache entries. A fixed order collapses them onto one.
  *
  * Insertion order here IS the emitted order — do not reorder casually.
  */
@@ -39,9 +32,10 @@ const FILTER_CLAUSE_WIRE_KEYS: ReadonlyArray<readonly [keyof Filter, string]> =
     ['must', 'must'],
     ['mustNot', 'must_not'],
     ['should', 'should'],
+    ['minShould', 'min_should'],
   ];
 
-const KNOWN_CLAUSES: ReadonlySet<string> = new Set(
+const TRANSLATED_CLAUSES: ReadonlySet<string> = new Set(
   FILTER_CLAUSE_WIRE_KEYS.map(([sdkKey]) => sdkKey as string)
 );
 
@@ -53,8 +47,8 @@ const KNOWN_CLAUSES: ReadonlySet<string> = new Set(
  * a filterless request keeps the byte-for-byte body it always had.
  *
  * @param filter - The caller's filter, in SDK (camelCase) vocabulary.
- * @param methodName - Method name, used in the error message on an unknown key.
- * @throws Error if the filter carries a key outside {must, mustNot, should}.
+ * @param methodName - Method name, used in the error message when the filter is not an object.
+ * @throws Error if the filter is not an object.
  */
 export function serializeFilter(
   filter: Filter | undefined | null,
@@ -64,18 +58,7 @@ export function serializeFilter(
 
   if (typeof filter !== 'object' || Array.isArray(filter)) {
     throw new Error(
-      `${methodName}: filter must be an object with must / mustNot / should clauses.`
-    );
-  }
-
-  const unknown = Object.keys(filter).filter(k => !KNOWN_CLAUSES.has(k));
-  if (unknown.length > 0) {
-    const snakeHint = unknown.includes('must_not')
-      ? ' Write the clause as `mustNot`; the SDK translates it to the wire key `must_not`.'
-      : '';
-    throw new Error(
-      `${methodName}: unknown filter clause(s): ${unknown.join(', ')}. ` +
-        `Valid clauses are must, mustNot, should.${snakeHint}`
+      `${methodName}: filter must be an object with must / mustNot / should / minShould clauses.`
     );
   }
 
@@ -83,6 +66,10 @@ export function serializeFilter(
   for (const [sdkKey, wireKey] of FILTER_CLAUSE_WIRE_KEYS) {
     const value = filter[sdkKey];
     if (value !== undefined) out[wireKey] = value;
+  }
+  // Every other key goes as written, to be judged by the API.
+  for (const [key, value] of Object.entries(filter)) {
+    if (!TRANSLATED_CLAUSES.has(key) && value !== undefined) out[key] = value;
   }
   return out;
 }
