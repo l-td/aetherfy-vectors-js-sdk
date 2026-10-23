@@ -414,23 +414,12 @@ export class HttpClient {
     const message =
       responseData?.message || nestedMessage || statusText || 'Unknown error';
     const error = new Error(message);
-    // The seconds a Retry-After header asked to wait (a 429's or a 5xx's); a
-    // 429 falls back to the body's own `retryAfter`.
-    let retryAfter: number | undefined;
-    if (status === 429 || status >= 500) {
-      retryAfter = parseRetryAfter(headers?.['retry-after']);
-      const fromBody = (responseData as { retryAfter?: unknown } | undefined)
-        ?.retryAfter;
-      if (
-        retryAfter === undefined &&
-        status === 429 &&
-        typeof fromBody === 'number' &&
-        Number.isFinite(fromBody) &&
-        fromBody >= 0
-      ) {
-        retryAfter = fromBody;
-      }
-    }
+    // The seconds a Retry-After header asked to wait (a 429's or a 5xx's); no
+    // body field names a time to come back, so none is read.
+    const retryAfter =
+      status === 429 || status >= 500
+        ? parseRetryAfter(headers?.['retry-after'])
+        : undefined;
     Object.assign(error, {
       status,
       statusText,

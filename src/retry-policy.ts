@@ -231,7 +231,7 @@ export function refusedBeforeAnything(error: unknown): boolean {
     return REFUSED_BEFORE_ANYTHING_CODES.has(serverCode(e) ?? '');
   }
   if (e.status === 429) {
-    // HttpClient reads the header, else the body's field, into `retryAfter`.
+    // HttpClient reads the Retry-After header into `retryAfter`.
     return typeof e.retryAfter === 'number';
   }
   // HttpClient saw the socket never connect.

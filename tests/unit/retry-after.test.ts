@@ -258,7 +258,7 @@ describe('a 429', () => {
   const limited = (retryAfter?: number) =>
     new RateLimitExceededError('slow down', retryAfter);
 
-  it('carries the header it was built with, else the body field', () => {
+  it('carries the header it was built with', () => {
     expect(
       (
         createErrorFromResponse(
@@ -270,15 +270,6 @@ describe('a 429', () => {
         ) as RateLimitExceededError
       ).retryAfter
     ).toBe(4);
-    expect(
-      (
-        createErrorFromResponse(
-          { retryAfter: 9, error: { code: 'RATE_LIMIT_EXCEEDED' } },
-          429,
-          'Too Many Requests'
-        ) as RateLimitExceededError
-      ).retryAfter
-    ).toBe(9);
     expect(
       (
         createErrorFromResponse(
@@ -334,6 +325,34 @@ describe('a 429', () => {
     });
     await retryWithBackoff(failingThenOk(raw), { retryClass: REPEATABLE });
     expect(clock.waits).toEqual([3000]);
+  });
+
+  it('a body value without the header is ignored: nothing is retried', async () => {
+    // No server sends a retry time in a 429 body; only the header names one.
+    clock.restore();
+    clock = fakeClock(30_000);
+    const client = new AetherfyVectorsClient({
+      apiKey: 'afy_test_1234567890123456',
+      workspace: 'home',
+      enableConnectionPooling: false,
+    });
+    const path = '/api/v1/workspaces/home/collections/docs/points/count';
+    const scope = nock(BASE)
+      .post(path)
+      .reply(429, {
+        retryAfter: 9,
+        error: {
+          code: 'RATE_LIMIT_EXCEEDED',
+          message: 'slow',
+          retry_after: 9,
+          details: { retry_after: 9, reset_in_seconds: 9 },
+        },
+      });
+    const error = await client.count('docs').catch(e => e);
+    expect(error).toBeInstanceOf(RateLimitExceededError);
+    expect(error.retryAfter).toBeUndefined();
+    expect(scope.isDone()).toBe(true);
+    expect(clock.waits).toEqual([]);
   });
 
   it('through the client, the header is waited for', async () => {

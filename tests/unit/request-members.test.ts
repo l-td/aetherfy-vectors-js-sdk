@@ -9,13 +9,13 @@
  */
 import nock from 'nock';
 import { AetherfyVectorsClient } from '../../src/client';
-import { Filter } from '../../src/models';
+import { DistanceMetric, Filter } from '../../src/models';
 
 const BASE = 'https://vectors.aetherfy.com';
 
-/** The members each endpoint takes (path suffix -> members). */
+/** The members each endpoint takes ("METHOD path-suffix" -> members). */
 const ALLOWED: Record<string, string[]> = {
-  'points/query': [
+  'POST points/query': [
     'shard_key',
     'prefetch',
     'query',
@@ -30,7 +30,7 @@ const ALLOWED: Record<string, string[]> = {
     'lookup_from',
     'with_vectors',
   ],
-  'points/scroll': [
+  'POST points/scroll': [
     'shard_key',
     'offset',
     'limit',
@@ -40,11 +40,17 @@ const ALLOWED: Record<string, string[]> = {
     'order_by',
     'with_vectors',
   ],
-  'points/count': ['shard_key', 'filter', 'exact'],
-  'points/delete': ['points', 'shard_key', 'filter'],
-  'points/payload': ['payload', 'points', 'filter', 'shard_key', 'key'],
-  'points/payload/delete': ['keys', 'points', 'filter', 'shard_key'],
-  'points/retrieve': ['ids', 'with_payload', 'with_vector'],
+  'POST points/count': ['shard_key', 'filter', 'exact'],
+  'POST points/delete': ['points', 'shard_key', 'filter'],
+  'PUT points': ['points'],
+  'PUT points/payload': ['payload', 'points', 'filter', 'shard_key', 'key'],
+  'POST collections': ['name', 'vectors', 'description', 'regions'],
+  'PUT index': ['field_name', 'field_schema'],
+  'PUT schema': ['schema', 'enforcement_mode', 'description'],
+  'POST schema/analyze': ['sample_size'],
+  'POST points/payload': ['payload', 'points', 'filter', 'shard_key', 'key'],
+  'POST points/payload/delete': ['keys', 'points', 'filter', 'shard_key'],
+  'POST points/retrieve': ['ids', 'with_payload', 'with_vector'],
 };
 const PARAMS = [
   'hnsw_ef',
@@ -64,18 +70,29 @@ const FILTER: Filter = {
   minShould: { conditions: COND, min_count: 1 },
 };
 
-type Recorded = { path: string; body: Record<string, unknown> };
+type Recorded = {
+  method: string;
+  path: string;
+  body: Record<string, unknown>;
+};
 
-function suffixOf(path: string): string | undefined {
+function endpointOf(method: string, path: string): string | undefined {
   return Object.keys(ALLOWED)
     .sort((a, b) => b.length - a.length)
-    .find(s => path.endsWith(s));
+    .find(key => {
+      const [verb, suffix] = key.split(' ');
+      return verb === method && path.endsWith(suffix);
+    });
 }
 
 /** The members of `body` the endpoint at `path` does not take. */
-function refused(path: string, body: Record<string, unknown>): string[] {
-  const suffix = suffixOf(path) as string;
-  const out = Object.keys(body).filter(k => !ALLOWED[suffix].includes(k));
+function refused(
+  method: string,
+  path: string,
+  body: Record<string, unknown>
+): string[] {
+  const endpoint = endpointOf(method, path) as string;
+  const out = Object.keys(body).filter(k => !ALLOWED[endpoint].includes(k));
   const filter = (body.filter ?? {}) as Record<string, unknown>;
   out.push(
     ...Object.keys(filter)
@@ -94,11 +111,12 @@ function refused(path: string, body: Record<string, unknown>): string[] {
 async function recordEveryRequest(): Promise<Recorded[]> {
   const recorded: Recorded[] = [];
   const answer = function (
-    this: { req: { path: string } },
+    this: { req: { path: string; method: string } },
     _uri: string,
     body: unknown
   ) {
     recorded.push({
+      method: this.req.method,
       path: this.req.path,
       body: (body ?? {}) as Record<string, unknown>,
     });
@@ -113,6 +131,20 @@ async function recordEveryRequest(): Promise<Recorded[]> {
   for (const method of ['post', 'put'] as const) {
     nock(BASE).persist()[method](/.*/).reply(answer);
   }
+  // An upsert reads the collection's vector config and its schema first.
+  nock(BASE)
+    .persist()
+    .get(/\/collections\/docs$/)
+    .reply(200, {
+      result: {
+        config: { params: { vectors: { size: 2, distance: 'Cosine' } } },
+      },
+      schema_version: 'v1',
+    });
+  nock(BASE)
+    .persist()
+    .get(/\/collections\/docs\/schema$/)
+    .reply(404, { error: { code: 'SCHEMA_NOT_DEFINED', message: 'x' } });
   nock(BASE)
     .persist()
     .get(/.*/)
@@ -151,6 +183,23 @@ async function recordEveryRequest(): Promise<Recorded[]> {
     () => client.deletePayload('docs', ['a'], [1]),
     () =>
       client.retrieve('docs', [1], { withPayload: false, withVectors: true }),
+    () => client.upsert('docs', [{ id: 1, vector: [0.1, 0.2] }]),
+    () =>
+      client.createCollection(
+        'fresh',
+        { size: 2, distance: DistanceMetric.COSINE },
+        'd',
+        ['us-east-1']
+      ),
+    () => client.createFieldIndex('docs', 'tag', 'keyword'),
+    () =>
+      client.setSchema(
+        'docs',
+        { fields: { name: { type: 'string', required: false } } },
+        'strict',
+        'd'
+      ),
+    () => client.analyzeSchema('docs', 500),
   ];
   for (const call of calls) {
     try {
@@ -168,13 +217,19 @@ afterEach(() => {
 
 describe('every member of every request is one the endpoint takes', () => {
   it('holds for every shape the client builds', async () => {
-    const recorded = (await recordEveryRequest()).filter(r => suffixOf(r.path));
-    const seen = new Set(recorded.map(r => suffixOf(r.path)));
-    for (const suffix of Object.keys(ALLOWED)) {
-      expect(seen.has(suffix)).toBe(true); // the shape was built
+    const recorded = (await recordEveryRequest()).filter(r =>
+      endpointOf(r.method, r.path)
+    );
+    const seen = new Set(recorded.map(r => endpointOf(r.method, r.path)));
+    for (const endpoint of Object.keys(ALLOWED)) {
+      expect({ endpoint, built: seen.has(endpoint) }).toEqual({
+        endpoint,
+        built: true, // the shape was built
+      });
     }
-    for (const { path, body } of recorded) {
-      expect({ path, refused: refused(path, body) }).toEqual({
+    for (const { method, path, body } of recorded) {
+      expect({ method, path, refused: refused(method, path, body) }).toEqual({
+        method,
         path,
         refused: [],
       });
@@ -200,7 +255,46 @@ describe('CONTROL: the check names a member the endpoint does not take', () => {
       ['params', 'params.bogus'],
     ],
   ])('%j', (body, expected) => {
-    const out = refused('/collections/docs/points/count', body);
+    const out = refused('POST', '/collections/docs/points/count', body);
     for (const name of expected) expect(out).toContain(name);
   });
+
+  it.each([
+    [
+      'PUT',
+      '/collections/docs/points',
+      { points: [], update_filter: {} },
+      ['update_filter'],
+    ],
+    [
+      'PUT',
+      '/collections/docs/points/payload',
+      { payload: {}, points: [], bogus: 1 },
+      ['bogus'],
+    ],
+    ['POST', '/collections', { name: 'x', vectors: {}, bogus: 1 }, ['bogus']],
+    [
+      'PUT',
+      '/collections/docs/index',
+      { field_name: 'a', field_type: 'keyword' },
+      ['field_type'],
+    ],
+    [
+      'PUT',
+      '/collections/docs/schema',
+      { schema: {}, mode: 'strict' },
+      ['mode'],
+    ],
+    [
+      'POST',
+      '/collections/docs/schema/analyze',
+      { sample_size: 1, limit: 2 },
+      ['limit'],
+    ],
+  ])(
+    'the remaining endpoints are judged too: %s %s',
+    (method, path, body, expected) => {
+      expect(refused(method, path, body)).toEqual(expected);
+    }
+  );
 });

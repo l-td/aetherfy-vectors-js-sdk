@@ -349,9 +349,11 @@ describe('Custom Exceptions', () => {
 
     it('should create RateLimitExceededError for 429 status', () => {
       const error = createErrorFromResponse(
-        { message: 'Too many requests', retryAfter: 30 },
+        { message: 'Too many requests' },
         429,
-        'Too Many Requests'
+        'Too Many Requests',
+        undefined,
+        30 // the Retry-After header, read by the HTTP layer
       );
 
       expect(error).toBeInstanceOf(RateLimitExceededError);

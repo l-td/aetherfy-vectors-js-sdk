@@ -1106,14 +1106,8 @@ export function createErrorFromResponse(
           )
         );
       }
-      // The time the server asked for: the header (read by the HTTP layer),
-      // else the body's own field.
-      return stamp(
-        new RateLimitExceededError(
-          message,
-          retryAfter ?? countOf(responseData?.retryAfter)
-        )
-      );
+      // The time the server asked for: the header, read by the HTTP layer.
+      return stamp(new RateLimitExceededError(message, retryAfter));
 
     case 502:
     case 503:

@@ -93,15 +93,16 @@ describe('search searchParams — wire contract', () => {
 
     it('does not enumerate or translate param names', async () => {
       // The SDK must not know the schema. An arbitrary key it has never heard
-      // of — including one Qdrant may add tomorrow — passes through intact,
-      // snake_case and nesting preserved. If this test ever needs updating
-      // for a new param name, the pass-through has grown an allowlist and
-      // become a compatibility treadmill.
+      // of passes through intact, snake_case and nesting preserved (the API
+      // judges the names: an unknown one is a 400 INVALID_REQUEST_FIELD). If
+      // this test ever needs a list of names in the SDK, the pass-through
+      // has grown an allowlist and become a compatibility treadmill.
       const opaque = {
         hnsw_ef: 512,
         exact: false,
         quantization: { rescore: true, oversampling: 2.0 },
-        some_param_invented_after_this_sdk_shipped: ['a', 1, null],
+        indexed_only: true,
+        acorn: { enable: true, max_selectivity: 0.4 },
       };
 
       const raw = await captureSearchBody(client, { searchParams: opaque });
