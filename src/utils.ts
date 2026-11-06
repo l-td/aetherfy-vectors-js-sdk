@@ -505,13 +505,17 @@ export async function retryWithBackoff<T>(
 /**
  * Sleep utility
  *
+ * The timer keeps the process alive until it fires. A retry's backoff is often
+ * the only thing pending after a connection fails fast (refused, unreachable);
+ * an unref'd timer lets Node exit then with the awaited call neither resolved
+ * nor rejected -- exit code 0 and no result, no error.
+ *
  * @param ms - Milliseconds to sleep
  * @returns Promise that resolves after delay
  */
 export function sleep(ms: number): Promise<void> {
   return new Promise(resolve => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref();
+    setTimeout(resolve, ms);
   });
 }
 

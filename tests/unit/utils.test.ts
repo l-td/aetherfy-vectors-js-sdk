@@ -657,6 +657,27 @@ describe('Async Utilities', () => {
       expect(end - start).toBeGreaterThanOrEqual(49); // Allow some variance
       jest.useRealTimers();
     }, 1000);
+
+    it('holds the event loop open until it resolves', async () => {
+      // An unref'd timer lets Node exit with the awaited call unsettled (exit
+      // code 0, no result): a retry backoff is often the only thing pending.
+      const real = global.setTimeout;
+      let held: ReturnType<typeof setTimeout> | undefined;
+      const spy = jest.spyOn(global, 'setTimeout').mockImplementation(((
+        fn: () => void,
+        ms?: number
+      ) => {
+        held = real(fn, ms);
+        return held;
+      }) as unknown as typeof setTimeout);
+      try {
+        const sleeping = sleep(5);
+        expect(held?.hasRef()).toBe(true);
+        await sleeping;
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 });
 
