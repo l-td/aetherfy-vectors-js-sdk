@@ -38,7 +38,11 @@ import {
   PeerNotFound,
 } from '../../../src/agent/errors';
 import { PEER_CACHE_SECONDS as CACHE_SECONDS_OF_CACHE } from '../../../src/agent/peers';
-import { peerCache } from '../../../src/agent/peers';
+import {
+  PEER_RETRY_CAP_SECONDS,
+  PEER_RETRY_FLOOR_SECONDS,
+  peerCache,
+} from '../../../src/agent/peers';
 
 const PEERS = 'https://agents.aetherfy.com/api/v1/agents/parent-agent-id/peers';
 const KEY = 'afy_test_key_do_not_leak';
@@ -1084,4 +1088,246 @@ describe('over a real socket (loopback only)', () => {
       }
     }
   );
+});
+
+// ------------------------------------------- a control plane that cannot answer
+//
+// A looked-up address outlives its window as the LAST KNOWN ONE and is served when the control plane
+// cannot answer (429, 5xx, no connection), and the control plane is not asked again before its
+// Retry-After. Every test counts lookups (events) and moves the injected clock; none waits.
+
+describe('a control plane that cannot answer', () => {
+  const WINDOW_PAST = PEER_CACHE_SECONDS + 1;
+  const unwell = (status: number): Reply => ({
+    status,
+    body: envelope('SERVICE_UNAVAILABLE'),
+  });
+
+  async function knownThenExpired(): Promise<void> {
+    await expect(agentUrl('analyst')).resolves.toBe(OLD);
+    clock.advance(WINDOW_PAST);
+  }
+
+  it.each([
+    [429, '7'],
+    [500, undefined],
+    [503, '7'],
+    [502, undefined],
+  ])(
+    'serves the last known address when the lookup answers %s',
+    async (status, retryAfter) => {
+      await knownThenExpired();
+      lookupReplies.set('analyst', unwell(status));
+      lookupRetryAfter = retryAfter;
+
+      await expect(agentUrl('analyst')).resolves.toBe(OLD);
+
+      expect(lookupCalls).toHaveLength(2); // asked once, was refused, served the known address
+    }
+  );
+
+  it('serves the last known address when the control plane is unreachable', async () => {
+    await knownThenExpired();
+    const calls = lookupCalls.length;
+    (global.fetch as jest.Mock).mockImplementationOnce(() => {
+      throw new TypeError('fetch failed');
+    });
+    (global.fetch as jest.Mock).mockImplementationOnce(() => {
+      throw new TypeError('fetch failed');
+    });
+
+    await expect(agentUrl('analyst')).resolves.toBe(OLD);
+    expect(lookupCalls).toHaveLength(calls); // neither attempt reached the fake lookup
+    // and the failure is waited out, not repeated on the next call
+    await expect(agentUrl('analyst')).resolves.toBe(OLD);
+    expect(lookupCalls).toHaveLength(calls);
+  });
+
+  it('does not ask again before the Retry-After, and asks again after it', async () => {
+    await knownThenExpired();
+    lookupReplies.set('analyst', unwell(429));
+    lookupRetryAfter = '10';
+    await agentUrl('analyst');
+    const asked = lookupCalls.length;
+
+    clock.advance(9.9);
+    await expect(agentUrl('analyst')).resolves.toBe(OLD);
+    expect(lookupCalls).toHaveLength(asked); // waiting: no request
+
+    answer('analyst', NEW);
+    lookupRetryAfter = undefined;
+    clock.advance(0.1);
+    await expect(agentUrl('analyst')).resolves.toBe(NEW);
+    expect(lookupCalls).toHaveLength(asked + 1);
+  });
+
+  it.each([
+    ['none waits the floor', undefined, PEER_RETRY_FLOOR_SECONDS],
+    ['a long one is capped', '3600', PEER_RETRY_CAP_SECONDS],
+    ['one in range is honoured', '20', 20],
+  ])('%s', async (_label, retryAfter, waits) => {
+    await knownThenExpired();
+    lookupReplies.set('analyst', unwell(503));
+    lookupRetryAfter = retryAfter;
+    await agentUrl('analyst');
+    const asked = lookupCalls.length;
+
+    clock.advance(waits - 0.01);
+    await agentUrl('analyst');
+    expect(lookupCalls).toHaveLength(asked);
+    clock.advance(0.02);
+    await agentUrl('analyst');
+    expect(lookupCalls).toHaveLength(asked + 1);
+  });
+
+  it('asks again at once after a Retry-After of zero', async () => {
+    await knownThenExpired();
+    lookupReplies.set('analyst', unwell(503));
+    lookupRetryAfter = '0';
+    await agentUrl('analyst');
+    const asked = lookupCalls.length;
+
+    await agentUrl('analyst');
+
+    expect(lookupCalls).toHaveLength(asked + 1);
+  });
+
+  it.each([
+    [403, 'AUTH_AGENT_KEY_OUT_OF_SCOPE'],
+    [404, 'AGENT_NOT_FOUND'],
+    [409, 'PEER_HAS_NO_URL'],
+  ])('never serves around a %s answer', async (status, code) => {
+    await knownThenExpired();
+    lookupReplies.set('analyst', { status, body: envelope(code) });
+
+    const error = await agentUrl('analyst').catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(PeerLookupError);
+    expect((error as PeerLookupError).status).toBe(status);
+  });
+
+  it('does not serve an address after the control plane said the peer is gone', async () => {
+    await knownThenExpired();
+    lookupReplies.set('analyst', {
+      status: 404,
+      body: envelope('AGENT_NOT_FOUND'),
+    });
+    await expect(agentUrl('analyst')).rejects.toBeInstanceOf(PeerNotFound);
+
+    lookupReplies.set('analyst', unwell(503));
+    const error = await agentUrl('analyst').catch((e: unknown) => e);
+
+    expect((error as PeerLookupError).status).toBe(503); // nothing known to fall back to
+  });
+
+  it('throws the failure with no known address, and then waits it out without asking', async () => {
+    lookupReplies.set('analyst', unwell(503));
+    lookupRetryAfter = '7';
+
+    const first = (await agentUrl('analyst').catch(
+      (e: unknown) => e
+    )) as PeerLookupError;
+    expect(first.status).toBe(503);
+    expect(first.retryAfter).toBe(7);
+
+    clock.advance(2);
+    const second = (await agentUrl('analyst').catch(
+      (e: unknown) => e
+    )) as PeerLookupError;
+
+    expect(lookupCalls).toHaveLength(1); // the second did not ask
+    expect(second.status).toBe(503);
+    expect(second.retryAfter).toBeCloseTo(5);
+    expect(second.message).toContain('no earlier address is known');
+  });
+
+  it('never answers fresh from memory', async () => {
+    await knownThenExpired();
+    lookupReplies.set('analyst', unwell(503));
+
+    await expect(agentUrl('analyst', { fresh: true })).rejects.toBeInstanceOf(
+      PeerLookupError
+    );
+    await expect(agentUrl('analyst', { fresh: true })).rejects.toBeInstanceOf(
+      PeerLookupError
+    ); // waiting is not an answer either
+
+    expect(lookupCalls).toHaveLength(2); // the first fresh asked; the second waited
+  });
+
+  it('does not make one peer wait out another', async () => {
+    lookupReplies.set('indexer', {
+      status: 200,
+      body: { name: 'indexer', url: INDEXER },
+    });
+    await knownThenExpired();
+    lookupReplies.set('analyst', unwell(503));
+    await agentUrl('analyst');
+
+    await expect(agentUrl('indexer')).resolves.toBe(INDEXER);
+  });
+
+  it('falls back to the last list known, as a copy', async () => {
+    lookupReplies.set(null, {
+      status: 200,
+      body: { peers: [{ name: 'analyst', url: OLD }] },
+    });
+    await expect(agentUrls()).resolves.toEqual({ analyst: OLD });
+    clock.advance(WINDOW_PAST);
+    lookupReplies.set(null, unwell(429));
+    lookupRetryAfter = '9';
+
+    const served = await agentUrls();
+    served.analyst = 'edited';
+
+    await expect(agentUrls()).resolves.toEqual({ analyst: OLD });
+    expect(lookupCalls).toHaveLength(2); // the second read waited
+    await expect(agentUrls({ fresh: true })).rejects.toBeInstanceOf(
+      PeerLookupError
+    );
+  });
+
+  it('throws a failed list when none is known', async () => {
+    lookupReplies.set(null, unwell(503));
+
+    const error = (await agentUrls().catch(
+      (e: unknown) => e
+    )) as PeerLookupError;
+
+    expect(error.status).toBe(503);
+  });
+
+  it('does not let a failed list hold back a lookup by name', async () => {
+    lookupReplies.set(null, unwell(503));
+    await expect(agentUrls()).rejects.toBeInstanceOf(PeerLookupError);
+
+    await expect(agentUrl('analyst')).resolves.toBe(OLD); // the two waits are separate
+  });
+
+  it('reaches the peer at the known address through an outage', async () => {
+    behaviour.set(OLD, { status: 200, body: { ok: true } });
+    await agentUrl('analyst');
+    clock.advance(WINDOW_PAST);
+    lookupReplies.set('analyst', unwell(429));
+    lookupRetryAfter = '5';
+
+    const response = await callAgent('analyst', '/x');
+
+    expect(response.status).toBe(200);
+    expect(peerCalls.map(c => c.url)).toEqual([`${OLD}/x`]);
+  });
+
+  it('does not retry, as a stale address, the one that just stopped answering', async () => {
+    behaviour.set(OLD, UNREACHABLE);
+    await agentUrl('analyst');
+    lookupReplies.set('analyst', unwell(503));
+
+    const error = (await callAgent('analyst', '/x').catch(
+      (e: unknown) => e
+    )) as PeerLookupError;
+
+    expect(error).toBeInstanceOf(PeerLookupError);
+    expect(error.status).toBe(503);
+    expect(peerCalls.map(c => c.url)).toEqual([`${OLD}/x`]); // one request, to the address that was known
+  });
 });

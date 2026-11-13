@@ -85,7 +85,14 @@ import {
   USER_AGENT_PREFIX,
 } from './http';
 import { MachineShape, PeerResponse, Run, Spawn } from './models';
-import { PEER_CACHE_SECONDS, peerCache } from './peers';
+import {
+  PEER_CACHE_SECONDS,
+  PEER_RETRY_CAP_SECONDS,
+  PEER_RETRY_FLOOR_SECONDS,
+  peerCache,
+  retryDelay,
+} from './peers';
+import type { PeerWait } from './peers';
 import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
 import { SDK_VERSION } from '../version';
 
@@ -113,7 +120,7 @@ export type { MachineShape, PeerResponse, Run, Spawn };
  * definition lives beside the cache that applies it; this is the same number,
  * readable where the calls are, and in both languages.
  */
-export { PEER_CACHE_SECONDS };
+export { PEER_CACHE_SECONDS, PEER_RETRY_CAP_SECONDS, PEER_RETRY_FLOOR_SECONDS };
 
 /**
  * The release this helper announces in its User-Agent. NOT a literal of its
@@ -841,6 +848,14 @@ const AGENT_URL_OPTION_KEYS = optionKeys<AgentUrlOptions>({ fresh: true });
  * Only the NAME to URL pair is kept. A refusal is never kept, so a peer that is
  * created a moment after a {@link PeerNotFound} is found on the next call.
  *
+ * WHEN THE CONTROL PLANE CANNOT ANSWER (429, 5xx, or no connection), the last
+ * address known for the peer is returned if there is one, and the control plane
+ * is not asked again before its `Retry-After` (between
+ * `PEER_RETRY_FLOOR_SECONDS` and `PEER_RETRY_CAP_SECONDS`): stale beats failing
+ * a call that would have worked. With no known address the failure is thrown.
+ * `{ fresh: true }` is never answered from memory, and a 404 or 409 drops the
+ * known address.
+ *
  * @throws {PeerNotFound} 404 `AGENT_NOT_FOUND`, the workspace has no agent of
  *   that name.
  * @throws {PeerHasNoUrl} 409 `PEER_HAS_NO_URL`, the agent exists but nothing
@@ -867,10 +882,27 @@ export async function agentUrl(
     if (cached !== undefined) return cached;
   }
 
-  const body = await lookupPeers(
-    `${peersUrl()}/${encodeURIComponent(name)}`,
-    name
-  );
+  const waiting = peerCache.blocked(name);
+  if (waiting !== undefined) {
+    const stale = options.fresh ? undefined : peerCache.lastKnownUrl(name);
+    if (stale !== undefined) return stale;
+    throw stillWaiting(`Looking up '${name}'`, waiting);
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await lookupPeers(`${peersUrl()}/${encodeURIComponent(name)}`, name);
+  } catch (error) {
+    if (error instanceof PeerNotFound || error instanceof PeerHasNoUrl) {
+      peerCache.forgetUrl(name);
+      throw error;
+    }
+    if (!controlPlaneCouldNotAnswer(error)) throw error;
+    blockLookup(name, error);
+    const stale = options.fresh ? undefined : peerCache.lastKnownUrl(name);
+    if (stale !== undefined) return stale;
+    throw error;
+  }
   const url = body.url;
   if (typeof url !== 'string' || url === '') {
     throw new PeerLookupError(
@@ -895,6 +927,10 @@ export async function agentUrl(
  *
  * The object is a copy: editing it does not edit what is remembered.
  *
+ * The same fallback as {@link agentUrl}: when the control plane cannot answer,
+ * the last list known is returned, and the control plane is not asked again
+ * before its `Retry-After`.
+ *
  * @throws {PeerLookupError} A refusal, among them 403
  *   `AUTH_AGENT_KEY_OUT_OF_SCOPE` — read `code`, not the prose.
  * @throws {NotRunningOnAgent} `AETHERFY_PEERS_URL` or `AETHERFY_API_KEY` is not
@@ -910,7 +946,23 @@ export async function agentUrls(
     if (cached !== undefined) return cached;
   }
 
-  const body = await lookupPeers(peersUrl(), null);
+  const waiting = peerCache.blocked(null);
+  if (waiting !== undefined) {
+    const staleList = options.fresh ? undefined : peerCache.lastKnownList();
+    if (staleList !== undefined) return staleList;
+    throw stillWaiting('Listing the peers', waiting);
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await lookupPeers(peersUrl(), null);
+  } catch (error) {
+    if (!controlPlaneCouldNotAnswer(error)) throw error;
+    blockLookup(null, error);
+    const staleList = options.fresh ? undefined : peerCache.lastKnownList();
+    if (staleList !== undefined) return staleList;
+    throw error;
+  }
   const peers = body.peers;
   if (!Array.isArray(peers)) {
     throw new PeerLookupError(
@@ -1111,6 +1163,41 @@ function peersUrl(): string {
  * categories the control plane reuses; `AGENT_NOT_FOUND` and `PEER_HAS_NO_URL`
  * are what it promises not to rename.
  */
+/**
+ * A lookup that failed for the control plane's state, not for what was asked: no connection, 429 or 5xx.
+ * A 403, a 404 and a 409 are ANSWERS and are never served around.
+ */
+function controlPlaneCouldNotAnswer(error: unknown): boolean {
+  if (error instanceof AgentTransportError) return true;
+  if (!(error instanceof PeerLookupError)) return false;
+  const status = error.status;
+  return status !== undefined && (status === 429 || status >= 500);
+}
+
+function blockLookup(key: string | null, error: unknown): void {
+  const failed = error instanceof PeerLookupError ? error : undefined;
+  peerCache.block(
+    key,
+    retryDelay(failed?.retryAfter),
+    failed?.status,
+    failed?.code
+  );
+}
+
+/** The failure of the lookup being waited out, thrown instead of asking again. */
+function stillWaiting(what: string, waiting: PeerWait): PeerLookupError {
+  return new PeerLookupError(
+    `${what} failed a moment ago (${waiting.status ?? 'no connection'}) and the ` +
+      `control plane is not asked again for ${Math.round(waiting.left)} more ` +
+      'second(s); no earlier address is known.',
+    {
+      status: waiting.status,
+      code: waiting.code,
+      retryAfter: waiting.left,
+    }
+  );
+}
+
 async function lookupPeers(
   url: string,
   name: string | null

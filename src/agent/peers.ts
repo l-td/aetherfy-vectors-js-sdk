@@ -29,6 +29,35 @@
  */
 export const PEER_CACHE_SECONDS = 30;
 
+/**
+ * THE LAST ADDRESS KNOWN FOR A PEER outlives the window above, and is served only when the control plane
+ * could not answer (429, 5xx, unreachable): an address that was right thirty seconds ago usually still is,
+ * and a call that would have worked must not fail because a lookup was refused. It is dropped the moment
+ * the control plane answers that the peer is gone (404 or 409), and it is never served to a caller that
+ * asked for a fresh one or to the re-lookup after an address stopped answering.
+ *
+ * HOW LONG AFTER A FAILED LOOKUP THE CONTROL PLANE IS NOT ASKED AGAIN: its Retry-After, kept between the
+ * floor and the cap. The floor is what a failure without a Retry-After waits (a sick control plane must not
+ * get a lookup per call); the cap stops one long Retry-After from pinning a stale address for minutes.
+ */
+export const PEER_RETRY_FLOOR_SECONDS = 5;
+export const PEER_RETRY_CAP_SECONDS = 60;
+
+/** Seconds not to ask again after a failed lookup that carried this Retry-After (or none). */
+export function retryDelay(retryAfter: number | undefined): number {
+  if (retryAfter === undefined || Number.isNaN(retryAfter)) {
+    return PEER_RETRY_FLOOR_SECONDS;
+  }
+  return Math.min(Math.max(retryAfter, 0), PEER_RETRY_CAP_SECONDS);
+}
+
+export interface PeerWait {
+  /** Seconds left of the wait. */
+  left: number;
+  status: number | undefined;
+  code: string | undefined;
+}
+
 export type Clock = () => number;
 
 const monotonicSeconds: Clock = () => performance.now() / 1000;
@@ -39,6 +68,13 @@ export class PeerCache {
   private urls = new Map<string, { url: string; storedAt: number }>();
   private list: { urls: Record<string, string>; storedAt: number } | null =
     null;
+  private knownUrls = new Map<string, string>();
+  private knownList: Record<string, string> | null = null;
+  // key (a name, or null for the list) -> when the failed lookup may be repeated, and what failed
+  private blockedUntil = new Map<
+    string | null,
+    { until: number; status: number | undefined; code: string | undefined }
+  >();
 
   constructor(clock: Clock = monotonicSeconds) {
     this.clock = clock;
@@ -53,6 +89,9 @@ export class PeerCache {
     this.clock = clock;
     this.urls.clear();
     this.list = null;
+    this.knownUrls.clear();
+    this.knownList = null;
+    this.blockedUntil.clear();
   }
 
   private fresh(storedAt: number): boolean {
@@ -69,6 +108,43 @@ export class PeerCache {
 
   putUrl(name: string, url: string): void {
     this.urls.set(name, { url, storedAt: this.clock() });
+    this.knownUrls.set(name, url);
+    this.blockedUntil.delete(name);
+  }
+
+  lastKnownUrl(name: string): string | undefined {
+    return this.knownUrls.get(name);
+  }
+
+  /** The control plane said the peer is gone: no stale address may be served for it. */
+  forgetUrl(name: string): void {
+    this.knownUrls.delete(name);
+    this.blockedUntil.delete(name);
+  }
+
+  block(
+    key: string | null,
+    seconds: number,
+    status: number | undefined,
+    code: string | undefined
+  ): void {
+    this.blockedUntil.set(key, {
+      until: this.clock() + seconds,
+      status,
+      code,
+    });
+  }
+
+  /** The failed lookup still being waited out, or undefined. */
+  blocked(key: string | null): PeerWait | undefined {
+    const entry = this.blockedUntil.get(key);
+    if (entry === undefined) return undefined;
+    const left = entry.until - this.clock();
+    if (left <= 0) {
+      this.blockedUntil.delete(key);
+      return undefined;
+    }
+    return { left, status: entry.status, code: entry.code };
   }
 
   /** A COPY: a caller who edits what it was handed must not edit the cache. */
@@ -81,6 +157,13 @@ export class PeerCache {
 
   putList(urls: Record<string, string>): void {
     this.list = { urls: { ...urls }, storedAt: this.clock() };
+    this.knownList = { ...urls };
+    this.blockedUntil.delete(null);
+  }
+
+  /** A COPY, like getList. */
+  lastKnownList(): Record<string, string> | undefined {
+    return this.knownList === null ? undefined : { ...this.knownList };
   }
 }
 
