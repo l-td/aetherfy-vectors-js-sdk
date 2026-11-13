@@ -42,6 +42,7 @@ import {
   PEER_RETRY_CAP_SECONDS,
   PEER_RETRY_FLOOR_SECONDS,
   peerCache,
+  retryDelay,
 } from '../../../src/agent/peers';
 
 const PEERS = 'https://agents.aetherfy.com/api/v1/agents/parent-agent-id/peers';
@@ -1180,17 +1181,41 @@ describe('a control plane that cannot answer', () => {
     expect(lookupCalls).toHaveLength(asked + 1);
   });
 
-  it('asks again at once after a Retry-After of zero', async () => {
-    await knownThenExpired();
-    lookupReplies.set('analyst', unwell(503));
-    lookupRetryAfter = '0';
-    await agentUrl('analyst');
-    const asked = lookupCalls.length;
-
-    await agentUrl('analyst');
-
-    expect(lookupCalls).toHaveLength(asked + 1);
+  it.each([
+    ['none', undefined, 5],
+    ['zero', 0, 5],
+    ['one', 1, 5],
+    ['4.9', 4.9, 5],
+    ['negative', -3, 5],
+    ['NaN', NaN, 5],
+    ['5', 5, 5],
+    ['20', 20, 20],
+    ['60', 60, 60],
+    ['120', 120, 60],
+  ])('retryDelay clamps both ends: %s', (_label, retryAfter, waits) => {
+    // The floor applies to a GIVEN Retry-After too: the control plane's own limiter sends small values,
+    // and a wait of 0 would give a sick control plane a lookup on every call.
+    expect(retryDelay(retryAfter)).toBe(waits);
   });
+
+  it.each([['0'], ['1'], ['4.9'], ['-3']])(
+    'a Retry-After of %s still waits the floor before asking again',
+    async retryAfter => {
+      await knownThenExpired();
+      lookupReplies.set('analyst', unwell(429));
+      lookupRetryAfter = retryAfter;
+      await agentUrl('analyst');
+      const asked = lookupCalls.length;
+
+      clock.advance(PEER_RETRY_FLOOR_SECONDS - 0.01);
+      await expect(agentUrl('analyst')).resolves.toBe(OLD);
+      expect(lookupCalls).toHaveLength(asked); // still waiting: no request
+
+      clock.advance(0.02);
+      await agentUrl('analyst');
+      expect(lookupCalls).toHaveLength(asked + 1);
+    }
+  );
 
   it.each([
     [403, 'AUTH_AGENT_KEY_OUT_OF_SCOPE'],

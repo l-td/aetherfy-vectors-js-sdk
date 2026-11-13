@@ -43,12 +43,21 @@ export const PEER_CACHE_SECONDS = 30;
 export const PEER_RETRY_FLOOR_SECONDS = 5;
 export const PEER_RETRY_CAP_SECONDS = 60;
 
-/** Seconds not to ask again after a failed lookup that carried this Retry-After (or none). */
+/**
+ * Seconds not to ask again after a failed lookup that carried this Retry-After (or none).
+ *
+ * BOTH ENDS ARE CLAMPED: a Retry-After below the floor (0, 1, a negative value) waits the floor, because the
+ * control plane's own limiter sends small values and a wait of 0 would give a sick control plane a lookup on
+ * every call; one above the cap waits the cap; none (or NaN) waits the floor.
+ */
 export function retryDelay(retryAfter: number | undefined): number {
   if (retryAfter === undefined || Number.isNaN(retryAfter)) {
     return PEER_RETRY_FLOOR_SECONDS;
   }
-  return Math.min(Math.max(retryAfter, 0), PEER_RETRY_CAP_SECONDS);
+  return Math.min(
+    Math.max(retryAfter, PEER_RETRY_FLOOR_SECONDS),
+    PEER_RETRY_CAP_SECONDS
+  );
 }
 
 export interface PeerWait {
