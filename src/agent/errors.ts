@@ -22,6 +22,13 @@
  * a spawn is refused for what you asked to start, a read for what you asked to
  * see. `ResultTooLarge` sits outside both — it is thrown before anything leaves
  * the machine.
+ *
+ * LOOKING A PEER UP is a third family, under `PeerLookupError`, with the same
+ * rule again: the status and the code together select a subclass
+ * (`PeerNotFound`, `PeerHasNoUrl`) and anything else arrives as the base
+ * reporting what came back. Reaching the peer itself, once it is found, throws
+ * nothing of the platform's: the peer is another service, and what it answers
+ * is returned as it came (see `callAgent`).
  */
 
 import { AetherfyVectorsError } from '../exceptions';
@@ -359,5 +366,96 @@ export class WaitTimeoutInvalid extends RunReadError {
     });
     this.name = 'WaitTimeoutInvalid';
     Object.setPrototypeOf(this, WaitTimeoutInvalid.prototype);
+  }
+}
+
+/**
+ * The two control-plane error codes a peer lookup gives a type of its own. ONE
+ * definition each, for the same reason as the codes above: the code both
+ * SELECTS the type and is STAMPED on it.
+ */
+export const AGENT_NOT_FOUND = 'AGENT_NOT_FOUND';
+export const PEER_HAS_NO_URL = 'PEER_HAS_NO_URL';
+
+/**
+ * The code the edge in front of `*.aetherfy.dev` answers a RETIRED address
+ * with, beside `AGENT_NOT_FOUND` (which it uses for an address that never
+ * existed or was deleted). Not a lookup error: it arrives in the body of a
+ * peer's response, never from the control plane, and `callAgent` reads it to
+ * decide whether to look the peer up again.
+ */
+export const AGENT_NOT_REACHABLE = 'AGENT_NOT_REACHABLE';
+
+/**
+ * The control plane did not hand over a peer's address.
+ *
+ * `code` is the platform's stable error code (`detail.code` in the
+ * control-plane envelope) and is the thing to branch on; the message is prose
+ * that may be reworded at any time.
+ *
+ * Same discipline as {@link SpawnError}: the STATUS AND THE CODE together
+ * select a subclass, and an unrecognised pairing arrives as this class
+ * reporting exactly what came back — among them
+ * `403 AUTH_AGENT_KEY_OUT_OF_SCOPE`, when this machine's own key may not look
+ * peers up.
+ */
+export class PeerLookupError extends AgentError {
+  public readonly status?: number;
+  public readonly code?: string;
+  public readonly detail: Record<string, unknown>;
+  /**
+   * The seconds the control plane's `Retry-After` header asked to wait, or
+   * undefined. This helper never retries a lookup itself.
+   */
+  public readonly retryAfter?: number;
+
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      code?: string;
+      detail?: Record<string, unknown>;
+      retryAfter?: number;
+    } = {}
+  ) {
+    super(message);
+    this.name = 'PeerLookupError';
+    this.status = options.status;
+    this.code = options.code;
+    this.detail = options.detail ?? {};
+    this.retryAfter = options.retryAfter;
+    Object.setPrototypeOf(this, PeerLookupError.prototype);
+  }
+}
+
+/**
+ * `404 AGENT_NOT_FOUND` — this agent's own workspace holds no agent of that
+ * name.
+ *
+ * Peers are the agents of the caller's own workspace, found by the name the
+ * agent has there; another workspace's agent is not a peer, and neither is a
+ * name that was spelled differently when the agent was created.
+ */
+export class PeerNotFound extends PeerLookupError {
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 404, code: AGENT_NOT_FOUND, detail });
+    this.name = 'PeerNotFound';
+    Object.setPrototypeOf(this, PeerNotFound.prototype);
+  }
+}
+
+/**
+ * `409 PEER_HAS_NO_URL` — the peer exists, but nothing listens for requests on
+ * it.
+ *
+ * A peer that is not reachable by URL cannot be called, whatever else it can
+ * do: it is not a service. Start it with {@link spawn} instead, or call a peer
+ * that serves HTTP.
+ */
+export class PeerHasNoUrl extends PeerLookupError {
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 409, code: PEER_HAS_NO_URL, detail });
+    this.name = 'PeerHasNoUrl';
+    Object.setPrototypeOf(this, PeerHasNoUrl.prototype);
   }
 }

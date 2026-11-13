@@ -85,3 +85,26 @@ export interface Run {
   /** Everything the control plane sent, unmodified. */
   raw: Record<string, unknown>;
 }
+
+/**
+ * What a peer answered to {@link callAgent}.
+ *
+ * Small on purpose: the peer is another service and its answer is its own, so
+ * this carries the three things every answer has and no more. `status` is the
+ * HTTP status exactly as the peer sent it — an error status is a return, not a
+ * throw, because only the caller knows what a 404 from that peer means.
+ * `headers` has lower-case names. `text` is the body decoded as UTF-8, with
+ * undecodable bytes replaced. The Python helper's `PeerResponse` has the same
+ * three fields and the same `json()`.
+ */
+export interface PeerResponse {
+  status: number;
+  headers: Record<string, string>;
+  text: string;
+  /**
+   * The body parsed as JSON.
+   *
+   * @throws {SyntaxError} The body is not JSON (an empty body included).
+   */
+  json(): unknown;
+}

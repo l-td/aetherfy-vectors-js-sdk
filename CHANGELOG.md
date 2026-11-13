@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Agents find each other at call time.** `agentUrl(name, { fresh })` returns a
+  peer's current public URL, `agentUrls({ fresh })` returns `{ name: url }` for
+  every addressable peer of the agent's workspace, and
+  `callAgent(name, path, { method, json, headers, timeout })` makes the request
+  and returns a `PeerResponse` (`status`, `headers`, `text`, `json()`), all from
+  `aetherfy-vectors/agent`. Both lookups are remembered in the process for
+  `PEER_CACHE_SECONDS` (30); `fresh: true` skips that. `callAgent` looks the
+  peer up again once, and only when the address it used is gone (the name does
+  not resolve, the connection is refused, or the edge's `404` `AGENT_NOT_FOUND` /
+  `AGENT_NOT_REACHABLE`); every other status is returned as it came, and a reset
+  or a timeout throws `AgentTransportError` without a repeat, because the peer
+  may have acted. The Aetherfy key is sent to the lookup and
+  never to the peer. A peer the workspace does not have is `PeerNotFound`
+  (`404 AGENT_NOT_FOUND`), one nothing listens on is `PeerHasNoUrl`
+  (`409 PEER_HAS_NO_URL`), anything else is `PeerLookupError` carrying `code`.
+  Reads `AETHERFY_PEERS_URL`, a template like `AETHERFY_SPAWN_URL`.
+
 ## [1.3.0] - 2026-10-23
 
 This release contains changes marked BREAKING below. They ship in a minor

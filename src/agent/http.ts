@@ -15,6 +15,7 @@
 
 import { parseRetryAfter } from '../retry-policy';
 import { AgentTransportError } from './errors';
+import type { PeerResponse } from './models';
 
 /** Version-stamped so a platform-side log can tell which helper release ran. */
 export const USER_AGENT_PREFIX = 'aetherfy-agent-js/';
@@ -124,4 +125,117 @@ export async function requestJson(
     `${method} ${url} did not reach the Aetherfy control plane after ` +
       `${attempts} attempt(s): ${reason}`
   );
+}
+
+/**
+ * One request to a peer: either its `response`, or the `failure` that kept any
+ * response from coming.
+ *
+ * `failure` is set only when the request PROVABLY NEVER REACHED A PEER: the name
+ * did not resolve, or the connection was refused. That is the one outcome
+ * `callAgent` answers by looking the peer up again, because repeating the
+ * request cannot run it twice. A reset or a timeout is NOT that: either can
+ * come after the peer acted, so {@link requestPeer} throws an
+ * {@link AgentTransportError} for it, as it does for a body that fails
+ * mid-stream. A VALUE, NOT AN ERROR, for the retryable case, so the helper's
+ * error hierarchy stays what a caller can catch. The Python helper's
+ * `PeerAttempt` has the same two fields.
+ */
+export interface PeerAttempt {
+  response?: PeerResponse;
+  failure?: string;
+}
+
+/** The `code`s of a connection that nothing accepted: the name, or the port. */
+const NEVER_REACHED_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED']);
+
+/**
+ * Whether a rejected `fetch` provably reached no peer. Node's `fetch` rejects
+ * with a `TypeError('fetch failed')` whose `cause` carries the socket error and
+ * its `code`; a timeout or an abort has no such code and is not that.
+ */
+function neverReachedAPeer(error: unknown): boolean {
+  const cause = (error as { cause?: { code?: unknown } } | null)?.cause;
+  return typeof cause?.code === 'string' && NEVER_REACHED_CODES.has(cause.code);
+}
+
+export interface PeerRequestOptions {
+  userAgent: string;
+  body?: string;
+  headers?: Record<string, string>;
+  timeoutMs: number;
+}
+
+/**
+ * Send one request to a PEER and return whatever it answered.
+ *
+ * THE AETHERFY KEY IS NOT AN OPTION, and that is the point: a peer is another
+ * service, and a bearer token for the whole account sent to it would hand the
+ * account to whatever that service logs. The only headers are the explicit
+ * `User-Agent` this module always sets and the caller's own.
+ *
+ * No retry here. Where a retry makes sense is the caller's to say: it needs the
+ * peer looked up again first, and repeating the same address would only repeat
+ * the failure.
+ *
+ * An HTTP status of any kind is a RETURN, a 3xx included: it is not followed
+ * (`redirect: 'manual'`). `fetch` otherwise follows it, replaying the body of a
+ * 307 or 308 to whatever host `Location` names, and a peer's redirect is the
+ * peer's answer like any other status. Only a request that never reached a peer
+ * (the name did not resolve, the connection was refused) comes back with a
+ * `failure` and no `response`; a reset, a timeout, or a body that cannot be
+ * read after the status arrived throws a plain {@link AgentTransportError}, and
+ * is not retried, because the peer may have acted on the request.
+ */
+export async function requestPeer(
+  method: string,
+  url: string,
+  options: PeerRequestOptions
+): Promise<PeerAttempt> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method,
+      headers: { 'User-Agent': options.userAgent, ...options.headers },
+      body: options.body,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(options.timeoutMs),
+    });
+  } catch (error) {
+    // fetch rejects only when the request never completed: a status, even a
+    // 500, resolves. Of the ways it can, only two are known to have reached
+    // nobody; the rest (a reset, a timeout) may have come after the peer acted.
+    const reason = error instanceof Error ? error.message : String(error);
+    if (neverReachedAPeer(error)) {
+      return { failure: reason };
+    }
+    throw new AgentTransportError(
+      `${method} ${url} got no answer and may or may not have run: ${reason}`
+    );
+  }
+
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new AgentTransportError(
+      `${method} ${url} answered ${response.status} but its body could not ` +
+        `be read: ${reason}`
+    );
+  }
+  // Headers yields lower-case names by specification, which is what the
+  // response object promises.
+  const headers: Record<string, string> = {};
+  response.headers.forEach((value, name) => {
+    headers[name] = value;
+  });
+  return {
+    response: {
+      status: response.status,
+      headers,
+      text,
+      json: () => JSON.parse(text) as unknown,
+    },
+  };
 }

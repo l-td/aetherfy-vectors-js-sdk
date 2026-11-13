@@ -172,6 +172,7 @@ const EXPECTED_CLAIMS: string[] = [
   // this guard was silently not checking.
   'PayloadTooLarge.maxBytes',
   'PayloadTooLarge.payloadBytes',
+  'PeerLookupError.code',
   'PermissionDeniedError.message',
   'QuotaExceededError.allowed',
   'QuotaExceededError.current',

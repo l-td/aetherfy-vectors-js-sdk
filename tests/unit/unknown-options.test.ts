@@ -49,7 +49,8 @@ import { AetherfyVectorsClient } from '../../src/client';
 import { HttpClient } from '../../src/http/client';
 import { createClient } from '../../src/index';
 import { retryWithBackoff } from '../../src/utils';
-import { fanOut } from '../../src/agent';
+import { agentUrl, agentUrls, callAgent, fanOut } from '../../src/agent';
+import { peerCache } from '../../src/agent/peers';
 import { MemoryClient } from '../../src/memory/client';
 import { Namespace } from '../../src/memory/namespace';
 import { Thread } from '../../src/memory/thread';
@@ -396,6 +397,39 @@ function onScope<S>(
   };
 }
 
+/**
+ * A completed peer call needs the platform's environment and a network to
+ * ask: the lookup answers one peer, and the peer answers 200. `touched` counts
+ * the requests that went out, so a call that returned early cannot pass for
+ * one that did the work. The process's one address cache starts empty, or an
+ * earlier case's answer would make this one touch nothing.
+ */
+const realFetch = global.fetch;
+function onPeers(call: (options: Options) => unknown): EntryPoint['setup'] {
+  return () => {
+    process.env.AETHERFY_PEERS_URL =
+      'https://agents.aetherfy.com/api/v1/agents/{id}/peers';
+    process.env.AETHERFY_AGENT_ID = 'parent-agent-id';
+    process.env.AETHERFY_API_KEY = API_KEY;
+    peerCache.reset();
+    const fetchMock = jest.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.endsWith('/peers')) {
+        return new Response(JSON.stringify({ peers: [] }), { status: 200 });
+      }
+      if (url.includes('/peers/')) {
+        return new Response(
+          JSON.stringify({ name: 'analyst', url: 'https://a.aetherfy.dev' }),
+          { status: 200 }
+        );
+      }
+      return new Response('ok', { status: 200 });
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    return { call, touched: () => fetchMock.mock.calls.length };
+  };
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const ENTRY_POINTS: EntryPoint[] = [
   // --- AetherfyVectorsClient (src/client.ts) ---
@@ -665,6 +699,24 @@ const ENTRY_POINTS: EntryPoint[] = [
       touched: () => null,
     }),
   },
+  {
+    id: 'agentUrl()#1',
+    label: 'agentUrl',
+    where: { owner: 'agentUrl', param: 1 },
+    setup: onPeers(options => agentUrl('analyst', options as any)),
+  },
+  {
+    id: 'agentUrls()#0',
+    label: 'agentUrls',
+    where: { owner: 'agentUrls', param: 0 },
+    setup: onPeers(options => agentUrls(options as any)),
+  },
+  {
+    id: 'callAgent()#2',
+    label: 'callAgent',
+    where: { owner: 'callAgent', param: 2 },
+    setup: onPeers(options => callAgent('analyst', '/x', options as any)),
+  },
 ];
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -686,6 +738,15 @@ beforeEach(() => {
 afterEach(() => {
   logSpy.mockRestore();
   for (const name of Object.keys(AGENT_SHAPE)) delete process.env[name];
+  global.fetch = realFetch;
+  for (const name of [
+    'AETHERFY_PEERS_URL',
+    'AETHERFY_AGENT_ID',
+    'AETHERFY_API_KEY',
+  ]) {
+    delete process.env[name];
+  }
+  peerCache.reset();
 });
 
 /** Run the call to completion: await a promise, drain an async iterator. */

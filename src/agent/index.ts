@@ -9,6 +9,7 @@
  * ```javascript
  * const {
  *   payload, machine, fanOut, spawn, writeResult, result, wait,
+ *   agentUrl, callAgent,
  * } = require('aetherfy-vectors/agent');
  *
  * const data = await payload();              // this run's input, {} when none
@@ -19,6 +20,13 @@
  * const run = await spawn('nightly-rollup', { date: '2026-09-08' });
  * const finished = await wait(run.spawn_id); // or result(...) for a plain read
  * console.log(finished.result);
+ *
+ * const url = await agentUrl('analyst');     // a peer service's address, by name
+ * const reply = await callAgent('analyst', '/summarise', {
+ *   method: 'POST',
+ *   json: { id: 7 },
+ * });
+ * console.log(reply.status, reply.json());
  * ```
  *
  * TWO HALVES, and they are the same contract read from opposite ends. A task
@@ -26,6 +34,13 @@
  * reads that result back. `payload`/`writeResult` are files on the machine and
  * touch no network at all; `spawn`/`result`/`wait` are the control plane, and
  * are the only calls here that do.
+ *
+ * A THIRD THING, for a service that talks to another service: `agentUrl` and
+ * `agentUrls` look a peer's public address up BY NAME at call time, and
+ * `callAgent` makes the request. Nothing about a peer's address is baked into
+ * this machine's environment, so a peer that is recreated is found at its new
+ * address without a restart here. The lookup is the control plane's, and its
+ * answer is remembered in this process for `PEER_CACHE_SECONDS`.
  *
  * It ships inside the `aetherfy-vectors` package as the `aetherfy-vectors/agent`
  * subpath, and the standard runtime image preinstalls that package — so on a
@@ -38,6 +53,8 @@
 import { readFile, writeFile } from 'node:fs/promises';
 
 import {
+  AGENT_NOT_FOUND,
+  AGENT_NOT_REACHABLE,
   AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED,
   AgentError,
   AgentTransportError,
@@ -45,8 +62,12 @@ import {
   DEPLOYMENT_NOT_FOUND,
   DEPLOYMENT_WAIT_TIMEOUT_INVALID,
   NotRunningOnAgent,
+  PEER_HAS_NO_URL,
   PayloadTooLarge,
   PayloadUnavailable,
+  PeerHasNoUrl,
+  PeerLookupError,
+  PeerNotFound,
   RUN_PAYLOAD_TOO_LARGE,
   ResultTooLarge,
   RunAccessDenied,
@@ -56,8 +77,15 @@ import {
   TooManyRunsInFlight,
   WaitTimeoutInvalid,
 } from './errors';
-import { requestJson, USER_AGENT_PREFIX } from './http';
-import { MachineShape, Run, Spawn } from './models';
+import {
+  DEFAULT_TIMEOUT_MS,
+  PeerAttempt,
+  requestJson,
+  requestPeer,
+  USER_AGENT_PREFIX,
+} from './http';
+import { MachineShape, PeerResponse, Run, Spawn } from './models';
+import { PEER_CACHE_SECONDS, peerCache } from './peers';
 import { assertAllowedOptionKeys, optionKeys } from '../utils/options';
 import { SDK_VERSION } from '../version';
 
@@ -67,6 +95,9 @@ export {
   NotRunningOnAgent,
   PayloadTooLarge,
   PayloadUnavailable,
+  PeerHasNoUrl,
+  PeerLookupError,
+  PeerNotFound,
   ResultTooLarge,
   RunAccessDenied,
   RunNotFound,
@@ -75,7 +106,14 @@ export {
   TooManyRunsInFlight,
   WaitTimeoutInvalid,
 };
-export type { MachineShape, Run, Spawn };
+export type { MachineShape, PeerResponse, Run, Spawn };
+
+/**
+ * How long a looked-up peer address is served without asking again. The one
+ * definition lives beside the cache that applies it; this is the same number,
+ * readable where the calls are, and in both languages.
+ */
+export { PEER_CACHE_SECONDS };
 
 /**
  * The release this helper announces in its User-Agent. NOT a literal of its
@@ -773,4 +811,343 @@ function spawnUrl(): string {
     "this agent's id, the spawn's parent"
   );
   return url.split('{id}').join(agentId);
+}
+
+export interface AgentUrlOptions {
+  /**
+   * Skip the in-process memory, ask the control plane, and replace the entry.
+   * Defaults to false.
+   */
+  fresh?: boolean;
+}
+
+// Derived from the type by optionKeys(): see src/utils/options.ts.
+const AGENT_URL_OPTION_KEYS = optionKeys<AgentUrlOptions>({ fresh: true });
+
+/**
+ * Return the current public URL of a peer agent, found by name.
+ *
+ * A peer is an agent of THIS agent's own workspace; `name` is the name it has
+ * there. The URL is what the platform serves the peer at right now, so a peer
+ * that was deleted and created again is found at its new address and nothing
+ * here, or in this machine's environment, has to change.
+ *
+ * THE ANSWER IS REMEMBERED FOR `PEER_CACHE_SECONDS` (30) PER NAME, in this
+ * process only, with no request while it is fresh. `{ fresh: true }` skips that
+ * memory, asks the control plane and replaces the entry; use it when an
+ * address you were handed has just stopped answering. {@link callAgent} does
+ * exactly that, once, by itself.
+ *
+ * Only the NAME to URL pair is kept. A refusal is never kept, so a peer that is
+ * created a moment after a {@link PeerNotFound} is found on the next call.
+ *
+ * @throws {PeerNotFound} 404 `AGENT_NOT_FOUND`, the workspace has no agent of
+ *   that name.
+ * @throws {PeerHasNoUrl} 409 `PEER_HAS_NO_URL`, the agent exists but nothing
+ *   listens on it.
+ * @throws {PeerLookupError} Any other refusal, among them 403
+ *   `AUTH_AGENT_KEY_OUT_OF_SCOPE` — read `code`, not the prose.
+ * @throws {NotRunningOnAgent} `AETHERFY_PEERS_URL` or `AETHERFY_API_KEY` is not
+ *   set.
+ * @throws {AgentError} `name` is empty. No request is sent.
+ * @throws {AgentTransportError} The request never reached the control plane.
+ */
+export async function agentUrl(
+  name: string,
+  options: AgentUrlOptions = {}
+): Promise<string> {
+  assertAllowedOptionKeys(options, AGENT_URL_OPTION_KEYS, 'agentUrl');
+  if (!name) {
+    throw new AgentError(
+      "name must be a peer agent's name, not an empty string."
+    );
+  }
+  if (!options.fresh) {
+    const cached = peerCache.getUrl(name);
+    if (cached !== undefined) return cached;
+  }
+
+  const body = await lookupPeers(
+    `${peersUrl()}/${encodeURIComponent(name)}`,
+    name
+  );
+  const url = body.url;
+  if (typeof url !== 'string' || url === '') {
+    throw new PeerLookupError(
+      `The lookup of '${name}' answered 200 with no 'url', so there is no ` +
+        'address to return.',
+      { status: 200, detail: body }
+    );
+  }
+  peerCache.putUrl(name, url);
+  return url;
+}
+
+/**
+ * Return every addressable peer of this agent's workspace as `{ name: url }`.
+ *
+ * The workspace's other agents that have a public URL; this agent is not in it,
+ * and neither is an agent nothing listens on. The same memory rule as
+ * {@link agentUrl}: the whole answer is remembered for `PEER_CACHE_SECONDS`
+ * (30) as one entry, and `{ fresh: true }` skips it and replaces it. The two
+ * memories are separate: this list is not read to answer {@link agentUrl}, nor
+ * the other way round.
+ *
+ * The object is a copy: editing it does not edit what is remembered.
+ *
+ * @throws {PeerLookupError} A refusal, among them 403
+ *   `AUTH_AGENT_KEY_OUT_OF_SCOPE` — read `code`, not the prose.
+ * @throws {NotRunningOnAgent} `AETHERFY_PEERS_URL` or `AETHERFY_API_KEY` is not
+ *   set.
+ * @throws {AgentTransportError} The request never reached the control plane.
+ */
+export async function agentUrls(
+  options: AgentUrlOptions = {}
+): Promise<Record<string, string>> {
+  assertAllowedOptionKeys(options, AGENT_URL_OPTION_KEYS, 'agentUrls');
+  if (!options.fresh) {
+    const cached = peerCache.getList();
+    if (cached !== undefined) return cached;
+  }
+
+  const body = await lookupPeers(peersUrl(), null);
+  const peers = body.peers;
+  if (!Array.isArray(peers)) {
+    throw new PeerLookupError(
+      "The peer list answered 200 with no 'peers' list, so there is nothing " +
+        'to return.',
+      { status: 200, detail: body }
+    );
+  }
+  const urls: Record<string, string> = {};
+  for (const peer of peers) {
+    const entry = asRecord(peer);
+    const peerName = entry?.name;
+    const peerUrl = entry?.url;
+    if (
+      typeof peerName !== 'string' ||
+      peerName === '' ||
+      typeof peerUrl !== 'string' ||
+      peerUrl === ''
+    ) {
+      throw new PeerLookupError(
+        'The peer list answered 200 with an entry that has no name and url: ' +
+          `${JSON.stringify(peer)}.`,
+        { status: 200, detail: body }
+      );
+    }
+    urls[peerName] = peerUrl;
+  }
+  peerCache.putList(urls);
+  return { ...urls };
+}
+
+export interface CallAgentInit {
+  /** The HTTP method. Defaults to `'GET'`. */
+  method?: string;
+  /**
+   * The request body, encoded as JSON, with a `Content-Type` of
+   * `application/json` unless `headers` names one. `undefined` sends no body;
+   * every other value, `null` included, is a body.
+   */
+  json?: unknown;
+  /** Headers for the peer, beside the `User-Agent` this helper sets. */
+  headers?: Record<string, string>;
+  /** Seconds for the request. Defaults to 30. */
+  timeout?: number;
+}
+
+// Derived from the type by optionKeys(): see src/utils/options.ts.
+const CALL_AGENT_OPTION_KEYS = optionKeys<CallAgentInit>({
+  method: true,
+  json: true,
+  headers: true,
+  timeout: true,
+});
+
+/**
+ * Call a peer agent over HTTP and return its answer.
+ *
+ * Looks `name` up with {@link agentUrl} and sends `init.method` to the URL plus
+ * `path` (which starts with `/`). `init.json`, when given, is the request body
+ * encoded as JSON, with a `Content-Type` of `application/json` unless
+ * `init.headers` names one. `init.timeout` is seconds for the request.
+ *
+ * THE PEER IS ANOTHER SERVICE, so it is never sent this machine's Aetherfy key:
+ * only the lookup carries it. Whatever authentication the peer wants is yours
+ * to put in `init.headers`.
+ *
+ * ONE RE-LOOKUP, AND ONLY FOR AN ADDRESS THAT IS GONE. The call is repeated
+ * once, at a freshly looked-up URL (`agentUrl(name, { fresh: true })`), when
+ * the first attempt PROVABLY NEVER REACHED A PEER (the name does not resolve,
+ * or the connection was refused: nothing accepted it) or when the edge REFUSED
+ * the address: a 404 whose JSON body is `{"error": {"code": "AGENT_NOT_FOUND"}}` or
+ * `AGENT_NOT_REACHABLE`, which is what a retired address answers. That is how a
+ * peer recreated inside the cache window is found without a restart. A second
+ * failure of either kind throws; nothing is retried again.
+ *
+ * EVERY OTHER STATUS IS RETURNED, never retried and never thrown, 5xx
+ * included: the peer answered, and only you know what its answer means. A
+ * redirect is such an answer: it is returned, not followed, so a `POST` is never
+ * quietly replayed to a host you did not name. A RESET OR A TIMEOUT IS NOT
+ * RETRIED: either can happen after the peer has acted, so the call throws an
+ * `AgentTransportError` and whether to repeat it is yours to say. A request that
+ * is not safe to repeat (a `POST` that charges a card) should carry its own
+ * idempotency key.
+ *
+ * @throws {PeerNotFound} 404 `AGENT_NOT_FOUND`, the workspace has no agent of
+ *   that name.
+ * @throws {PeerHasNoUrl} 409 `PEER_HAS_NO_URL`, the agent exists but nothing
+ *   listens on it.
+ * @throws {PeerLookupError} Any other refusal of the lookup.
+ * @throws {AgentTransportError} The peer did not answer and the request may or
+ *   may not have run (a reset or a timeout); or it could not be reached at the
+ *   freshly looked-up address either, or that address was refused too, or the
+ *   lookup never reached the control plane.
+ * @throws {NotRunningOnAgent} `AETHERFY_PEERS_URL` or `AETHERFY_API_KEY` is not
+ *   set.
+ * @throws {AgentError} `name` is empty, `path` does not start with `/` or
+ *   `timeout` is not positive. No request is sent.
+ */
+export async function callAgent(
+  name: string,
+  path: string,
+  init: CallAgentInit = {}
+): Promise<PeerResponse> {
+  assertAllowedOptionKeys(init, CALL_AGENT_OPTION_KEYS, 'callAgent');
+  if (!path.startsWith('/')) {
+    throw new AgentError(
+      `path must start with '/', as in '/summarise', not ${JSON.stringify(path)}.`
+    );
+  }
+  const method = init.method ?? 'GET';
+  const headers: Record<string, string> = { ...init.headers };
+  let body: string | undefined;
+  if (init.json !== undefined) {
+    body = JSON.stringify(init.json);
+    if (!Object.keys(headers).some(k => k.toLowerCase() === 'content-type')) {
+      headers['Content-Type'] = 'application/json';
+    }
+  }
+  const timeoutMs =
+    init.timeout === undefined ? DEFAULT_TIMEOUT_MS : init.timeout * 1000;
+  if (!(timeoutMs > 0) || !Number.isFinite(timeoutMs)) {
+    throw new AgentError(
+      `timeout must be a positive number of seconds, not ${String(init.timeout)}.`
+    );
+  }
+
+  const attempt = (base: string): Promise<PeerAttempt> =>
+    requestPeer(method, base.replace(/\/+$/, '') + path, {
+      userAgent: userAgent(),
+      body,
+      headers,
+      timeoutMs,
+    });
+
+  const first = (await attempt(await agentUrl(name))).response;
+  if (first !== undefined && refusedCode(first) === undefined) {
+    return first;
+  }
+
+  const second = await attempt(await agentUrl(name, { fresh: true }));
+  if (second.response === undefined) {
+    throw new AgentTransportError(
+      `The peer '${name}' did not answer at its freshly looked-up address, ` +
+        `nor at the one it had before: ${second.failure}`
+    );
+  }
+  const refused = refusedCode(second.response);
+  if (refused !== undefined) {
+    throw new AgentTransportError(
+      `The peer '${name}' was refused (${refused}) at its freshly looked-up ` +
+        'address, as at the one it had before.'
+    );
+  }
+  return second.response;
+}
+
+/** The code of an address the edge refused, or undefined for any other answer. */
+function refusedCode(response: PeerResponse): string | undefined {
+  if (response.status !== 404) return undefined;
+  let body: unknown;
+  try {
+    body = response.json();
+  } catch {
+    return undefined;
+  }
+  const code = asRecord(asRecord(body)?.error)?.code;
+  return code === AGENT_NOT_FOUND || code === AGENT_NOT_REACHABLE
+    ? code
+    : undefined;
+}
+
+/**
+ * Resolve `AETHERFY_PEERS_URL` into the URL to GET, without a trailing slash.
+ *
+ * A TEMPLATE, exactly as {@link spawnUrl} explains for its variable: the
+ * platform leaves `{id}` as a literal placeholder in `.../agents/{id}/peers`,
+ * and the id that belongs there is this machine's own agent, because these are
+ * THIS agent's peers.
+ */
+function peersUrl(): string {
+  let url = requireEnv('AETHERFY_PEERS_URL', 'the peer lookup endpoint');
+  if (url.includes('{id}')) {
+    const agentId = requireEnv(
+      'AETHERFY_AGENT_ID',
+      "this agent's id, whose peers these are"
+    );
+    url = url.split('{id}').join(agentId);
+  }
+  return url.replace(/\/+$/, '');
+}
+
+/**
+ * One GET against the peers route, shared by {@link agentUrl} and
+ * {@link agentUrls}: the two answer in the same envelope and refuse in the same
+ * words, so there is one place that maps the refusal.
+ *
+ * THE CODE DECIDES, NOT THE STATUS ALONE, as in {@link spawn}. 404 and 409 are
+ * categories the control plane reuses; `AGENT_NOT_FOUND` and `PEER_HAS_NO_URL`
+ * are what it promises not to rename.
+ */
+async function lookupPeers(
+  url: string,
+  name: string | null
+): Promise<Record<string, unknown>> {
+  const apiKey = requireEnv(
+    'AETHERFY_API_KEY',
+    'the key a peer lookup authenticates with'
+  );
+  const { status, body, retryAfter } = await requestJson('GET', url, {
+    apiKey,
+    userAgent: userAgent(),
+  });
+
+  if (status === 200) {
+    const record = asRecord(body);
+    if (!record) {
+      throw new PeerLookupError(
+        'The peer lookup answered 200 with a body that is not an object, so ' +
+          'there is nothing to return.',
+        { status }
+      );
+    }
+    return record;
+  }
+
+  const detail = detailOf(body);
+  const what = name ? `Looking up '${name}'` : 'Listing the peers';
+  const message =
+    typeof detail.message === 'string'
+      ? detail.message
+      : `${what} failed with status ${status}.`;
+  const code = typeof detail.code === 'string' ? detail.code : undefined;
+  if (status === 404 && code === AGENT_NOT_FOUND) {
+    throw new PeerNotFound(message, detail);
+  }
+  if (status === 409 && code === PEER_HAS_NO_URL) {
+    throw new PeerHasNoUrl(message, detail);
+  }
+  throw new PeerLookupError(message, { status, code, detail, retryAfter });
 }
