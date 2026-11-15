@@ -23,7 +23,7 @@ no infrastructure to run.
 
 ## 🚀 Installation
 
-Requires Node.js **>= 20**. Ships CommonJS, ESM, and UMD browser builds with first-class TypeScript types.
+Requires Node.js **>= 22**. Ships CommonJS, ESM, and UMD browser builds with first-class TypeScript types.
 
 ```bash
 npm install aetherfy-vectors

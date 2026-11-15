@@ -94,7 +94,7 @@
   "author": "Aetherfy <developers@aetherfy.com>",
   "license": "MIT",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "overrides": {
     "serialize-javascript": ">=7.0.3",
