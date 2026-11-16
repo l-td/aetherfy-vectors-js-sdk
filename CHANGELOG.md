@@ -30,8 +30,8 @@ This release contains changes marked BREAKING below.
 
 - **BREAKING: `TooManyRunsInFlight` is `RunLineFull`.** The in-flight limit no
   longer refuses a run, so `429 AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED` is gone,
-  and so is the class, its code constant and every mention of it: there is no
-  alias, and `instanceof TooManyRunsInFlight` becomes `instanceof RunLineFull`.
+  and so are the class and its code constant: there is no alias, and
+  `instanceof TooManyRunsInFlight` becomes `instanceof RunLineFull`.
   `RunLineFull` is thrown on `429 AGENT_RUN_LINE_FULL`, and only when the
   account's line itself is full. It is a `SpawnError`, as before, and carries
   `waitingCount`, `maxWaitingRuns`, `inFlightCount`, `maxInFlightRuns`, `limit`
