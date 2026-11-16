@@ -1,5 +1,73 @@
 # Changelog
 
+## [1.5.0] - 2026-11-16
+
+This release contains changes marked BREAKING below.
+
+### Changed
+
+- **A run over the account's in-flight limit waits in a line instead of being
+  refused.** `spawn` now answers such a run with `status` `'waiting'`, and the
+  run waits in the account's line (state `waiting`: no machine, nothing billed)
+  until a slot frees. `wait` keeps holding through the time in the line and
+  returns when the run ends. A run that goes straight to a machine is `'queued'`
+  as before. The README no longer says Aetherfy never queues a run.
+- **A run ends `completed`, `failed` or `cancelled`.** A run is `waiting` while
+  it waits in the line and `active` while it executes. `Run.state` is still the
+  platform's own string, so no union was added, and the README samples branch on
+  all three endings instead of only `'completed'`.
+- **BREAKING (types): `Spawn.job_id` is `string | null`, and `Spawn` has two new
+  required fields, `position` and `raw`.** A run that waits in the line has no
+  job yet, so `job_id` is `null`, not the string `'null'`. Code that builds a
+  `Spawn` by hand, or assigns `job_id` to a `string`, needs updating.
+- `RunAccessDenied` carries the code that arrived in `code`:
+  `DEPLOYMENT_ACCESS_DENIED` as before, or `AUTH_AGENT_KEY_OUT_OF_SCOPE` from
+  `cancel`. Its constructor takes the code as an optional third argument. A READ
+  that the agent's key may not make is still a plain `RunReadError` with that
+  code, as before.
+
+### Changed (breaking)
+
+- **BREAKING: `TooManyRunsInFlight` is `RunLineFull`.** The in-flight limit no
+  longer refuses a run, so `429 AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED` is gone,
+  and so is the class, its code constant and every mention of it: there is no
+  alias, and `instanceof TooManyRunsInFlight` becomes `instanceof RunLineFull`.
+  `RunLineFull` is thrown on `429 AGENT_RUN_LINE_FULL`, and only when the
+  account's line itself is full. It is a `SpawnError`, as before, and carries
+  `waitingCount`, `maxWaitingRuns`, `inFlightCount`, `maxInFlightRuns`, `limit`
+  (each `null` when the envelope omits it) and `retryAfter`. The control plane
+  sends no `Retry-After` with it, so `retryAfter` is undefined unless a header is
+  there, and nothing is retried for you.
+
+### Added
+
+- **`cancel(runId)` stops a run**, waiting or executing, and returns a
+  `Cancellation` (`run`, `outcome`, `message`, `cancelled_count`). `outcome` is
+  `'cancelled'` (cancelled now), `'stopping'` (executing, being stopped; it ends
+  `cancelled`) or `'already_finished'` (not an error). `cancelled_count` includes
+  the runs started below it. It posts to `/deployments/{runId}/cancel` with the
+  agent's key. A release id is `NotARun` (`409 DEPLOYMENT_NOT_A_RUN`); no run is
+  `RunNotFound`; another account's run or a run outside what the agent's key may
+  cancel (the runs below its own run) is `RunAccessDenied`; anything else is
+  `RunCancelError` carrying `code`.
+- **`serviceRun(headers)` is the handle for a service's run handler.** Inside
+  `POST /aetherfy/run`, `serviceRun(req.headers)` reads `X-Aetherfy-Run` and
+  `X-Aetherfy-Run-Key` (case-insensitively, from Node's `req.headers`, a fetch
+  `Headers` or a plain object) and returns a `ServiceRun` with `run_id`, `spawn`,
+  `result`, `wait` and `cancel`: the same signatures, endpoints and errors as the
+  module-level functions, authenticating with the run's own key, so what the
+  handler starts belongs to the run. The handle holds the key in a closure and
+  shows it nowhere. Headers without the id and key throw `NotAServiceRun`. The
+  handle is explicit because an implicit context would be lost wherever work
+  leaves the handler's async chain and fall back to the release's key without an
+  error. The module-level functions are unchanged and keep reading
+  `AETHERFY_API_KEY`.
+- `Spawn.position` (the place in the line, 1 being next; `null` unless the run
+  is waiting) and `Spawn.raw` (the whole response body).
+- New exports from `aetherfy-vectors/agent`: `cancel`, `serviceRun`, `RunLineFull`,
+  `RunCancelError`, `NotARun`, `NotAServiceRun`, and the types `Cancellation`,
+  `ServiceRun` and `HeaderSource`.
+
 ## [1.4.0] - 2026-11-15
 
 ### Added
