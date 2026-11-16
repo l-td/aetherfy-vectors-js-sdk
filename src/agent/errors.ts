@@ -9,12 +9,11 @@
  *
  * Only three spawn outcomes are worth telling apart, and they are the three the
  * control plane distinguishes: the payload was too big
- * (413 RUN_PAYLOAD_TOO_LARGE), too many runs are already in flight
- * (429 AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED), and everything else.
- * "Everything else" is any other status AND any other code on those two
- * statuses: the pairing is what selects a type, so a 413 the platform grows for
- * some new reason arrives as a plain SpawnError reporting its own code rather
- * than wearing this one's.
+ * (413 RUN_PAYLOAD_TOO_LARGE), the account's line of waiting runs is full
+ * (429 AGENT_RUN_LINE_FULL), and everything else. "Everything else" is any other
+ * status AND any other code on those two statuses: the pairing is what selects
+ * a type, so a 413 the platform grows for some new reason arrives as a plain
+ * SpawnError reporting its own code rather than wearing this one's.
  *
  * READING A RUN BACK has its own small family below, under `RunReadError`, and
  * it follows exactly the same rule. It is a SEPARATE family from `SpawnError`
@@ -22,6 +21,14 @@
  * a spawn is refused for what you asked to start, a read for what you asked to
  * see. `ResultTooLarge` sits outside both — it is thrown before anything leaves
  * the machine.
+ *
+ * CANCELLING A RUN has a third family, under `RunCancelError`, with the same
+ * rule. Two of its refusals are the read family's own types, because they are
+ * the same two problems: `RunNotFound` (no run has that id) and
+ * `RunAccessDenied` (the run is not the caller's to touch). Code that catches
+ * only `RunCancelError` therefore misses those two; catch `AgentError` to see
+ * every failure of the module. `NotAServiceRun` is thrown before anything leaves
+ * the machine, by `serviceRun`.
  *
  * LOOKING A PEER UP is a third family, under `PeerLookupError`, with the same
  * rule again: the status and the code together select a subclass
@@ -42,8 +49,15 @@ import { AetherfyVectorsError } from '../exceptions';
  * a code the platform never sent.
  */
 export const RUN_PAYLOAD_TOO_LARGE = 'RUN_PAYLOAD_TOO_LARGE';
-export const AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED =
-  'AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED';
+export const AGENT_RUN_LINE_FULL = 'AGENT_RUN_LINE_FULL';
+
+/**
+ * The two headers the platform sets on the call to a service's
+ * `POST /aetherfy/run`: the run's id and the run's own key. ONE definition each:
+ * `serviceRun` reads them and `NotAServiceRun` names them.
+ */
+export const RUN_ID_HEADER = 'X-Aetherfy-Run';
+export const RUN_KEY_HEADER = 'X-Aetherfy-Run-Key';
 
 export class AgentError extends AetherfyVectorsError {
   constructor(message: string) {
@@ -162,54 +176,61 @@ export class PayloadTooLarge extends SpawnError {
 }
 
 /**
- * `429 AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED` — the account's runs-in-flight
- * cap is full.
+ * `429 AGENT_RUN_LINE_FULL` — the account's line of waiting runs is full.
  *
- * Retryable, unlike the other two: wait for runs to finish and spawn again.
- * `retryAfter` is the seconds the control plane's `Retry-After` header asked to
- * wait, or undefined; a spawn repeated before that time is refused again. This
- * helper never retries a spawn itself.
+ * A run started while the account is at its in-flight limit does not fail: it
+ * waits in the account's line, and the spawn is accepted with status
+ * `waiting`. This is thrown only when the line itself already holds the most
+ * runs the plan allows, so there is nowhere left to wait.
  *
- * THE CAP IS THE ACCOUNT'S, NOT THE AGENT'S, and it is set by the plan.
- * `limit` names WHICH plan limit was hit — a stable string the platform
- * documents as switchable-on — and `maxInFlightRuns` is its value.
- * `maxInFlightRuns` is `null` when the plan declares no cap, so a caller
- * building a message from it must not assume a number.
+ * THE LIMITS ARE THE ACCOUNT'S, NOT THE AGENT'S, and the plan sets them.
+ * `waitingCount` runs are in the line now, of at most `maxWaitingRuns`;
+ * `inFlightCount` runs are executing, of at most `maxInFlightRuns`. `limit`
+ * names WHICH plan limit was hit (`"max_waiting_runs"` today) and is read from
+ * the envelope rather than assumed, so a second named limit reaching this
+ * status arrives intact. Any of them is `null` when the envelope does not carry
+ * it, so a caller building a message from them must not assume a number.
  *
- * `limit` was `"max_in_flight_runs"` at the time of writing and is the only
- * value the platform sends today; it is read from the envelope rather than
- * assumed, so a second named limit reaching this status arrives intact
- * instead of being reported as the first one.
+ * NOTHING IS RETRIED FOR YOU. This refusal comes with no `Retry-After`;
+ * `retryAfter` is the seconds that header asks to wait, and is undefined
+ * whenever it is absent. Spawn again once runs have left the line, and decide
+ * for yourself how long to wait.
  */
-export class TooManyRunsInFlight extends SpawnError {
+export class RunLineFull extends SpawnError {
+  public readonly waitingCount: number | null;
+  public readonly maxWaitingRuns: number | null;
   public readonly inFlightCount: number | null;
-  public readonly limit: string | null;
   public readonly maxInFlightRuns: number | null;
+  public readonly limit: string | null;
 
   constructor(
     message: string,
     options: {
+      waitingCount?: number | null;
+      maxWaitingRuns?: number | null;
       inFlightCount?: number | null;
-      limit?: string | null;
       maxInFlightRuns?: number | null;
+      limit?: string | null;
       detail?: Record<string, unknown>;
       retryAfter?: number;
     } = {}
   ) {
     super(message, {
       status: 429,
-      code: AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED,
+      code: AGENT_RUN_LINE_FULL,
       detail: options.detail,
       retryAfter: options.retryAfter,
     });
-    this.name = 'TooManyRunsInFlight';
+    this.name = 'RunLineFull';
     // Absent and explicitly-null both surface as null, so the two languages
     // agree: Python collapses them to None and a caller porting a task between
     // them should not find one of them reading `undefined`.
+    this.waitingCount = options.waitingCount ?? null;
+    this.maxWaitingRuns = options.maxWaitingRuns ?? null;
     this.inFlightCount = options.inFlightCount ?? null;
-    this.limit = options.limit ?? null;
     this.maxInFlightRuns = options.maxInFlightRuns ?? null;
-    Object.setPrototypeOf(this, TooManyRunsInFlight.prototype);
+    this.limit = options.limit ?? null;
+    Object.setPrototypeOf(this, RunLineFull.prototype);
   }
 }
 
@@ -223,19 +244,27 @@ export class AgentTransportError extends AgentError {
 }
 
 /**
- * The three control-plane error codes the run-reading calls give a type of
- * their own. ONE definition each, for the same reason as the two above: the
- * code both SELECTS the type and is STAMPED on it, and two literals could
+ * The control-plane error codes the run-reading and run-cancelling calls give a
+ * type of their own. ONE definition each, for the same reason as the two above:
+ * the code both SELECTS the type and is STAMPED on it, and two literals could
  * disagree.
  *
  * The first two are the deployment read's existing contract, and the /wait
  * route answers with them identically by construction — one loader serves both
- * routes upstream, so a caller need not know which one it called.
+ * routes upstream, so a caller need not know which one it called. The cancel
+ * route answers with the same two.
  */
 export const DEPLOYMENT_NOT_FOUND = 'DEPLOYMENT_NOT_FOUND';
 export const DEPLOYMENT_ACCESS_DENIED = 'DEPLOYMENT_ACCESS_DENIED';
 export const DEPLOYMENT_WAIT_TIMEOUT_INVALID =
   'DEPLOYMENT_WAIT_TIMEOUT_INVALID';
+/** A cancel of an id that is a release, not a run. */
+export const DEPLOYMENT_NOT_A_RUN = 'DEPLOYMENT_NOT_A_RUN';
+/**
+ * An agent's key used on a run outside what it may touch. A cancel of a run
+ * that is not below the key's own run is refused with it.
+ */
+export const AUTH_AGENT_KEY_OUT_OF_SCOPE = 'AUTH_AGENT_KEY_OUT_OF_SCOPE';
 
 /**
  * `writeResult` was given more than this machine's inline cap.
@@ -328,20 +357,32 @@ export class RunNotFound extends RunReadError {
 }
 
 /**
- * `403 DEPLOYMENT_ACCESS_DENIED` — the run belongs to another account.
+ * The control plane will not let this key touch the run.
  *
- * Not thrown for an agent's own key reading a run that is not its own: that is
- * `403 AUTH_AGENT_KEY_OUT_OF_SCOPE`, a different code for a different problem
- * (what the key may read, not whose run it is), and it arrives as a plain
- * {@link RunReadError} carrying that `code`.
+ * Two codes arrive as this type, and `code` is the one that came, the thing to
+ * tell them apart by:
+ *
+ * - `403 DEPLOYMENT_ACCESS_DENIED`, the run belongs to another account, from a
+ *   read or a cancel;
+ * - `403 AUTH_AGENT_KEY_OUT_OF_SCOPE`, from {@link cancel} ONLY: an agent's key
+ *   may cancel just the runs below its own run.
+ *
+ * A READ is different. An agent's own key reading a run outside its run tree is
+ * `403 AUTH_AGENT_KEY_OUT_OF_SCOPE` too, but it arrives as a plain
+ * {@link RunReadError} carrying that `code`: what the key may read, not whose
+ * run it is.
  *
  * Distinct from {@link RunNotFound} because the platform distinguishes them,
  * and the two are different problems: an id that does not exist is a bug in
- * what you passed, an id you may not read is a bug in whose key you used.
+ * what you passed, an id you may not touch is a bug in whose key you used.
  */
 export class RunAccessDenied extends RunReadError {
-  constructor(message: string, detail?: Record<string, unknown>) {
-    super(message, { status: 403, code: DEPLOYMENT_ACCESS_DENIED, detail });
+  constructor(
+    message: string,
+    detail?: Record<string, unknown>,
+    code: string = DEPLOYMENT_ACCESS_DENIED
+  ) {
+    super(message, { status: 403, code, detail });
     this.name = 'RunAccessDenied';
     Object.setPrototypeOf(this, RunAccessDenied.prototype);
   }
@@ -366,6 +407,93 @@ export class WaitTimeoutInvalid extends RunReadError {
     });
     this.name = 'WaitTimeoutInvalid';
     Object.setPrototypeOf(this, WaitTimeoutInvalid.prototype);
+  }
+}
+
+/**
+ * The control plane refused to cancel a run, for a reason with no type of its
+ * own.
+ *
+ * `code` is the platform's stable error code (`detail.code` in the
+ * control-plane envelope) and is the thing to branch on; the message is prose
+ * that may be reworded at any time.
+ *
+ * Same discipline as {@link SpawnError}: the STATUS AND THE CODE together
+ * select a subclass, and an unrecognised pairing arrives as this class
+ * reporting exactly what came back. A run that had already ended is not a
+ * refusal at all: the cancel answers 200 with outcome `already_finished`.
+ *
+ * The two refusals every run call shares are NOT subclasses of this: an id no
+ * run has is {@link RunNotFound}, and a run this key may not cancel is
+ * {@link RunAccessDenied}. Catch {@link AgentError} to see all of them.
+ */
+export class RunCancelError extends AgentError {
+  public readonly status?: number;
+  public readonly code?: string;
+  public readonly detail: Record<string, unknown>;
+  /**
+   * The seconds the control plane's `Retry-After` header asked to wait, or
+   * undefined. This helper never retries a cancel itself.
+   */
+  public readonly retryAfter?: number;
+
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      code?: string;
+      detail?: Record<string, unknown>;
+      retryAfter?: number;
+    } = {}
+  ) {
+    super(message);
+    this.name = 'RunCancelError';
+    this.status = options.status;
+    this.code = options.code;
+    this.detail = options.detail ?? {};
+    this.retryAfter = options.retryAfter;
+    Object.setPrototypeOf(this, RunCancelError.prototype);
+  }
+}
+
+/**
+ * `409 DEPLOYMENT_NOT_A_RUN` — the id names a release, not a run.
+ *
+ * A release is cancelled with the CLI's `afy cancel <agent>`; this call cancels
+ * runs. `Spawn.spawn_id` is always a run's id.
+ */
+export class NotARun extends RunCancelError {
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 409, code: DEPLOYMENT_NOT_A_RUN, detail });
+    this.name = 'NotARun';
+    Object.setPrototypeOf(this, NotARun.prototype);
+  }
+}
+
+/**
+ * {@link serviceRun} was given headers that carry no run id and key.
+ *
+ * `serviceRun` is for the handler of `POST /aetherfy/run` ONLY. The platform
+ * sets `X-Aetherfy-Run` and `X-Aetherfy-Run-Key` on that one call and removes
+ * both from every public request, so headers without them belong to an ordinary
+ * request, or to a service deployed before a service run had a key of its own,
+ * which has to be deployed again. `missing` names the headers that were not
+ * there.
+ */
+export class NotAServiceRun extends AgentError {
+  public readonly missing: string[];
+
+  constructor(missing: string[]) {
+    super(
+      `serviceRun() is for the handler of POST /aetherfy/run only: the platform ` +
+        `sets ${RUN_ID_HEADER} and ${RUN_KEY_HEADER} on that call, and these ` +
+        `headers lack ${missing.join(' and ')}. A public request carries ` +
+        'neither; a service deployed before a service run had a key of its own ' +
+        'sends no key and has to be deployed again.'
+    );
+    this.name = 'NotAServiceRun';
+    this.missing = [...missing];
+    Object.setPrototypeOf(this, NotAServiceRun.prototype);
   }
 }
 

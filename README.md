@@ -646,35 +646,38 @@ aetherfy: fanning out 32 wide on 4 vCPU / 8192 MB (120 tasks)
 calls and HTTP requests fan out on the event loop and never touch a thread.
 CPU-bound work belongs in `worker_threads`, sized from `shape.vcpus`.
 
-Spawning has three outcomes worth telling apart. The payload cap and the
-concurrent-run cap get their own types; everything else carries the platform's
-stable error code, which is the thing to branch on:
+A run over your account's in-flight limit is not refused: it waits in the
+account's line, with no machine and nothing billed, and starts when a slot
+frees. The spawn comes back with `status` `'waiting'` and `position`, its place
+in the line (1 is next); a run that goes straight to a machine has `status`
+`'queued'` and a `position` of `null`. `wait` includes the time in the line.
+
+Spawning has three outcomes worth telling apart. The payload cap and a full line
+get their own types; everything else carries the platform's stable error code,
+which is the thing to branch on:
 
 ```typescript
 import {
   spawn,
   PayloadTooLarge,
+  RunLineFull,
   SpawnError,
-  TooManyRunsInFlight,
 } from 'aetherfy-vectors/agent';
 
 try {
-  await spawn('nightly-rollup', { date: '2026-09-07' });
+  const run = await spawn('nightly-rollup', { date: '2026-09-07' });
+  console.log(run.status, run.position); // 'waiting' and 3, or 'queued' and null
 } catch (error) {
   if (error instanceof PayloadTooLarge) {
     // The payload is for parameters and references, not data. Write the data
     // to a collection and pass its id.
     console.error(error.payloadBytes, 'exceeds', error.maxBytes);
-  } else if (error instanceof TooManyRunsInFlight) {
-    // The one refusal here worth retrying: runs are finishing all the time.
-    // The cap is the ACCOUNT's and is set by your plan; `limit` names which
-    // plan limit was hit, and `maxInFlightRuns` is null on an uncapped plan.
-    console.error(
-      'waiting on',
-      error.inFlightCount,
-      'of',
-      error.maxInFlightRuns
-    );
+  } else if (error instanceof RunLineFull) {
+    // The account's line of waiting runs is full: there is nowhere left to
+    // wait. The limits are the ACCOUNT's and are set by your plan; `limit`
+    // names which one was hit. Nothing is retried for you: spawn again when
+    // runs have left the line.
+    console.error(error.waitingCount, 'of', error.maxWaitingRuns, 'waiting');
   } else if (error instanceof SpawnError) {
     console.error(error.code);
   } else {
@@ -701,20 +704,31 @@ await writeResult({ rows: 128, date: '2026-09-08' });
 ```typescript
 import { spawn, wait, result } from 'aetherfy-vectors/agent';
 
-// In the parent. wait() holds one request open instead of polling; a run that
-// has not finished in time comes back exactly as it stands, which is not an
-// error — read `state` and call again.
+// In the parent. wait() holds one request open instead of polling, and the time
+// the run spends waiting in the account's line is part of what it waits for. A
+// run that has not finished in time comes back exactly as it stands, which is
+// not an error — read `state` and call again.
 const run = await spawn('nightly-rollup', { date: '2026-09-08' });
 const finished = await wait(run.spawn_id, 45);
 
 if (finished.state === 'completed') {
   console.log(finished.result);
+} else if (finished.state === 'failed' || finished.state === 'cancelled') {
+  console.error('the run ended', finished.state);
+} else {
+  // 'waiting' (in the account's line) or 'active' (executing): not over yet.
+  console.log('still', finished.state);
 }
 
 // result() is the same read without the waiting.
 const now = await result(run.spawn_id);
 console.log(now.state, now.has_result, now.result_error);
 ```
+
+A run's `state` is `waiting` while it waits in the account's line, `active`
+while it executes, and ends `completed`, `failed` or `cancelled`. While it is
+`waiting`, `run.raw.position` is its place in the line. The states belong to the
+platform, so the helper does not enumerate them.
 
 The result shares the payload's inline cap — one number bounding both
 directions — and it is for answers and references, not data. Anything larger
@@ -768,6 +782,92 @@ try {
 With the agent's own `AETHERFY_API_KEY`, a read the control plane does not
 allow that key ([which ones it allows](https://docs.aetherfy.com/platform/api-keys#agent-scoped-keys-issued-by-aetherfy))
 is refused with `RunReadError` and `code` `AUTH_AGENT_KEY_OUT_OF_SCOPE`.
+An agent's key reads and waits on the runs in its own run tree, the runs that
+share its root run.
+
+### Cancelling a run
+
+`cancel` stops a run, whether it is waiting in the account's line or executing,
+and answers with what it did:
+
+```typescript
+import {
+  cancel,
+  NotARun,
+  RunAccessDenied,
+  RunCancelError,
+  RunNotFound,
+} from 'aetherfy-vectors/agent';
+
+try {
+  const cancellation = await cancel(run.spawn_id);
+  // 'cancelled': it is cancelled now. 'stopping': it was executing and is being
+  // stopped, and it ends `cancelled`. 'already_finished': it had ended before
+  // the call, which is an answer and not an error.
+  console.log(cancellation.outcome, cancellation.cancelled_count);
+} catch (error) {
+  if (error instanceof RunNotFound) {
+    console.error('no run has that id');
+  } else if (error instanceof RunAccessDenied) {
+    // Another account's run, or a run this agent's key may not cancel.
+    console.error('that run is not yours to cancel');
+  } else if (error instanceof NotARun) {
+    console.error('that id is a release, not a run');
+  } else if (error instanceof RunCancelError) {
+    console.error(error.code);
+  } else {
+    throw error;
+  }
+}
+```
+
+`cancelled_count` counts every run the call cancelled: the runs started below the
+cancelled one are cancelled with it. A cancelled run's key stops working at once,
+so nothing it was still starting gets through. An account's key may cancel any
+run of the account; an agent's own key may cancel only the runs below its own
+run. A release is cancelled with `afy cancel <agent>`, not with this call.
+`RunNotFound` and `RunAccessDenied` are the read family's types and are not
+`RunCancelError`s: catch `AgentError` to see every failure. A `RunAccessDenied`
+from a cancel carries `code` `DEPLOYMENT_ACCESS_DENIED` (another account's run)
+or `AUTH_AGENT_KEY_OUT_OF_SCOPE` (a run this agent's key may not cancel).
+
+### Inside a service's run handler
+
+A service handles a run in `POST /aetherfy/run`. The platform gives that run a
+key of its own and sends it, with the run's id, in the headers
+`X-Aetherfy-Run-Key` and `X-Aetherfy-Run`, on that one call. `serviceRun` reads
+them into a handle whose `spawn`, `result`, `wait` and `cancel` are the
+functions above, with the same signatures and errors, authenticating as the run:
+
+```typescript
+import { serviceRun } from 'aetherfy-vectors/agent';
+
+app.post('/aetherfy/run', async (req, res) => {
+  const run = serviceRun(req.headers); // Node's headers, a Headers, or an object
+  const child = await run.spawn('worker', { id: 7 });
+  const finished = await run.wait(child.spawn_id);
+  res.json({ answer: finished.result });
+});
+```
+
+What the handler starts through the handle belongs to the run: cancelling the
+run cancels it. Headers without the run's id and key throw `NotAServiceRun`;
+`serviceRun` is for the handler of `POST /aetherfy/run` only, and a public
+request carries neither header.
+
+The handle is explicit on purpose. A service answers many runs at once, and an
+implicit context (`AsyncLocalStorage`) is lost wherever work leaves the async
+chain the handler started, such as a worker thread or a callback a pooling
+library runs from its own queue: the call would fall back, without an error, to
+the release's key, and what it started would land outside the run, where
+cancelling the run does not reach it. The module-level `spawn`, `result`, `wait`
+and `cancel` are unchanged and read `AETHERFY_API_KEY`, which on a task machine is
+the run's key and in a service is the release's: right for the service's own
+traffic, wrong inside a run. Do not mix the two on one run. A run spawned through
+the handle is in the run's tree, not the release's, so a module-level `wait` on
+it is refused with `AUTH_AGENT_KEY_OUT_OF_SCOPE`: wait through the handle. The
+run's key stops working when the run ends, so do not keep the handle past the
+handler.
 
 ### Finding another agent at call time
 

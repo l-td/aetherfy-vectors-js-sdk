@@ -190,6 +190,39 @@ describe('the run', () => {
     expect(run.raw.regions).toEqual(['iad']);
   });
 
+  it.each(['waiting', 'active', 'completed', 'failed', 'cancelled'])(
+    'returns a run in state %s as it stands',
+    async state => {
+      // The platform owns the vocabulary: the helper adds no union and rejects
+      // no state, so `waiting` (in the account's line) and `cancelled` (stopped
+      // from outside) arrive like the rest, from both reads.
+      // A Response body is read once, so each call gets a fresh one.
+      fetchMock.mockImplementation(async () =>
+        reply(200, { ...FINISHED, state, result: null, has_result: false })
+      );
+
+      expect((await result(RUN_ID)).state).toBe(state);
+      expect((await wait(RUN_ID, 5)).state).toBe(state);
+    }
+  );
+
+  it('keeps the place in the line in raw while a run waits', async () => {
+    fetchMock.mockResolvedValue(
+      reply(200, {
+        ...FINISHED,
+        state: 'waiting',
+        result: null,
+        has_result: false,
+        position: 4,
+      })
+    );
+
+    const run = await result(RUN_ID);
+
+    expect(run.state).toBe('waiting');
+    expect(run.raw.position).toBe(4);
+  });
+
   it('reports a refused result as not a result', async () => {
     // image_generator.py's _collect_result classifies an oversized or
     // unparsable file, and Deployment.has_result is False whenever

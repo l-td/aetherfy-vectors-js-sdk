@@ -1,5 +1,6 @@
 /**
- * `spawn()`: the request the control plane's route actually accepts, and the
+ * `spawn()`: the request the control plane's route actually accepts, what an
+ * accepted run looks like (queued, or waiting in the account's line), and the
  * two refusals a caller has to tell apart.
  *
  * Pinned against aetherfy-control-plane `api/routes/agents.py`:
@@ -13,8 +14,8 @@ import {
   AgentTransportError,
   NotRunningOnAgent,
   PayloadTooLarge,
+  RunLineFull,
   SpawnError,
-  TooManyRunsInFlight,
 } from '../../../src/agent/errors';
 
 const ACCEPTED = {
@@ -103,7 +104,52 @@ describe('spawn()', () => {
       status: 'queued',
       workspace: 'research',
       estimated_start: '~1s',
+      // A run that goes straight to a machine has no place in the line.
+      position: null,
+      raw: ACCEPTED,
     });
+  });
+
+  it('gives a run waiting in the line no job and a place', async () => {
+    // The account is at its limit: the run is accepted and waits. It has no job
+    // yet, so `job_id` is null (not the string "null"), and `position` is its
+    // place in the line, 1 being next.
+    fetchMock.mockResolvedValue(
+      reply(202, { ...ACCEPTED, job_id: null, status: 'waiting', position: 3 })
+    );
+
+    const run = await spawn('nightly-rollup');
+
+    expect(run.status).toBe('waiting');
+    expect(run.job_id).toBeNull();
+    expect(run.position).toBe(3);
+    expect(run.spawn_id).toBe(ACCEPTED.spawn_id);
+  });
+
+  it.each([['3'], [2.5], [true], [[1]], [{ n: 1 }]])(
+    'takes a position that is not an integer (%p) for no position',
+    async position => {
+      fetchMock.mockResolvedValue(
+        reply(202, { ...ACCEPTED, status: 'waiting', position })
+      );
+
+      expect((await spawn('nightly-rollup')).position).toBeNull();
+    }
+  );
+
+  it('keeps the whole response body in raw', async () => {
+    // What the platform sends beyond the named fields is kept, as `Run.raw`
+    // keeps the whole deployment object.
+    const body = {
+      ...ACCEPTED,
+      status: 'waiting',
+      position: 1,
+      job_id: null,
+      extra: 'x',
+    };
+    fetchMock.mockResolvedValue(reply(202, body));
+
+    expect((await spawn('nightly-rollup')).raw).toEqual(body);
   });
 
   it("carries the spawned agent's workspace name, which is never null", async () => {
@@ -136,17 +182,20 @@ describe('spawn()', () => {
     expect(error.status).toBe(413);
   });
 
-  it('maps 429 to TooManyRunsInFlight', async () => {
-    // The envelope shared/job_runs.py builds at the 429 raise: `limit` names
-    // WHICH plan limit was hit and `max_in_flight_runs` is its value. The cap
-    // is the ACCOUNT's, set by the plan — not a per-agent spawn ceiling.
+  it('maps 429 to RunLineFull', async () => {
+    // The envelope of the 429 a spawn gets when the account's line already
+    // holds the most waiting runs its plan allows: `limit` names WHICH plan
+    // limit was hit, and the counts say where the account stands. The limits
+    // are the ACCOUNT's, set by the plan, not a per-agent spawn ceiling.
     fetchMock.mockResolvedValue(
       reply(429, {
         detail: {
-          code: 'AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED',
+          code: 'AGENT_RUN_LINE_FULL',
           message:
-            'Too many runs in flight on this account (25/25); wait for some to finish. The limit is set by your plan.',
-          limit: 'max_in_flight_runs',
+            'The line of waiting runs is full (50/50); wait for some to start. The limit is set by your plan.',
+          limit: 'max_waiting_runs',
+          waiting_count: 50,
+          max_waiting_runs: 50,
           in_flight_count: 25,
           max_in_flight_runs: 25,
         },
@@ -154,23 +203,29 @@ describe('spawn()', () => {
     );
 
     const error = await spawn('nightly-rollup').catch(e => e);
-    expect(error).toBeInstanceOf(TooManyRunsInFlight);
+    expect(error).toBeInstanceOf(RunLineFull);
+    expect(error).toBeInstanceOf(SpawnError);
+    expect(error.waitingCount).toBe(50);
+    expect(error.maxWaitingRuns).toBe(50);
     expect(error.inFlightCount).toBe(25);
-    expect(error.limit).toBe('max_in_flight_runs');
     expect(error.maxInFlightRuns).toBe(25);
-    expect(error.code).toBe('AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED');
+    expect(error.limit).toBe('max_waiting_runs');
+    expect(error.code).toBe('AGENT_RUN_LINE_FULL');
+    expect(error.status).toBe(429);
   });
 
-  it('survives an uncapped plan on 429', async () => {
-    // `max_in_flight_runs` is null when the plan declares no cap. A caller
-    // building a message from it must not be handed undefined instead.
+  it('survives an uncapped number on 429', async () => {
+    // A count the envelope leaves null stays null. A caller building a message
+    // from it must not be handed undefined instead.
     fetchMock.mockResolvedValue(
       reply(429, {
         detail: {
-          code: 'AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED',
-          message: 'Too many runs in flight on this account.',
-          limit: 'max_in_flight_runs',
-          in_flight_count: 400,
+          code: 'AGENT_RUN_LINE_FULL',
+          message: 'The line is full.',
+          limit: 'max_waiting_runs',
+          waiting_count: 400,
+          max_waiting_runs: 400,
+          in_flight_count: 3,
           max_in_flight_runs: null,
         },
       })
@@ -178,20 +233,19 @@ describe('spawn()', () => {
 
     const error = await spawn('nightly-rollup').catch(e => e);
     expect(error.maxInFlightRuns).toBeNull();
-    expect(error.inFlightCount).toBe(400);
+    expect(error.inFlightCount).toBe(3);
   });
 
   it('reads the limit name rather than assuming it', async () => {
     // `limit` is read off the envelope, not hardcoded. A second named limit
-    // reaching this status must arrive intact, not be reported as the first.
+    // reaching this code must arrive intact, not be reported as the first.
     fetchMock.mockResolvedValue(
       reply(429, {
         detail: {
-          code: 'AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED',
+          code: 'AGENT_RUN_LINE_FULL',
           message: 'Some other cap.',
           limit: 'max_agents',
-          in_flight_count: 3,
-          max_in_flight_runs: null,
+          waiting_count: 3,
         },
       })
     );
@@ -230,7 +284,7 @@ describe('spawn()', () => {
 
     const error = await spawn('nightly-rollup').catch(e => e);
     expect(error).toBeInstanceOf(SpawnError);
-    expect(error).not.toBeInstanceOf(TooManyRunsInFlight);
+    expect(error).not.toBeInstanceOf(RunLineFull);
     expect(error.code).toBe('RATE_LIMIT_EXCEEDED');
     expect(error.status).toBe(429);
   });
@@ -247,7 +301,7 @@ describe('spawn()', () => {
       const error = await spawn('nightly-rollup').catch(e => e);
       expect(error).toBeInstanceOf(SpawnError);
       expect(error).not.toBeInstanceOf(PayloadTooLarge);
-      expect(error).not.toBeInstanceOf(TooManyRunsInFlight);
+      expect(error).not.toBeInstanceOf(RunLineFull);
       expect(error.code).toBeUndefined();
       expect(error.status).toBe(status);
     }
@@ -256,32 +310,31 @@ describe('spawn()', () => {
   it('maps a 429 carrying no extras', async () => {
     fetchMock.mockResolvedValue(
       reply(429, {
-        detail: {
-          code: 'AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED',
-          message: 'busy',
-        },
+        detail: { code: 'AGENT_RUN_LINE_FULL', message: 'busy' },
       })
     );
 
     const error = await spawn('nightly-rollup').catch(e => e);
-    expect(error).toBeInstanceOf(TooManyRunsInFlight);
+    expect(error).toBeInstanceOf(RunLineFull);
     // null, not undefined — the Python helper reports None for the same body,
     // and a task ported between the two should not have to know the difference.
     expect(error.limit).toBeNull();
-    expect(error.maxInFlightRuns).toBeNull();
+    expect(error.waitingCount).toBeNull();
+    expect(error.maxWaitingRuns).toBeNull();
     expect(error.inFlightCount).toBeNull();
+    expect(error.maxInFlightRuns).toBeNull();
   });
 
   it('keeps the two refusals distinguishable', async () => {
     // They must not collapse into one another: PayloadTooLarge is permanent
-    // for this payload, TooManyRunsInFlight is the one worth retrying.
+    // for this payload, RunLineFull is the one worth trying again later.
     const tooLarge = new PayloadTooLarge('a');
-    const tooMany = new TooManyRunsInFlight('b');
+    const lineFull = new RunLineFull('b');
 
     expect(tooLarge).toBeInstanceOf(SpawnError);
-    expect(tooMany).toBeInstanceOf(SpawnError);
-    expect(tooLarge).not.toBeInstanceOf(TooManyRunsInFlight);
-    expect(tooMany).not.toBeInstanceOf(PayloadTooLarge);
+    expect(lineFull).toBeInstanceOf(SpawnError);
+    expect(tooLarge).not.toBeInstanceOf(RunLineFull);
+    expect(lineFull).not.toBeInstanceOf(PayloadTooLarge);
   });
 
   it.each([
@@ -300,7 +353,7 @@ describe('spawn()', () => {
     const error = await spawn('nightly-rollup').catch(e => e);
     expect(error).toBeInstanceOf(SpawnError);
     expect(error).not.toBeInstanceOf(PayloadTooLarge);
-    expect(error).not.toBeInstanceOf(TooManyRunsInFlight);
+    expect(error).not.toBeInstanceOf(RunLineFull);
     expect(error.code).toBe(code);
     expect(error.status).toBe(status);
     expect(error.message).toContain('refused');
@@ -391,25 +444,16 @@ describe('Retry-After on a refusal', () => {
       headers: { 'Content-Type': 'application/json', ...headers },
     });
 
-  it('a 429 carries the time the control plane asked for', async () => {
+  it('a full line is refused once and nothing is retried for you', async () => {
+    // The control plane sends no Retry-After with this refusal, so there is no
+    // time to carry, and the helper never repeats a spawn itself.
     fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          detail: {
-            code: 'AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED',
-            message: 'full',
-            limit: 'max_in_flight_runs',
-            in_flight_count: 5,
-            max_in_flight_runs: 5,
-          },
-        }),
-        { status: 429, headers: { 'Retry-After': '12' } }
-      )
+      reply(429, { detail: { code: 'AGENT_RUN_LINE_FULL', message: 'full' } })
     );
     const error = await spawn('worker').catch(e => e);
-    expect(error).toBeInstanceOf(TooManyRunsInFlight);
-    expect(error.retryAfter).toBe(12);
-    expect(fetchMock).toHaveBeenCalledTimes(1); // never retried by the helper
+    expect(error).toBeInstanceOf(RunLineFull);
+    expect(error.retryAfter).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('a 503 carries the time too', async () => {

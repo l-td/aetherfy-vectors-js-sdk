@@ -8,7 +8,7 @@
  *
  * ```javascript
  * const {
- *   payload, machine, fanOut, spawn, writeResult, result, wait,
+ *   payload, machine, fanOut, spawn, writeResult, result, wait, cancel,
  *   agentUrl, callAgent,
  * } = require('aetherfy-vectors/agent');
  *
@@ -20,6 +20,7 @@
  * const run = await spawn('nightly-rollup', { date: '2026-09-08' });
  * const finished = await wait(run.spawn_id); // or result(...) for a plain read
  * console.log(finished.result);
+ * await cancel(run.spawn_id); // stop it, waiting or running
  *
  * const url = await agentUrl('analyst');     // a peer service's address, by name
  * const reply = await callAgent('analyst', '/summarise', {
@@ -32,8 +33,20 @@
  * TWO HALVES, and they are the same contract read from opposite ends. A task
  * reads its payload and writes its result; whoever started it spawns and then
  * reads that result back. `payload`/`writeResult` are files on the machine and
- * touch no network at all; `spawn`/`result`/`wait` are the control plane, and
- * are the only calls here that do.
+ * touch no network at all; `spawn`/`result`/`wait`/`cancel` are the control
+ * plane, and are the only calls here that do.
+ *
+ * A RUN HAS A LIFE BEFORE IT RUNS. When the account is at its in-flight limit, a
+ * new run waits in the account's line (state `waiting`, no machine, nothing
+ * billed), and `wait` keeps waiting through that time. A run ends `completed`,
+ * `failed` or `cancelled`; `cancel` is what ends one from outside, whether it is
+ * waiting or executing.
+ *
+ * INSIDE A SERVICE'S RUN HANDLER, USE THE HANDLE. The key these module-level
+ * calls read from `AETHERFY_API_KEY` is, in a service, the release's: right for
+ * the service's own traffic, wrong for a run. `serviceRun(req.headers)` returns
+ * a handle whose `spawn`, `result`, `wait` and `cancel` use the run's own key,
+ * so what the handler starts belongs to the run.
  *
  * A THIRD THING, for a service that talks to another service: `agentUrl` and
  * `agentUrls` look a peer's public address up BY NAME at call time, and
@@ -55,12 +68,16 @@ import { readFile, writeFile } from 'node:fs/promises';
 import {
   AGENT_NOT_FOUND,
   AGENT_NOT_REACHABLE,
-  AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED,
+  AGENT_RUN_LINE_FULL,
+  AUTH_AGENT_KEY_OUT_OF_SCOPE,
   AgentError,
   AgentTransportError,
   DEPLOYMENT_ACCESS_DENIED,
+  DEPLOYMENT_NOT_A_RUN,
   DEPLOYMENT_NOT_FOUND,
   DEPLOYMENT_WAIT_TIMEOUT_INVALID,
+  NotARun,
+  NotAServiceRun,
   NotRunningOnAgent,
   PEER_HAS_NO_URL,
   PayloadTooLarge,
@@ -68,13 +85,16 @@ import {
   PeerHasNoUrl,
   PeerLookupError,
   PeerNotFound,
+  RUN_ID_HEADER,
+  RUN_KEY_HEADER,
   RUN_PAYLOAD_TOO_LARGE,
   ResultTooLarge,
   RunAccessDenied,
+  RunCancelError,
+  RunLineFull,
   RunNotFound,
   RunReadError,
   SpawnError,
-  TooManyRunsInFlight,
   WaitTimeoutInvalid,
 } from './errors';
 import {
@@ -84,7 +104,7 @@ import {
   requestPeer,
   USER_AGENT_PREFIX,
 } from './http';
-import { MachineShape, PeerResponse, Run, Spawn } from './models';
+import { Cancellation, MachineShape, PeerResponse, Run, Spawn } from './models';
 import {
   PEER_CACHE_SECONDS,
   PEER_RETRY_CAP_SECONDS,
@@ -99,6 +119,8 @@ import { SDK_VERSION } from '../version';
 export {
   AgentError,
   AgentTransportError,
+  NotARun,
+  NotAServiceRun,
   NotRunningOnAgent,
   PayloadTooLarge,
   PayloadUnavailable,
@@ -107,13 +129,14 @@ export {
   PeerNotFound,
   ResultTooLarge,
   RunAccessDenied,
+  RunCancelError,
+  RunLineFull,
   RunNotFound,
   RunReadError,
   SpawnError,
-  TooManyRunsInFlight,
   WaitTimeoutInvalid,
 };
-export type { MachineShape, PeerResponse, Run, Spawn };
+export type { Cancellation, MachineShape, PeerResponse, Run, Spawn };
 
 /**
  * How long a looked-up peer address is served without asking again. The one
@@ -458,18 +481,23 @@ export async function fanOut<T, R>(
  * allowed.
  *
  * ACCEPTANCE IS NOT EXECUTION. The returned {@link Spawn} says the run was
- * recorded and its deploy queued. Aetherfy never queues a run behind another:
- * a spawn aimed at a task whose machines are all busy gets a machine of its
- * own and runs at once, and a task spawn over the account's runs-in-flight
- * limit is refused ({@link TooManyRunsInFlight}) — the same limit, and the same
- * code, a manual or scheduled run meets. Wait for the run and read its state.
+ * recorded. A run over the account's in-flight limit is not refused: it WAITS in
+ * the account's line (`status` `'waiting'`, `position` its place there, 1 being
+ * next), with no machine and nothing billed, and starts when a slot frees;
+ * otherwise `status` is `'queued'` and it goes straight to a machine.
+ * {@link wait} includes the time in the line. A spawn is refused only when the
+ * line itself is full ({@link RunLineFull}), and nothing is retried for you
+ * then. Wait for the run and read its state.
  *
  * Keep the payload small: it is for parameters and references, not data. Pass
  * anything large by reference to a collection.
  *
+ * This uses `AETHERFY_API_KEY`: on a task machine that is the run's own key, in
+ * a service the release's. Inside a service's run handler, spawn through
+ * {@link serviceRun} so the new run belongs to the run being handled.
+ *
  * @throws {PayloadTooLarge} 413, the payload crossed the inline cap.
- * @throws {TooManyRunsInFlight} 429, the concurrent-run cap is full. The one
- *   failure here worth retrying.
+ * @throws {RunLineFull} 429, the account's line of waiting runs is full.
  * @throws {SpawnError} Any other refusal — read `code`, not the prose.
  * @throws {AgentTransportError} The request never reached the control plane.
  */
@@ -477,10 +505,22 @@ export async function spawn(
   child: string,
   spawnPayload?: Record<string, unknown>
 ): Promise<Spawn> {
-  const apiKey = requireEnv(
-    'AETHERFY_API_KEY',
-    'the key a spawn authenticates with'
+  return spawnAs(
+    environmentKey('the key a spawn authenticates with'),
+    child,
+    spawnPayload
   );
+}
+
+/**
+ * The one spawn, for whichever key it is made with: {@link spawn} passes the
+ * environment's, a {@link ServiceRun} its run's.
+ */
+async function spawnAs(
+  apiKey: string,
+  child: string,
+  spawnPayload: Record<string, unknown> | undefined
+): Promise<Spawn> {
   const url = spawnUrl();
 
   const { status, body, retryAfter } = await requestJson('POST', url, {
@@ -498,9 +538,14 @@ export async function spawn(
         { status }
       );
     }
+    // A run waiting in the line has no job yet, and a run that is not waiting
+    // has no place in it: null is an answer, not the string "null".
     return {
       spawn_id: stringOf(record.spawn_id),
-      job_id: stringOf(record.job_id),
+      job_id:
+        record.job_id === null || record.job_id === undefined
+          ? null
+          : stringOf(record.job_id),
       child_agent_id: stringOf(record.child_agent_id),
       region: stringOf(record.region),
       status: stringOf(record.status),
@@ -509,6 +554,10 @@ export async function spawn(
         typeof record.estimated_start === 'string'
           ? record.estimated_start
           : undefined,
+      position: Number.isInteger(record.position)
+        ? (record.position as number)
+        : null,
+      raw: record,
     };
   }
 
@@ -533,11 +582,13 @@ export async function spawn(
       detail,
     });
   }
-  if (status === 429 && code === AGENT_RUN_CONCURRENCY_LIMIT_EXCEEDED) {
-    throw new TooManyRunsInFlight(message, {
+  if (status === 429 && code === AGENT_RUN_LINE_FULL) {
+    throw new RunLineFull(message, {
+      waitingCount: numberOf(detail, 'waiting_count'),
+      maxWaitingRuns: numberOf(detail, 'max_waiting_runs'),
       inFlightCount: numberOf(detail, 'in_flight_count'),
-      limit: stringOrNull(detail, 'limit'),
       maxInFlightRuns: numberOf(detail, 'max_in_flight_runs'),
+      limit: stringOrNull(detail, 'limit'),
       detail,
       retryAfter,
     });
@@ -620,10 +671,11 @@ export async function writeResult(value: unknown): Promise<void> {
 /**
  * Read one run back, with whatever it returned.
  *
- * Answers immediately with the run as it stands. A run that is still going has
- * `state === 'active'` and no result yet; {@link wait} is the same read with
- * the waiting done server-side, and is what to use when the answer is the
- * point.
+ * Answers immediately with the run as it stands. A run that has not ended has no
+ * result yet: its `state` is `'waiting'` while it waits in the account's line and
+ * `'active'` while it is executing, and it ends `'completed'`, `'failed'` or
+ * `'cancelled'`. {@link wait} is the same read with the waiting done
+ * server-side, and is what to use when the answer is the point.
  *
  * `runId` is a run's id — `Spawn.spawn_id` from a {@link spawn}, or the id of
  * this run itself in `AETHERFY_SPAWN_ID`.
@@ -638,7 +690,11 @@ export async function writeResult(value: unknown): Promise<void> {
  * @throws {AgentTransportError} The request never reached the control plane.
  */
 export async function result(runId: string): Promise<Run> {
-  return readRun(runUrl(runId));
+  return resultAs(environmentKey('the key a run is read with'), runId);
+}
+
+async function resultAs(apiKey: string, runId: string): Promise<Run> {
+  return readRun(runUrl(runId), apiKey);
 }
 
 /**
@@ -648,12 +704,17 @@ export async function result(runId: string): Promise<Run> {
  * without it every caller writes the same loop with its own interval, and all
  * of them pay for the privilege of not knowing yet.
  *
+ * THE TIME IN THE LINE IS PART OF WHAT IS WAITED FOR. A run over the account's
+ * in-flight limit waits in the account's line (state `waiting`), and this keeps
+ * holding through it. It returns when the run has ended: `completed`, `failed`
+ * or `cancelled`.
+ *
  * A TIMEOUT IS NOT AN ERROR. If the run has not finished in `timeoutSeconds`
- * this returns it exactly as it stands — read `Run.state`, which is `active`
- * while a run is executing and `completed` or `failed` when it is over, and
- * call again. Waiting longer than the maximum is a second call, not a bigger
- * number: the request is held open, and anything longer is cut by the network
- * in front of Aetherfy.
+ * this returns it exactly as it stands — read `Run.state`, which is `waiting`
+ * while the run waits in the line, `active` while it is executing, and
+ * `completed`, `failed` or `cancelled` when it is over, and call again. Waiting
+ * longer than the maximum is a second call, not a bigger number: the request is
+ * held open, and anything longer is cut by the network in front of Aetherfy.
  *
  * ONE CONNECTION FAILURE IS NOT RETRIED HERE, unlike every other call in this
  * module. A retry would silently hold a second full timeout and hand back a run
@@ -678,6 +739,18 @@ export async function wait(
   runId: string,
   timeoutSeconds: number = WAIT_TIMEOUT_DEFAULT_SECONDS
 ): Promise<Run> {
+  return waitAs(
+    environmentKey('the key a run is read with'),
+    runId,
+    timeoutSeconds
+  );
+}
+
+async function waitAs(
+  apiKey: string,
+  runId: string,
+  timeoutSeconds: number
+): Promise<Run> {
   const seconds = Math.trunc(timeoutSeconds);
   if (
     !Number.isFinite(seconds) ||
@@ -690,10 +763,232 @@ export async function wait(
         'is another call to wait(), not a bigger number.'
     );
   }
-  return readRun(`${runUrl(runId)}/wait?timeout_seconds=${seconds}`, {
+  return readRun(`${runUrl(runId)}/wait?timeout_seconds=${seconds}`, apiKey, {
     timeoutMs: (seconds + WAIT_TRANSPORT_MARGIN_SECONDS) * 1000,
     retryConnectionErrors: false,
   });
+}
+
+/**
+ * Cancel a run, whether it is waiting in the account's line or executing.
+ *
+ * `runId` is a run's id — `Spawn.spawn_id` from a {@link spawn}. The answer is a
+ * {@link Cancellation}: its `outcome` is `'cancelled'` (the run is cancelled
+ * now), `'stopping'` (it was executing and is being stopped; it ends
+ * `cancelled`) or `'already_finished'` (it had ended before this call). A run
+ * that had already ended is NOT an error, so cancelling twice, or racing the
+ * run's own end, needs no handling. `cancelled_count` counts every run this call
+ * cancelled, the runs started below the cancelled one (its descendants)
+ * included: a cancelled run's own spawns are cancelled with it.
+ *
+ * A run cancelled from outside ends `cancelled`, on every path: by a person, by
+ * a run above it, or as part of a cascade. A cancelled run's key stops working
+ * at once, so whatever it was still starting is refused.
+ *
+ * WHICH RUNS A KEY MAY CANCEL. An account's key may cancel any run of the
+ * account. An agent's own key (`AETHERFY_API_KEY` on an agent machine) may
+ * cancel only the runs below its own run, not the run itself and not its
+ * siblings. Inside a service's run handler, cancel through {@link serviceRun}.
+ *
+ * This is for runs. A release (a deploy) is cancelled with the CLI's
+ * `afy cancel <agent>`.
+ *
+ * @throws {RunNotFound} 404, no run has that id.
+ * @throws {RunAccessDenied} 403, the run belongs to another account (`code`
+ *   `DEPLOYMENT_ACCESS_DENIED`), or an agent's key was used on a run that is not
+ *   below its own (`code` `AUTH_AGENT_KEY_OUT_OF_SCOPE`).
+ * @throws {NotARun} 409 `DEPLOYMENT_NOT_A_RUN`, the id names a release.
+ * @throws {RunCancelError} Any other refusal — read `code`, not the prose. Note
+ *   that {@link RunNotFound} and {@link RunAccessDenied} are not its subclasses;
+ *   catch {@link AgentError} to see all of them.
+ * @throws {AgentError} `runId` is empty. No request is sent.
+ * @throws {AgentTransportError} The request never reached the control plane.
+ */
+export async function cancel(runId: string): Promise<Cancellation> {
+  return cancelAs(environmentKey('the key a cancel authenticates with'), runId);
+}
+
+async function cancelAs(apiKey: string, runId: string): Promise<Cancellation> {
+  const { status, body, retryAfter } = await requestJson(
+    'POST',
+    `${runUrl(runId)}/cancel`,
+    { apiKey, userAgent: userAgent() }
+  );
+
+  if (status === 200) {
+    const record = asRecord(body);
+    const run = asRecord(record?.run);
+    const outcome = record?.outcome;
+    if (!record || !run || typeof outcome !== 'string' || outcome === '') {
+      throw new RunCancelError(
+        'Cancelling the run answered 200 with a body that has no run and ' +
+          'outcome, so what the cancel did is not known.',
+        { status }
+      );
+    }
+    return {
+      run: runFrom(run),
+      outcome,
+      message: typeof record.message === 'string' ? record.message : '',
+      cancelled_count: Number.isInteger(record.cancelled_count)
+        ? (record.cancelled_count as number)
+        : 0,
+    };
+  }
+
+  const detail = detailOf(body);
+  const message =
+    typeof detail.message === 'string'
+      ? detail.message
+      : `Cancelling the run failed with status ${status}.`;
+  const code = typeof detail.code === 'string' ? detail.code : undefined;
+
+  // THE CODE DECIDES, NOT THE STATUS ALONE, as in spawn() and the reads. The 404
+  // and the DEPLOYMENT_ACCESS_DENIED 403 are the read family's own, shared with
+  // it; the out-of-scope 403 is mapped here and not on a read, because a cancel
+  // has one problem to report with it (this key may not cancel that run) and a
+  // read has another.
+  const refusal = sharedRunRefusal(status, code, message, detail);
+  if (refusal) throw refusal;
+  if (status === 403 && code === AUTH_AGENT_KEY_OUT_OF_SCOPE) {
+    throw new RunAccessDenied(message, detail, AUTH_AGENT_KEY_OUT_OF_SCOPE);
+  }
+  if (status === 409 && code === DEPLOYMENT_NOT_A_RUN) {
+    throw new NotARun(message, detail);
+  }
+  throw new RunCancelError(message, { status, code, detail, retryAfter });
+}
+
+/**
+ * The headers of a request, as the runtimes hand them over: a fetch `Headers`
+ * (or anything with a `get` that reads names without regard to case), Node's
+ * `request.headers`, or a plain object. Names are compared without regard to
+ * case in every shape.
+ */
+export type HeaderSource =
+  | { get(name: string): string | null }
+  | Record<string, string | string[] | undefined>;
+
+/**
+ * The run a service is handling right now, as a handle to spawn, read, wait on
+ * and cancel with THAT RUN'S OWN KEY. Built by {@link serviceRun}.
+ *
+ * `spawn`, `result`, `wait` and `cancel` are the module-level functions of the
+ * same names, with the same signatures, the same endpoints, the same errors and
+ * the same documentation; only the key differs. What the handler starts through
+ * the handle belongs to the run: it is in the run's tree, so cancelling the run
+ * cancels it, and the run's key may read and wait on it. `run_id` is the id of
+ * the run being handled.
+ *
+ * WHY A HANDLE YOU PASS, NOT A CONTEXT THE LIBRARY KEEPS. A service answers many
+ * runs at once in one process, so which run a call belongs to has to come from
+ * somewhere. An implicit context (`AsyncLocalStorage`) is lost wherever work
+ * leaves the async chain the handler started (a worker thread, or a callback a
+ * pooling or batching library runs from its own queue): the call then falls
+ * back, without an error, to the release's key, and what it starts lands
+ * outside the run's tree, where cancelling the run does not reach it. An
+ * explicit handle is either in scope or a visible `ReferenceError`.
+ *
+ * TWO KEYS IN ONE HANDLER. The module-level functions read `AETHERFY_API_KEY`,
+ * which in a service is the release's: right for the service's own traffic,
+ * wrong for a run. Do not mix them on one run. A run spawned through the handle
+ * belongs to the run's tree and not to the release's, so a module-level
+ * {@link wait} on it is refused (403 `AUTH_AGENT_KEY_OUT_OF_SCOPE`, a
+ * {@link RunReadError}): wait through the handle.
+ *
+ * THE KEY LASTS AS LONG AS THE RUN. It stops working when the run ends,
+ * answered, cancelled or failed, so do not keep the handle past the handler.
+ * The handle holds the key in a closure and has no property that shows it, so
+ * logging the handle logs no credential.
+ */
+export interface ServiceRun {
+  /** The id of the run being handled (`X-Aetherfy-Run`). */
+  readonly run_id: string;
+  /** {@link spawn}, with this run's key: the new run belongs to this run. */
+  spawn(child: string, spawnPayload?: Record<string, unknown>): Promise<Spawn>;
+  /** {@link result}, with this run's key. */
+  result(runId: string): Promise<Run>;
+  /** {@link wait}, with this run's key. */
+  wait(runId: string, timeoutSeconds?: number): Promise<Run>;
+  /** {@link cancel}, with this run's key: it may cancel the runs below this run. */
+  cancel(runId: string): Promise<Cancellation>;
+}
+
+/**
+ * Return the handle for the run a service's `POST /aetherfy/run` is handling.
+ *
+ * Call it with the request's headers, at the top of the handler:
+ *
+ * ```javascript
+ * app.post('/aetherfy/run', async (req, res) => {
+ *   const run = serviceRun(req.headers);
+ *   const child = await run.spawn('worker', { id: 7 });
+ *   const finished = await run.wait(child.spawn_id);
+ *   res.json({ answer: finished.result });
+ * });
+ * ```
+ *
+ * The platform sets `X-Aetherfy-Run` (the run's id) and `X-Aetherfy-Run-Key` (the
+ * run's own key) on that one call, and removes both from every public request,
+ * so a handler can trust them. They are read without regard to case, from any
+ * {@link HeaderSource}: Node's `req.headers`, a fetch `Headers`, a plain object.
+ * The key is never logged by this package.
+ *
+ * THE HANDLE IS EXPLICIT BECAUSE AN IMPLICIT ONE WOULD FAIL SILENTLY: see
+ * {@link ServiceRun}. The module-level functions are unchanged and keep reading
+ * `AETHERFY_API_KEY`, which on a task machine is the run's key and in a service
+ * is the release's.
+ *
+ * @throws {NotAServiceRun} The headers carry no run id and run key. This is for
+ *   the handler of `POST /aetherfy/run` only; a public request has neither.
+ */
+export function serviceRun(headers: HeaderSource): ServiceRun {
+  const runId = headerValue(headers, RUN_ID_HEADER);
+  const apiKey = headerValue(headers, RUN_KEY_HEADER);
+  const missing = [
+    ...(runId === undefined ? [RUN_ID_HEADER] : []),
+    ...(apiKey === undefined ? [RUN_KEY_HEADER] : []),
+  ];
+  if (runId === undefined || apiKey === undefined) {
+    throw new NotAServiceRun(missing);
+  }
+  return Object.freeze({
+    run_id: runId,
+    spawn: (child: string, spawnPayload?: Record<string, unknown>) =>
+      spawnAs(apiKey, child, spawnPayload),
+    result: (id: string) => resultAs(apiKey, id),
+    wait: (id: string, timeoutSeconds: number = WAIT_TIMEOUT_DEFAULT_SECONDS) =>
+      waitAs(apiKey, id, timeoutSeconds),
+    cancel: (id: string) => cancelAs(apiKey, id),
+  });
+}
+
+/**
+ * One header's value, or undefined when it is absent or blank. A value with
+ * `get` is read through it (a fetch `Headers` is case-insensitive by
+ * specification); anything else is a plain object whose names are compared
+ * lower-cased, and whose value may be an array, of which the first is taken.
+ */
+function headerValue(headers: HeaderSource, name: string): string | undefined {
+  const getter = (headers as { get?: unknown }).get;
+  if (typeof getter === 'function') {
+    return usable(
+      (headers as { get(name: string): string | null }).get(name) ?? undefined
+    );
+  }
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() !== wanted) continue;
+    const found = usable(Array.isArray(value) ? value[0] : value);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+function usable(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
 }
 
 /**
@@ -730,7 +1025,56 @@ function runUrl(runId: string): string {
 }
 
 /**
- * One GET, one Run — shared by {@link result} and {@link wait}.
+ * The key this process was started with: on a task machine the run's own, in a
+ * service the release's. What the module-level functions send.
+ */
+function environmentKey(purpose: string): string {
+  return requireEnv('AETHERFY_API_KEY', purpose);
+}
+
+/**
+ * The one place a response's deployment object becomes a {@link Run}: a read and
+ * a cancel both hand one back.
+ */
+function runFrom(record: Record<string, unknown>): Run {
+  return {
+    id: stringOf(record.id),
+    agent_id: stringOf(record.agent_id),
+    state: stringOf(record.state),
+    result: record.result ?? null,
+    result_error:
+      typeof record.result_error === 'string' ? record.result_error : null,
+    has_result: record.has_result === true,
+    is_ephemeral: record.is_ephemeral === true,
+    error_message:
+      typeof record.error_message === 'string' ? record.error_message : null,
+    raw: record,
+  };
+}
+
+/**
+ * The two refusals every call on a run answers in the same words, as the types
+ * they have: no run has that id, and the run is another account's. Undefined
+ * for anything else.
+ */
+function sharedRunRefusal(
+  status: number,
+  code: string | undefined,
+  message: string,
+  detail: Record<string, unknown>
+): RunReadError | undefined {
+  if (status === 404 && code === DEPLOYMENT_NOT_FOUND) {
+    return new RunNotFound(message, detail);
+  }
+  if (status === 403 && code === DEPLOYMENT_ACCESS_DENIED) {
+    return new RunAccessDenied(message, detail);
+  }
+  return undefined;
+}
+
+/**
+ * One GET, one Run — shared by {@link result} and {@link wait}, for whichever
+ * key they are given.
  *
  * ONE implementation because the two routes return the SAME object and refuse
  * in the SAME words; the control plane loads both through one function for
@@ -739,9 +1083,9 @@ function runUrl(runId: string): string {
  */
 async function readRun(
   url: string,
+  apiKey: string,
   options: { timeoutMs?: number; retryConnectionErrors?: boolean } = {}
 ): Promise<Run> {
-  const apiKey = requireEnv('AETHERFY_API_KEY', 'the key a run is read with');
   const { status, body, retryAfter } = await requestJson('GET', url, {
     apiKey,
     userAgent: userAgent(),
@@ -758,19 +1102,7 @@ async function readRun(
         { status }
       );
     }
-    return {
-      id: stringOf(record.id),
-      agent_id: stringOf(record.agent_id),
-      state: stringOf(record.state),
-      result: record.result ?? null,
-      result_error:
-        typeof record.result_error === 'string' ? record.result_error : null,
-      has_result: record.has_result === true,
-      is_ephemeral: record.is_ephemeral === true,
-      error_message:
-        typeof record.error_message === 'string' ? record.error_message : null,
-      raw: record,
-    };
+    return runFrom(record);
   }
 
   const detail = detailOf(body);
@@ -785,12 +1117,8 @@ async function readRun(
   // every route; DEPLOYMENT_NOT_FOUND and DEPLOYMENT_ACCESS_DENIED are what it
   // publishes and promises not to rename. An unrecognised pairing falls through
   // to RunReadError, which reports exactly what arrived.
-  if (status === 404 && code === DEPLOYMENT_NOT_FOUND) {
-    throw new RunNotFound(message, detail);
-  }
-  if (status === 403 && code === DEPLOYMENT_ACCESS_DENIED) {
-    throw new RunAccessDenied(message, detail);
-  }
+  const refusal = sharedRunRefusal(status, code, message, detail);
+  if (refusal) throw refusal;
   if (status === 422 && code === DEPLOYMENT_WAIT_TIMEOUT_INVALID) {
     throw new WaitTimeoutInvalid(message, detail);
   }
