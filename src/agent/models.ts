@@ -65,8 +65,9 @@ export interface Spawn {
  * One run, read back from the control plane.
  *
  * THE RUN ROW IS THE RECORD. A run's answer is not delivered anywhere — it is
- * stored on the run and read from it, so a parent hears from a child in another
- * region with no side channel and no shared storage between them.
+ * stored on the run and read from it, so a parent reads a child's answer in
+ * another region with no shared storage between them. What the two say to each
+ * other WHILE both run is a message ({@link send}, {@link receive}), not this.
  *
  * Only the fields a caller of {@link result} or {@link wait} reads are named
  * here. The response carries a deployment object with a good deal more on it
@@ -147,4 +148,47 @@ export interface PeerResponse {
    * @throws {SyntaxError} The body is not JSON (an empty body included).
    */
   json(): unknown;
+}
+
+/**
+ * One message in a run's mailbox, as {@link receive} hands it over or
+ * {@link messages} lists it. `id` is the sender's own id for it (a resend of the
+ * same id is the same message, stored once) and `seq` its place in this
+ * mailbox, 1 for the first. `sender` is `"run"` (`sender_run_id` says which) or
+ * `"person"`. A message is handed over at least once: after a restart from the
+ * run's history it can come again, and `id` and `seq` tell a repeat apart. The
+ * Python helper's `Message` has the same fields; `kind` is what tells a
+ * `Message` from an {@link Ended} here, where Python uses the class.
+ */
+export interface Message {
+  kind: 'message';
+  id: string;
+  seq: number;
+  sender: string;
+  sender_run_id: string | null;
+  body: unknown;
+  created_at: string | null;
+  raw: Record<string, unknown>;
+}
+
+/**
+ * A run this run started has ended: what {@link receive} hands over in place of
+ * a message when a direct child ends. Each child's end is handed over once,
+ * unless this run already read it through `wait` or `result`.
+ */
+export interface Ended {
+  kind: 'ended';
+  run_id: string;
+  state: string;
+  raw: Record<string, unknown>;
+}
+
+/** What sending a message answered: the message as stored and the run it went to. */
+export interface Sent {
+  message_id: string;
+  seq: number;
+  recipient_id: string;
+  recipient_agent: string | null;
+  recipient_state: string | null;
+  raw: Record<string, unknown>;
 }

@@ -49,7 +49,15 @@ import { AetherfyVectorsClient } from '../../src/client';
 import { HttpClient } from '../../src/http/client';
 import { createClient } from '../../src/index';
 import { retryWithBackoff } from '../../src/utils';
-import { agentUrl, agentUrls, callAgent, fanOut } from '../../src/agent';
+import {
+  agentUrl,
+  agentUrls,
+  callAgent,
+  fanOut,
+  messages,
+  receive,
+  send,
+} from '../../src/agent';
 import { peerCache } from '../../src/agent/peers';
 import { MemoryClient } from '../../src/memory/client';
 import { Namespace } from '../../src/memory/namespace';
@@ -430,6 +438,35 @@ function onPeers(call: (options: Options) => unknown): EntryPoint['setup'] {
   };
 }
 
+/** A run's mailbox: the environment a run has, and a control plane that answers each message route. */
+function onMailbox(call: (options: Options) => unknown): EntryPoint['setup'] {
+  return () => {
+    process.env.AETHERFY_API_URL = 'https://agents.aetherfy.com/api/v1';
+    process.env.AETHERFY_API_KEY = API_KEY;
+    process.env.AETHERFY_SPAWN_ID = '11111111-1111-4111-8111-111111111111';
+    const fetchMock = jest.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.endsWith('/messages/receive')) {
+        return new Response(JSON.stringify({ waiting: false }), {
+          status: 200,
+        });
+      }
+      if (url.includes('/messages?')) {
+        return new Response(JSON.stringify({ messages: [] }), { status: 200 });
+      }
+      return new Response(
+        JSON.stringify({
+          message: { id: 'm', seq: 1 },
+          recipient: { id: 'r' },
+        }),
+        { status: 201 }
+      );
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    return { call, touched: () => fetchMock.mock.calls.length };
+  };
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const ENTRY_POINTS: EntryPoint[] = [
   // --- AetherfyVectorsClient (src/client.ts) ---
@@ -716,6 +753,28 @@ const ENTRY_POINTS: EntryPoint[] = [
     label: 'callAgent',
     where: { owner: 'callAgent', param: 2 },
     setup: onPeers(options => callAgent('analyst', '/x', options as any)),
+  },
+  {
+    id: 'send()#2',
+    label: 'send',
+    where: { owner: 'send', param: 2 },
+    setup: onMailbox(options =>
+      send('22222222-2222-4222-8222-222222222222', 'hi', options as any)
+    ),
+  },
+  {
+    id: 'receive()#0',
+    label: 'receive',
+    where: { owner: 'receive', param: 0 },
+    required: { timeoutSeconds: 0 },
+    setup: onMailbox(options => receive(options as any)),
+  },
+  {
+    id: 'messages()#0',
+    label: 'messages',
+    where: { owner: 'messages', param: 0 },
+    sync: true,
+    setup: onMailbox(options => messages(options as any).next()),
   },
 ];
 /* eslint-enable @typescript-eslint/no-explicit-any */

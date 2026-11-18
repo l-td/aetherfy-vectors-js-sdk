@@ -7,12 +7,14 @@
  * - a request that MAY HAVE BEEN DELIVERED (a timeout or a reset after it was
  *   sent) is retried once only when the call is repeatable, and otherwise
  *   throws at once saying it may have been applied;
- * - a status is never retried.
+ * - a 503 RESOURCE_BUSY or SERVICE_UNAVAILABLE with Retry-After (either can
+ *   come partway through a request) is retried once after it, only for a
+ *   repeatable call; any other status never.
  *
  * `fetch` is the only thing stubbed. Nothing here opens a socket.
  */
 
-import { requestJson } from '../../../src/agent/http';
+import { requestJson, waiting } from '../../../src/agent/http';
 import { AgentTransportError } from '../../../src/agent/errors';
 
 const realFetch = global.fetch;
@@ -141,4 +143,90 @@ describe('requestJson', () => {
     expect(retryAfter).toBe(5);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+});
+
+describe('a 503 the control plane answered with a Retry-After', () => {
+  let waits: number[];
+
+  beforeEach(() => {
+    waits = [];
+    // A request no test queued an answer for is answered 418, so an attempt the
+    // rule should not make shows in the assertion rather than as a crash.
+    fetchMock.mockImplementation(
+      async () => new Response('{"unexpected": true}', { status: 418 })
+    );
+    jest
+      .spyOn(waiting, 'sleep')
+      .mockImplementation(async (ms: number) => void waits.push(ms));
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  function refusal(code: string, retryAfter: string | null = '5'): Response {
+    return new Response(JSON.stringify({ detail: { code, message: 'busy' } }), {
+      status: 503,
+      headers: retryAfter === null ? {} : { 'Retry-After': retryAfter },
+    });
+  }
+
+  it.each([['RESOURCE_BUSY'], ['SERVICE_UNAVAILABLE']])(
+    '%s is retried once after its Retry-After for a repeatable call',
+    async code => {
+      fetchMock
+        .mockResolvedValueOnce(refusal(code))
+        .mockResolvedValueOnce(accepted());
+      const { status } = await send(true);
+      expect([status, fetchMock.mock.calls.length, waits]).toEqual([
+        202,
+        2,
+        [5000],
+      ]);
+    }
+  );
+
+  it.each([['RESOURCE_BUSY'], ['SERVICE_UNAVAILABLE']])(
+    '%s is returned to a call that is not repeatable',
+    async code => {
+      // It can come partway through the request: a blind repeat could do the work twice.
+      fetchMock.mockResolvedValueOnce(refusal(code));
+      const { status } = await send(false);
+      expect([status, fetchMock.mock.calls.length, waits]).toEqual([
+        503,
+        1,
+        [],
+      ]);
+    }
+  );
+
+  it('a second refusal is returned as it came', async () => {
+    fetchMock
+      .mockResolvedValueOnce(refusal('RESOURCE_BUSY'))
+      .mockResolvedValueOnce(refusal('RESOURCE_BUSY'));
+    const { status, retryAfter } = await send(true);
+    expect([status, retryAfter, fetchMock.mock.calls.length, waits]).toEqual([
+      503,
+      5,
+      2,
+      [5000],
+    ]);
+  });
+
+  it.each([
+    ['RESOURCE_BUSY', null], // no Retry-After: not the control plane's first-unit refusal
+    ['PLACEMENT_UNAVAILABLE', '5'], // another 503 is an answer
+    ['RESOURCE_BUSY', '600'], // longer than the request's own timeout: the caller's to wait
+  ])(
+    'any other 503 is returned with no wait (%s, Retry-After %s)',
+    async (code, retryAfter) => {
+      fetchMock.mockResolvedValueOnce(refusal(code, retryAfter));
+      const { status } = await send(true);
+      expect([status, fetchMock.mock.calls.length, waits]).toEqual([
+        503,
+        1,
+        [],
+      ]);
+    }
+  );
 });

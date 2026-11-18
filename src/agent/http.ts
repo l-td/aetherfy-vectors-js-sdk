@@ -22,6 +22,56 @@ export const USER_AGENT_PREFIX = 'aetherfy-agent-js/';
 
 export const DEFAULT_TIMEOUT_MS = 30_000;
 
+/**
+ * The control plane's 503s worth one more try after their `Retry-After`, each
+ * only for a call whose repeat gives the same result (`repeatable`): either
+ * can come PARTWAY through a request. `SERVICE_UNAVAILABLE`: the archive
+ * storage an upload or a rebuild needs. `RESOURCE_BUSY`: a request's first
+ * unit found no database slot (control plane REVIEW_FAQ §97, nothing ran), but
+ * today the same code also answers a lock or statement timeout partway through
+ * a request.
+ */
+export const RESOURCE_BUSY = 'RESOURCE_BUSY';
+export const SERVICE_UNAVAILABLE = 'SERVICE_UNAVAILABLE';
+/** The longest `Retry-After` the helper waits out itself: the request's own timeout. */
+export const MAX_RETRY_AFTER_WAITED_SECONDS = DEFAULT_TIMEOUT_MS / 1000;
+
+/**
+ * How a `Retry-After` is waited out: an object of its own so a test records
+ * the wait instead of taking it.
+ */
+export const waiting = {
+  sleep: (ms: number): Promise<void> =>
+    new Promise(resolve => setTimeout(resolve, ms)),
+};
+
+function worthOneMoreTry(
+  status: number,
+  body: unknown,
+  retryAfter: number | undefined,
+  options: RequestOptions
+): boolean {
+  const refusals = options.refusals ?? 'by-the-rule';
+  const detail = (body as { detail?: unknown } | null)?.detail;
+  const code = (detail as { code?: unknown } | null | undefined)?.code;
+  const codes =
+    refusals === 'resource-busy-only'
+      ? [RESOURCE_BUSY]
+      : [RESOURCE_BUSY, SERVICE_UNAVAILABLE];
+  const retryable =
+    refusals !== 'none' &&
+    options.repeatable &&
+    typeof code === 'string' &&
+    codes.includes(code);
+  return (
+    status === 503 &&
+    retryable &&
+    retryAfter !== undefined &&
+    retryAfter >= 0 &&
+    retryAfter <= MAX_RETRY_AFTER_WAITED_SECONDS
+  );
+}
+
 export interface JsonResponse {
   status: number;
   /** Parsed JSON, or null when the body was empty or not JSON at all. */
@@ -39,7 +89,12 @@ export interface RequestOptions {
   apiKey: string;
   userAgent: string;
   body?: unknown;
-  timeoutMs?: number;
+  /**
+   * Undefined: the default timeout. `null`: none at all, for the one call that
+   * blocks until it is released (a waiting receive's local call to its
+   * supervisor, whose deadline, when there is one, is the control plane's).
+   */
+  timeoutMs?: number | null;
   /**
    * Whether a repeat of this call gives the same result: a read, a cancel, or
    * a spawn or message that carries its own id (the control plane stores it
@@ -48,6 +103,14 @@ export interface RequestOptions {
    * the open, so a new call never inherits a retry it did not think about.
    */
   repeatable: boolean;
+  /**
+   * Which of the control plane's 503s are waited out and repeated for a
+   * repeatable call (see {@link requestJson}). `'by-the-rule'`, the default:
+   * `RESOURCE_BUSY` and `SERVICE_UNAVAILABLE`. `'resource-busy-only'`:
+   * `RESOURCE_BUSY` alone. `'none'`: neither, returned as they came. The peer
+   * lookup chooses: it has a last known address to serve at once instead.
+   */
+  refusals?: 'by-the-rule' | 'resource-busy-only' | 'none';
 }
 
 /**
@@ -80,9 +143,14 @@ async function readJson(response: Response): Promise<unknown> {
  *   sent) is retried only when `options.repeatable` says its repeat gives the
  *   same result. A call that is not repeatable throws at once, saying the
  *   request may have been applied, because a blind repeat could do the work a
- *   second time.
+ *   second time;
+ * - a 503 `RESOURCE_BUSY` or `SERVICE_UNAVAILABLE` with a `Retry-After` is
+ *   retried after it only when the call is `repeatable`: either can come
+ *   partway through a request. It waits at most
+ *   {@link MAX_RETRY_AFTER_WAITED_SECONDS}; a longer one is returned as it
+ *   came.
  *
- * An HTTP status is never retried here: a 4xx repeated is a 4xx.
+ * No other HTTP status is retried here: a 4xx repeated is a 4xx.
  */
 export async function requestJson(
   method: string,
@@ -111,7 +179,10 @@ export async function requestJson(
         method,
         headers,
         body: payload,
-        signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+        signal:
+          options.timeoutMs === null
+            ? undefined
+            : AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
       });
     } catch (error) {
       // ONLY the fetch call is inside the retry. fetch rejects when the
@@ -130,11 +201,19 @@ export async function requestJson(
         `${method} ${url} got no answer and may have been applied: ${reason}`
       );
     }
-    return {
+    const answer: JsonResponse = {
       status: response.status,
       body: await readJson(response),
       retryAfter: parseRetryAfter(response.headers.get('retry-after')),
     };
+    if (
+      attempts < 2 &&
+      worthOneMoreTry(answer.status, answer.body, answer.retryAfter, options)
+    ) {
+      await waiting.sleep((answer.retryAfter as number) * 1000);
+      continue;
+    }
+    return answer;
   }
 
   const reason =
