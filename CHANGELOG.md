@@ -26,6 +26,16 @@ This release contains changes marked BREAKING below.
   that the agent's key may not make is still a plain `RunReadError` with that
   code, as before.
 
+### Added
+
+- **`Run.failure_code`: why a failed run failed, as the platform's code.** It is
+  beside `error_message` (the sentence) on every run `wait`, `result`, `cancel`
+  and `serviceRun` return, and is the value to switch on: for example
+  `RUN_EXITED_NONZERO`, `RUN_OUT_OF_MEMORY`, `RUN_TIME_LIMIT_EXCEEDED`, or
+  `PLATFORM_FAILURE` when the failure was the platform's, not the code's.
+  `null` for a run that did not fail. `wait` and `result` still return a failed
+  run rather than throw.
+
 ### Changed (breaking)
 
 - **BREAKING: `TooManyRunsInFlight` is `RunLineFull`.** The in-flight limit no

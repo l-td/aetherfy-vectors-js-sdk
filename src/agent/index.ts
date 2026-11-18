@@ -1048,6 +1048,8 @@ function runFrom(record: Record<string, unknown>): Run {
     is_ephemeral: record.is_ephemeral === true,
     error_message:
       typeof record.error_message === 'string' ? record.error_message : null,
+    failure_code:
+      typeof record.failure_code === 'string' ? record.failure_code : null,
     raw: record,
   };
 }

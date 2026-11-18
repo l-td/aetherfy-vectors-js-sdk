@@ -713,8 +713,11 @@ const finished = await wait(run.spawn_id, 45);
 
 if (finished.state === 'completed') {
   console.log(finished.result);
-} else if (finished.state === 'failed' || finished.state === 'cancelled') {
-  console.error('the run ended', finished.state);
+} else if (finished.state === 'failed') {
+  // failure_code is the value to switch on; error_message says it in words.
+  console.error('the run failed:', finished.failure_code, finished.error_message);
+} else if (finished.state === 'cancelled') {
+  console.error('the run was cancelled:', finished.error_message);
 } else {
   // 'waiting' (in the account's line) or 'active' (executing): not over yet.
   console.log('still', finished.state);

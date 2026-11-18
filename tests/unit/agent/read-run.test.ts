@@ -44,6 +44,7 @@ const FINISHED = {
   result_error: null,
   has_result: true,
   error_message: null,
+  failure_code: null,
   regions: ['iad'],
   pending_regions: [],
   created_at: '2026-09-08T09:04:11Z',
@@ -181,6 +182,7 @@ describe('the run', () => {
     expect(run.has_result).toBe(true);
     expect(run.is_ephemeral).toBe(true);
     expect(run.error_message).toBeNull();
+    expect(run.failure_code).toBeNull();
   });
 
   it('keeps the whole object in raw, including what is not named', async () => {
@@ -205,6 +207,41 @@ describe('the run', () => {
       expect((await wait(RUN_ID, 5)).state).toBe(state);
     }
   );
+
+  it('returns a failed run with its failure code beside its sentence, from both reads', async () => {
+    // The code is the value to switch on, the sentence the prose; a failed run is
+    // an answer, so it is returned, never thrown.
+    fetchMock.mockImplementation(async () =>
+      reply(200, {
+        ...FINISHED,
+        state: 'failed',
+        result: null,
+        has_result: false,
+        error_message: 'run exited with code 3',
+        failure_code: 'RUN_EXITED_NONZERO',
+      })
+    );
+    for (const run of [await result(RUN_ID), await wait(RUN_ID, 5)]) {
+      expect([run.state, run.failure_code, run.error_message]).toEqual([
+        'failed',
+        'RUN_EXITED_NONZERO',
+        'run exited with code 3',
+      ]);
+    }
+  });
+
+  it('CONTROL: a run sent without the field has no failure code', async () => {
+    // A run that failed before the platform recorded codes is sent without one.
+    const { failure_code: _omitted, ...withoutTheField } = FINISHED;
+    fetchMock.mockResolvedValue(
+      reply(200, {
+        ...withoutTheField,
+        state: 'failed',
+        error_message: 'it failed',
+      })
+    );
+    expect((await result(RUN_ID)).failure_code).toBeNull();
+  });
 
   it('keeps the place in the line in raw while a run waits', async () => {
     fetchMock.mockResolvedValue(

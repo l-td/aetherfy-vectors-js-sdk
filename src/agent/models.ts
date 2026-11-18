@@ -89,6 +89,12 @@ export interface Spawn {
  * `has_result` is the platform's own answer to "did this run answer at all". A
  * refused result is not a result, so `has_result` is false whenever
  * `result_error` is set.
+ *
+ * `failure_code` is why a FAILED run failed, as the platform's code, beside
+ * `error_message`, its sentence: the value to switch on (the code is the
+ * contract, the sentence is prose). Null for a run that did not fail, and for
+ * one that failed before the platform recorded codes. A `cancelled` run carries
+ * none: why it was stopped is `raw.cancellation_reason`.
  */
 export interface Run {
   id: string;
@@ -99,6 +105,7 @@ export interface Run {
   has_result: boolean;
   is_ephemeral: boolean;
   error_message: string | null;
+  failure_code: string | null;
   /** Everything the control plane sent, unmodified. */
   raw: Record<string, unknown>;
 }
