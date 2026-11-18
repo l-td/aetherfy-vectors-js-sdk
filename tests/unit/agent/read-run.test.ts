@@ -45,6 +45,7 @@ const FINISHED = {
   has_result: true,
   error_message: null,
   failure_code: null,
+  retry: null,
   regions: ['iad'],
   pending_regions: [],
   created_at: '2026-09-08T09:04:11Z',
@@ -183,6 +184,7 @@ describe('the run', () => {
     expect(run.is_ephemeral).toBe(true);
     expect(run.error_message).toBeNull();
     expect(run.failure_code).toBeNull();
+    expect(run.retry).toBeNull();
   });
 
   it('keeps the whole object in raw, including what is not named', async () => {
@@ -241,6 +243,116 @@ describe('the run', () => {
       })
     );
     expect((await result(RUN_ID)).failure_code).toBeNull();
+  });
+
+  // What the control plane sends while it retries an attempt that met a
+  // temporary unavailability. The run's `state` is not this field's business: a
+  // retry is read off the run whatever it is.
+  const RETRYING = {
+    code: 'PLATFORM_TEMPORARILY_UNAVAILABLE',
+    attempt: 2,
+    max_attempts: 4,
+    next_attempt_at: '2026-11-18T03:12:45Z',
+  };
+
+  it('returns the retry of a run being retried, from both reads', async () => {
+    fetchMock.mockImplementation(async () =>
+      reply(200, { ...FINISHED, retry: RETRYING })
+    );
+    for (const run of [await result(RUN_ID), await wait(RUN_ID, 5)]) {
+      expect(run.retry).toEqual({
+        code: 'PLATFORM_TEMPORARILY_UNAVAILABLE',
+        attempt: 2,
+        max_attempts: 4,
+        next_attempt_at: new Date(Date.UTC(2026, 10, 18, 3, 12, 45)),
+      });
+      expect(run.raw.retry).toEqual(RETRYING);
+    }
+  });
+
+  it.each([
+    ['Z', '2026-11-18T03:12:45Z', '2026-11-18T03:12:45.000Z'],
+    [
+      'fractional seconds',
+      '2026-11-18T03:12:45.250000Z',
+      '2026-11-18T03:12:45.250Z',
+    ],
+    ['no seconds', '2026-11-18T03:12Z', '2026-11-18T03:12:00.000Z'],
+    ['a zero offset', '2026-11-18T03:12:45+00:00', '2026-11-18T03:12:45.000Z'],
+    // The same instant, said in another offset, is the same Date.
+    ['+02:00', '2026-11-18T05:12:45+02:00', '2026-11-18T03:12:45.000Z'],
+    ['-05:00', '2026-11-17T22:12:45-05:00', '2026-11-18T03:12:45.000Z'],
+  ])(
+    'reads next_attempt_at, sent with %s, as the Date it names',
+    async (_name, sent, instant) => {
+      fetchMock.mockResolvedValue(
+        reply(200, {
+          ...FINISHED,
+          retry: { ...RETRYING, next_attempt_at: sent },
+        })
+      );
+
+      const when = (await result(RUN_ID)).retry?.next_attempt_at;
+
+      expect(when).toBeInstanceOf(Date);
+      expect(when?.toISOString()).toBe(instant);
+    }
+  );
+
+  it('has no retry for a run that is not being retried', async () => {
+    fetchMock.mockResolvedValue(reply(200, { ...FINISHED, retry: null }));
+
+    expect((await result(RUN_ID)).retry).toBeNull();
+  });
+
+  it('CONTROL: a run sent without the field has no retry', async () => {
+    // A run from before the platform sent it has no key at all: that reads as
+    // null too.
+    const { retry: _omitted, ...withoutTheField } = FINISHED;
+    fetchMock.mockResolvedValue(reply(200, withoutTheField));
+
+    expect((await result(RUN_ID)).retry).toBeNull();
+  });
+
+  it.each([
+    ['a string', 'soon'],
+    ['a list', [2, 4]],
+    ['an empty object', {}],
+    ['no code', { ...RETRYING, code: undefined }],
+    ['no attempt', { ...RETRYING, attempt: undefined }],
+    ['no max_attempts', { ...RETRYING, max_attempts: undefined }],
+    ['no next_attempt_at', { ...RETRYING, next_attempt_at: undefined }],
+    ['a code that is not a string', { ...RETRYING, code: 7 }],
+    ['an attempt that is a string', { ...RETRYING, attempt: '2' }],
+    ['an attempt that is a boolean', { ...RETRYING, attempt: true }],
+    ['an attempt that is a fraction', { ...RETRYING, attempt: 2.5 }],
+    ['a max_attempts that is null', { ...RETRYING, max_attempts: null }],
+    ['a number of seconds', { ...RETRYING, next_attempt_at: 1794971565 }],
+    [
+      'a timestamp that is not one',
+      { ...RETRYING, next_attempt_at: 'tomorrow' },
+    ],
+    ['an empty timestamp', { ...RETRYING, next_attempt_at: '' }],
+    [
+      'a timestamp with no offset',
+      { ...RETRYING, next_attempt_at: '2026-11-18T03:12:45' },
+    ],
+    ['a date with no time', { ...RETRYING, next_attempt_at: '2026-11-18' }],
+    [
+      'a month that does not exist',
+      { ...RETRYING, next_attempt_at: '2026-13-01T00:00:00Z' },
+    ],
+  ])('reads %s as no retry, and still returns the run', async (_name, sent) => {
+    // An optional field of the wrong type reads as absent, as `position` does
+    // on a spawn: the run itself is still an answer, and raw keeps what was
+    // sent. (JSON drops an `undefined`, so those cases are a missing key.)
+    fetchMock.mockResolvedValue(reply(200, { ...FINISHED, retry: sent }));
+
+    const run = await result(RUN_ID);
+
+    expect(run.retry).toBeNull();
+    expect(run.state).toBe('completed');
+    expect(run.raw.retry).toEqual(JSON.parse(JSON.stringify(sent)));
   });
 
   it('keeps the place in the line in raw while a run waits', async () => {

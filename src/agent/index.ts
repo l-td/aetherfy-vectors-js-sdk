@@ -104,7 +104,14 @@ import {
   requestPeer,
   USER_AGENT_PREFIX,
 } from './http';
-import { Cancellation, MachineShape, PeerResponse, Run, Spawn } from './models';
+import {
+  Cancellation,
+  MachineShape,
+  PeerResponse,
+  Run,
+  RunRetry,
+  Spawn,
+} from './models';
 import {
   PEER_CACHE_SECONDS,
   PEER_RETRY_CAP_SECONDS,
@@ -136,7 +143,7 @@ export {
   SpawnError,
   WaitTimeoutInvalid,
 };
-export type { Cancellation, MachineShape, PeerResponse, Run, Spawn };
+export type { Cancellation, MachineShape, PeerResponse, Run, RunRetry, Spawn };
 
 /**
  * How long a looked-up peer address is served without asking again. The one
@@ -1050,8 +1057,58 @@ function runFrom(record: Record<string, unknown>): Run {
       typeof record.error_message === 'string' ? record.error_message : null,
     failure_code:
       typeof record.failure_code === 'string' ? record.failure_code : null,
+    retry: retryFrom(record.retry),
     raw: record,
   };
+}
+
+/**
+ * A run's `retry` object as a {@link RunRetry}, or null.
+ *
+ * Null is the answer for a `null`, for a missing key, and for an object that
+ * does not have the shape: `retry` is information about a run that is still
+ * going, so a field of the wrong type reads as absent, as `position` and
+ * `cancelled_count` do, rather than failing the read of the run. It is all or
+ * nothing, never a retry with some of its fields. `Run.raw` keeps what the
+ * platform sent either way.
+ */
+function retryFrom(value: unknown): RunRetry | null {
+  const entry = asRecord(value);
+  if (!entry) return null;
+  const nextAttemptAt = dateWithOffsetOf(entry.next_attempt_at);
+  if (
+    typeof entry.code !== 'string' ||
+    !Number.isInteger(entry.attempt) ||
+    !Number.isInteger(entry.max_attempts) ||
+    nextAttemptAt === null
+  ) {
+    return null;
+  }
+  return {
+    code: entry.code,
+    attempt: entry.attempt as number,
+    max_attempts: entry.max_attempts as number,
+    next_attempt_at: nextAttemptAt,
+  };
+}
+
+/** An ISO 8601 date and time that names its offset: `Z` or `+hh:mm`. */
+const TIMESTAMP_WITH_OFFSET =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * An ISO 8601 timestamp that names its offset as the `Date` it is; null for
+ * anything else.
+ *
+ * A timestamp without an offset is refused, not assumed: `Date.parse` would
+ * read it as local time, and the platform's are UTC.
+ */
+function dateWithOffsetOf(value: unknown): Date | null {
+  if (typeof value !== 'string' || !TIMESTAMP_WITH_OFFSET.test(value)) {
+    return null;
+  }
+  const milliseconds = Date.parse(value);
+  return Number.isNaN(milliseconds) ? null : new Date(milliseconds);
 }
 
 /**

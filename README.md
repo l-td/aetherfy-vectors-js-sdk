@@ -723,6 +723,19 @@ if (finished.state === 'completed') {
   console.log('still', finished.state);
 }
 
+// While the platform retries an attempt that met a temporary unavailability,
+// `retry` says which attempt comes next and when; it is null otherwise.
+if (finished.retry) {
+  console.log(
+    'attempt',
+    finished.retry.attempt,
+    'of',
+    finished.retry.max_attempts,
+    'at',
+    finished.retry.next_attempt_at.toISOString()
+  );
+}
+
 // result() is the same read without the waiting.
 const now = await result(run.spawn_id);
 console.log(now.state, now.has_result, now.result_error);
@@ -732,6 +745,12 @@ A run's `state` is `waiting` while it waits in the account's line, `active`
 while it executes, and ends `completed`, `failed` or `cancelled`. While it is
 `waiting`, `run.raw.position` is its place in the line. The states belong to the
 platform, so the helper does not enumerate them.
+
+While the platform retries an attempt that met a temporary unavailability,
+`run.retry` is a `RunRetry`: its `code`, the number of the next `attempt` out of
+`max_attempts`, and `next_attempt_at`, when that attempt is made (a `Date`). It
+is `null` when nothing is being retried, and it says nothing about how the run
+ended: `state` and `failure_code` do.
 
 The result shares the payload's inline cap — one number bounding both
 directions — and it is for answers and references, not data. Anything larger
