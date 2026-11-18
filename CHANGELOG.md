@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [1.6.0] - not yet released
+
+Ships after 1.5.0, with messaging between running agents.
 
 ### Fixed
 - **A spawn whose answer was lost no longer starts a second run.** Every `spawn()` now carries an id of its own
