@@ -358,6 +358,16 @@ describe('the key each call sends', () => {
       };
       const { headers, signal: _signal, ...rest } = init;
       const { Authorization: _key, ...otherHeaders } = headers;
+      // A spawn's request_id is made once per CALL (its idempotency), so the
+      // two spawns differ by it alone: both carry one, and nothing else differs.
+      if (typeof rest.body === 'string') {
+        const parsed = JSON.parse(rest.body);
+        if ('request_id' in parsed) {
+          expect(parsed.request_id).toEqual(expect.any(String));
+          delete parsed.request_id;
+          rest.body = JSON.stringify(parsed);
+        }
+      }
       return [call[0], rest, otherHeaders];
     };
 

@@ -106,6 +106,27 @@ describe('the request', () => {
     expect(init.headers['User-Agent']).toMatch(/^aetherfy-agent-js\//);
   });
 
+  it('is sent again when its answer was lost: a second cancel changes nothing', async () => {
+    // REPEATABLE: a cancel that reached the control plane and lost its answer
+    // is repeated, and the repeat answers `stopping` with a count of 0.
+    fetchMock
+      .mockReset()
+      .mockRejectedValueOnce(
+        Object.assign(new TypeError('fetch failed'), {
+          cause: Object.assign(new Error('socket hang up'), {
+            code: 'ECONNRESET',
+          }),
+        })
+      )
+      .mockResolvedValueOnce(reply(200, answer('stopping', 0, 'active')));
+
+    const cancellation = await cancel(RUN_ID);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(cancellation.outcome).toBe('stopping');
+    expect(cancellation.cancelled_count).toBe(0);
+  });
+
   it('does not double a trailing slash on the base URL', async () => {
     process.env.AETHERFY_API_URL = 'https://agents.aetherfy.com/api/v1/';
     await cancel(RUN_ID);

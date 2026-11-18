@@ -40,8 +40,14 @@ export interface RequestOptions {
   userAgent: string;
   body?: unknown;
   timeoutMs?: number;
-  /** One retry for a connection-level failure. Never for a status. */
-  retryConnectionErrors?: boolean;
+  /**
+   * Whether a repeat of this call gives the same result: a read, a cancel, or
+   * a spawn or message that carries its own id (the control plane stores it
+   * once). Decides the retry of a request that MAY HAVE BEEN DELIVERED (a
+   * timeout or a reset after it was sent). REQUIRED: every caller decides it in
+   * the open, so a new call never inherits a retry it did not think about.
+   */
+  repeatable: boolean;
 }
 
 /**
@@ -66,10 +72,17 @@ async function readJson(response: Response): Promise<unknown> {
  * onto its own types and needs the body to do it. Only a request that never
  * got an answer throws, as `AgentTransportError`.
  *
- * ONE retry, and only for a connection-level failure — a DNS blip or a reset
- * socket on the way out, where nothing was recorded and repeating is safe. An
- * HTTP status is never retried here: a 4xx repeated is a 4xx, and retrying a
- * spawn the control plane may already have recorded would create a second run.
+ * AT MOST ONE RETRY, and only where a repeat cannot do the work twice:
+ *
+ * - a request that NEVER LEFT ({@link neverDelivered}: the name did not
+ *   resolve, the connection was refused) is retried, whatever the call;
+ * - a request that may have been DELIVERED (a timeout or a reset after it was
+ *   sent) is retried only when `options.repeatable` says its repeat gives the
+ *   same result. A call that is not repeatable throws at once, saying the
+ *   request may have been applied, because a blind repeat could do the work a
+ *   second time.
+ *
+ * An HTTP status is never retried here: a 4xx repeated is a 4xx.
  */
 export async function requestJson(
   method: string,
@@ -87,10 +100,11 @@ export async function requestJson(
     headers['Content-Type'] = 'application/json';
   }
 
-  const attempts = options.retryConnectionErrors === false ? 1 : 2;
   let lastError: unknown = null;
+  let attempts = 0;
 
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+  while (attempts < 2) {
+    attempts += 1;
     let response: Response;
     try {
       response = await fetch(url, {
@@ -105,12 +119,16 @@ export async function requestJson(
       // everything caught here really is transport.
       //
       // READING THE BODY IS DELIBERATELY OUTSIDE IT. A body that fails
-      // mid-stream arrives AFTER the server answered, and on a spawn the
-      // control plane has already recorded the run: retrying there would
-      // create a second one. readJson swallows that failure into a null body
-      // and the status stands.
+      // mid-stream arrives AFTER the server answered, and the work is done.
+      // readJson swallows that failure into a null body and the status stands.
       lastError = error;
-      continue;
+      if (neverDelivered(error) || options.repeatable) {
+        continue;
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new AgentTransportError(
+        `${method} ${url} got no answer and may have been applied: ${reason}`
+      );
     }
     return {
       status: response.status,
@@ -150,11 +168,16 @@ export interface PeerAttempt {
 const NEVER_REACHED_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED']);
 
 /**
- * Whether a rejected `fetch` provably reached no peer. Node's `fetch` rejects
- * with a `TypeError('fetch failed')` whose `cause` carries the socket error and
- * its `code`; a timeout or an abort has no such code and is not that.
+ * Whether a rejected `fetch` provably reached nobody: the name did not resolve,
+ * or the connection was refused. Node's `fetch` rejects with a
+ * `TypeError('fetch failed')` whose `cause` carries the socket error and its
+ * `code`; a timeout or an abort has no such code and is not that, because it
+ * can come after the far side received the request and acted on it. ONE answer
+ * for every request this module sends: {@link requestJson} to the control plane
+ * and {@link requestPeer} to a peer read it, and so does the vectors client's
+ * retry policy (`src/retry-policy.ts`, "refused before anything happened").
  */
-function neverReachedAPeer(error: unknown): boolean {
+function neverDelivered(error: unknown): boolean {
   const cause = (error as { cause?: { code?: unknown } } | null)?.cause;
   return typeof cause?.code === 'string' && NEVER_REACHED_CODES.has(cause.code);
 }
@@ -206,7 +229,7 @@ export async function requestPeer(
     // 500, resolves. Of the ways it can, only two are known to have reached
     // nobody; the rest (a reset, a timeout) may have come after the peer acted.
     const reason = error instanceof Error ? error.message : String(error);
-    if (neverReachedAPeer(error)) {
+    if (neverDelivered(error)) {
       return { failure: reason };
     }
     throw new AgentTransportError(

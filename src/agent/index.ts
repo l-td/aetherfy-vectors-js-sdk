@@ -63,6 +63,7 @@
  * @public
  */
 
+import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 
 import {
@@ -339,6 +340,7 @@ export async function payload(): Promise<Record<string, unknown>> {
   const { status, body } = await requestJson('GET', url, {
     apiKey,
     userAgent: userAgent(),
+    repeatable: true,
   });
   if (status !== 200) {
     const message = detailOf(body).message;
@@ -523,10 +525,19 @@ async function spawnAs(
 ): Promise<Spawn> {
   const url = spawnUrl();
 
+  // THE SPAWN'S OWN ID, made once per call. The control plane stores it with
+  // the run it makes and answers a repeat of the same id with that run, so a
+  // spawn whose answer was lost on the way (a timeout after the request left)
+  // is sent again safely and never makes a second run.
   const { status, body, retryAfter } = await requestJson('POST', url, {
     apiKey,
     userAgent: userAgent(),
-    body: { child_agent_id: child, payload: spawnPayload ?? {} },
+    body: {
+      child_agent_id: child,
+      payload: spawnPayload ?? {},
+      request_id: randomUUID(),
+    },
+    repeatable: true,
   });
 
   if (status === 200 || status === 201 || status === 202) {
@@ -765,7 +776,7 @@ async function waitAs(
   }
   return readRun(`${runUrl(runId)}/wait?timeout_seconds=${seconds}`, apiKey, {
     timeoutMs: (seconds + WAIT_TRANSPORT_MARGIN_SECONDS) * 1000,
-    retryConnectionErrors: false,
+    repeatable: false,
   });
 }
 
@@ -809,10 +820,13 @@ export async function cancel(runId: string): Promise<Cancellation> {
 }
 
 async function cancelAs(apiKey: string, runId: string): Promise<Cancellation> {
+  // REPEATABLE: a second cancel of the same run changes nothing (it answers
+  // `stopping` with a count of 0, or `already_finished`), so a cancel whose
+  // answer was lost is sent again rather than reported as maybe applied.
   const { status, body, retryAfter } = await requestJson(
     'POST',
     `${runUrl(runId)}/cancel`,
-    { apiKey, userAgent: userAgent() }
+    { apiKey, userAgent: userAgent(), repeatable: true }
   );
 
   if (status === 200) {
@@ -1084,13 +1098,13 @@ function sharedRunRefusal(
 async function readRun(
   url: string,
   apiKey: string,
-  options: { timeoutMs?: number; retryConnectionErrors?: boolean } = {}
+  options: { timeoutMs?: number; repeatable?: boolean } = {}
 ): Promise<Run> {
   const { status, body, retryAfter } = await requestJson('GET', url, {
     apiKey,
     userAgent: userAgent(),
     timeoutMs: options.timeoutMs,
-    retryConnectionErrors: options.retryConnectionErrors,
+    repeatable: options.repeatable ?? true,
   });
 
   if (status === 200) {
@@ -1537,6 +1551,7 @@ async function lookupPeers(
   const { status, body, retryAfter } = await requestJson('GET', url, {
     apiKey,
     userAgent: userAgent(),
+    repeatable: true,
   });
 
   if (status === 200) {
