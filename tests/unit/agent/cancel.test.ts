@@ -190,6 +190,36 @@ describe('the three answers', () => {
     expect(run.is_ephemeral).toBe(true);
   });
 
+  it('reads the run a cancel answers with like any other run', async () => {
+    // One reader for every run the SDK returns: a cancel's carries the retry it
+    // was sent with, and none when it was sent without.
+    const body = answer('cancelled');
+    fetchMock.mockResolvedValueOnce(
+      reply(200, {
+        ...body,
+        run: {
+          ...body.run,
+          retry: {
+            code: 'PLATFORM_TEMPORARILY_UNAVAILABLE',
+            attempt: 3,
+            max_attempts: 4,
+            next_attempt_at: '2026-11-18T03:12:45Z',
+          },
+        },
+      })
+    );
+
+    expect((await cancel(RUN_ID)).run.retry).toEqual({
+      code: 'PLATFORM_TEMPORARILY_UNAVAILABLE',
+      attempt: 3,
+      max_attempts: 4,
+      next_attempt_at: new Date(Date.UTC(2026, 10, 18, 3, 12, 45)),
+    });
+
+    fetchMock.mockResolvedValueOnce(reply(200, body));
+    expect((await cancel(RUN_ID)).run.retry).toBeNull();
+  });
+
   it.each([
     ['a string', 'OK'],
     ['an empty object', {}],

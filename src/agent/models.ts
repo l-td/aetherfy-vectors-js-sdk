@@ -89,6 +89,19 @@ export interface Spawn {
  * `has_result` is the platform's own answer to "did this run answer at all". A
  * refused result is not a result, so `has_result` is false whenever
  * `result_error` is set.
+ *
+ * `failure_code` is why a FAILED run failed, as the platform's code, beside
+ * `error_message`, its sentence: the value to switch on (the code is the
+ * contract, the sentence is prose). Null for a run that did not fail, and for
+ * one that failed before the platform recorded codes. A `cancelled` run carries
+ * none: why it was stopped is `raw.cancellation_reason`.
+ *
+ * `retry` is the platform RETRYING this run, while it does: a {@link RunRetry}
+ * for an attempt that met a temporary unavailability, with the code, the number
+ * of the next attempt out of `max_attempts`, and when it is made. Null whenever
+ * nothing is being retried, and for a run sent without the field. It describes
+ * the retry in progress, not how the run ended: `state` and `failure_code` do
+ * that.
  */
 export interface Run {
   id: string;
@@ -99,8 +112,26 @@ export interface Run {
   has_result: boolean;
   is_ephemeral: boolean;
   error_message: string | null;
+  failure_code: string | null;
+  retry: RunRetry | null;
   /** Everything the control plane sent, unmodified. */
   raw: Record<string, unknown>;
+}
+
+/**
+ * The platform retrying a run's attempt that met a temporary unavailability.
+ *
+ * `code` is the platform's code for what the attempt met, the value to switch
+ * on (`PLATFORM_TEMPORARILY_UNAVAILABLE`). `attempt` is the number of the
+ * attempt that will be made NEXT (2 to `max_attempts`), `max_attempts` is how
+ * many attempts the platform makes in all, and `next_attempt_at` is when the
+ * next one is made, as a `Date`.
+ */
+export interface RunRetry {
+  code: string;
+  attempt: number;
+  max_attempts: number;
+  next_attempt_at: Date;
 }
 
 /**

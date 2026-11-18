@@ -26,6 +26,24 @@ This release contains changes marked BREAKING below.
   that the agent's key may not make is still a plain `RunReadError` with that
   code, as before.
 
+### Added
+
+- **`Run.failure_code`: why a failed run failed, as the platform's code.** It is
+  beside `error_message` (the sentence) on every run `wait`, `result`, `cancel`
+  and `serviceRun` return, and is the value to switch on: for example
+  `RUN_EXITED_NONZERO`, `RUN_OUT_OF_MEMORY`, `RUN_TIME_LIMIT_EXCEEDED`, or
+  `PLATFORM_FAILURE` when the failure was the platform's, not the code's.
+  `null` for a run that did not fail. `wait` and `result` still return a failed
+  run rather than throw.
+- **`Run.retry`: the platform retrying a run, and when.** While the platform
+  retries a run's attempt that met a temporary unavailability, every run `wait`,
+  `result`, `cancel` and `serviceRun` return carries a `RunRetry` (new, and
+  exported as a type from `aetherfy-vectors/agent`): `code`
+  (`PLATFORM_TEMPORARILY_UNAVAILABLE`), `attempt` (the number of the attempt that
+  will be made next), `max_attempts`, and `next_attempt_at`, a `Date`. `null`
+  when nothing is being retried. A `retry` that does not have that shape reads as
+  `null`, and `Run.raw` keeps what was sent.
+
 ### Changed (breaking)
 
 - **BREAKING: `TooManyRunsInFlight` is `RunLineFull`.** The in-flight limit no
