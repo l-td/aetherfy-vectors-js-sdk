@@ -13,6 +13,8 @@ Ships after 1.5.0, with messaging between running agents.
   that starts again on a new machine (`restarted()`) is handed again what it had not finished with, and `messages()`
   reads the mailbox's whole history. `parent()` is the run that started this one. The service-run handle gains
   `send`, `receive`, `messages` and `parent`.
+- A waiting `receive()` names the machine it runs on (`AETHERFY_INSTANCE_ID`, set by the platform), so a service
+  release's wait is released on the machine that holds its handler.
 - New types `Message`, `Ended` and `Sent`, and the refusals `MessageError`, `MessageTooLarge`, `MessageRateLimited`
   (`retryAfter`), `MailboxFull`, `MessageStorageFull`, `RecipientEnded` and `SenderEnded`.
 

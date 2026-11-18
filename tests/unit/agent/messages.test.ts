@@ -411,3 +411,24 @@ describe('a service run', () => {
     await handle.receive({ timeoutSeconds: 0 });
   });
 });
+
+describe('the machine a wait is held on', () => {
+  afterEach(() => {
+    delete process.env.AETHERFY_INSTANCE_ID;
+  });
+
+  it('names the machine its supervisor set', async () => {
+    // A service release's wait is held by the machine that runs the handler: the control plane is told which.
+    process.env.AETHERFY_INSTANCE_ID = '8f1c2d3e-0000-4000-8000-00000000abcd';
+    queue(reply(200, { waiting: false }));
+    await receive({ timeoutSeconds: 0 });
+    expect(bodyOf(0).instance_id).toBe('8f1c2d3e-0000-4000-8000-00000000abcd');
+  });
+
+  it('names none without it', async () => {
+    delete process.env.AETHERFY_INSTANCE_ID;
+    queue(reply(200, { waiting: false }));
+    await receive({ timeoutSeconds: 0 });
+    expect(bodyOf(0)).not.toHaveProperty('instance_id');
+  });
+});

@@ -1694,6 +1694,14 @@ async function lookupPeers(
 /** Where the supervisor holds a waiting receive(): set by the platform on the run's process or service. */
 export const SUPERVISOR_WAIT_URL_VARIABLE = 'AETHERFY_SUPERVISOR_WAIT_URL';
 
+/**
+ * The machine this process runs on, as the platform names it to the control
+ * plane: set by a supervisor that holds waits (run-request-v4). A wait records
+ * the machine whose supervisor holds its call; a service release's wait names
+ * it with this, since a release has no one machine of its own.
+ */
+export const INSTANCE_ID_VARIABLE = 'AETHERFY_INSTANCE_ID';
+
 /** How many times the local wait is asked again after its connection dropped. */
 const LOCAL_WAIT_ATTEMPTS = 3;
 
@@ -1894,6 +1902,8 @@ async function receiveOnce(
     if (options.timeoutSeconds !== undefined) {
       request.timeout_seconds = options.timeoutSeconds;
     }
+    const instanceId = process.env[INSTANCE_ID_VARIABLE];
+    if (instanceId) request.instance_id = instanceId;
     // Kept until this call sees the wait through: if the request fails after
     // it may have arrived, the next call names the same wait.
     pendingWaits.set(runId, waitId);
