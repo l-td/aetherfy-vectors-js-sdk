@@ -3,11 +3,10 @@
  *
  * Single source of truth for the rule: never POST/PUT more than
  * MAX_REQUEST_BYTES of points to the backend in one HTTP request. The
- * client→backend hop terminates at Cloudflare's edge, whose body-size cap
- * is 100 MB on Free/Pro/Business plans (500 MB on Enterprise). A request
- * exceeding that cap is rejected with 413 BEFORE reaching our origin —
- * the server-side streaming chunker can't help because Cloudflare buffers
- * the body before forwarding.
+ * client→backend hop terminates at the service's edge, whose request-body
+ * cap is 100 MB. A request exceeding that cap is rejected with 413 BEFORE
+ * reaching our origin — the server-side streaming chunker can't help
+ * because the edge buffers the body before forwarding.
  *
  * Why bytes, not point count: a 1000-vector batch is ~35 MB for 384-dim
  * vectors and ~138 MB for 1536-dim vectors. A count cap that's safe for
@@ -15,12 +14,12 @@
  * robust across dim and payload shape.
  *
  * Mirror of vectordb/backend/services/chunking.js (server-side) with a
- * higher threshold tuned to Cloudflare's edge limit instead of Qdrant's
+ * higher threshold tuned to the edge's limit instead of Qdrant's
  * 32 MB body cap.
  */
 
 /**
- * Per-HTTP-request byte target. The binding constraint is NOT Cloudflare's
+ * Per-HTTP-request byte target. The binding constraint is NOT the edge's
  * 100 MB body cap — it's the BACKEND'S PROCESSING TIME. The server re-chunks
  * each request into ~12 MB Qdrant sub-batches and writes them with
  * `wait=true` (Qdrant segment commit ~1-5 s each, serial) inside a 90 s
@@ -83,7 +82,7 @@ export function pointWireBytes(point: unknown): number {
  * targetBytes.
  *
  * Single-point overflow: if one point exceeds targetBytes on its own, it
- * gets its own chunk. The backend (or Cloudflare) may reject it, but the
+ * gets its own chunk. The backend (or the edge) may reject it, but the
  * SDK never silently drops data — every point is at least attempted.
  * Callers (upsert) catch the resulting error and surface the point id
  * so the user knows exactly which point is too large.
