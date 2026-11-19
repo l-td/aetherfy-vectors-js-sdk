@@ -7,8 +7,9 @@
  * - a request that MAY HAVE BEEN DELIVERED (a timeout or a reset after it was
  *   sent) is retried once only when the call is repeatable, and otherwise
  *   throws at once saying it may have been applied;
- * - a 503 RESOURCE_BUSY or SERVICE_UNAVAILABLE with Retry-After (either can
- *   come partway through a request) is retried once after it, only for a
+ * - a 503 with Retry-After is retried once after it: RESOURCE_BUSY (refused
+ *   before anything ran) whatever the call, REQUEST_TIMED_OUT and
+ *   SERVICE_UNAVAILABLE (either can come partway through a request) only for a
  *   repeatable call; any other status never.
  *
  * `fetch` is the only thing stubbed. Nothing here opens a socket.
@@ -171,7 +172,7 @@ describe('a 503 the control plane answered with a Retry-After', () => {
     });
   }
 
-  it.each([['RESOURCE_BUSY'], ['SERVICE_UNAVAILABLE']])(
+  it.each([['RESOURCE_BUSY'], ['REQUEST_TIMED_OUT'], ['SERVICE_UNAVAILABLE']])(
     '%s is retried once after its Retry-After for a repeatable call',
     async code => {
       fetchMock
@@ -186,7 +187,20 @@ describe('a 503 the control plane answered with a Retry-After', () => {
     }
   );
 
-  it.each([['RESOURCE_BUSY'], ['SERVICE_UNAVAILABLE']])(
+  it('RESOURCE_BUSY is retried once for a call that is not repeatable', async () => {
+    // Refused before anything ran: the repeat cannot do the work twice, so even a create is sent again.
+    fetchMock
+      .mockResolvedValueOnce(refusal('RESOURCE_BUSY'))
+      .mockResolvedValueOnce(accepted());
+    const { status } = await send(false);
+    expect([status, fetchMock.mock.calls.length, waits]).toEqual([
+      202,
+      2,
+      [5000],
+    ]);
+  });
+
+  it.each([['REQUEST_TIMED_OUT'], ['SERVICE_UNAVAILABLE']])(
     '%s is returned to a call that is not repeatable',
     async code => {
       // It can come partway through the request: a blind repeat could do the work twice.

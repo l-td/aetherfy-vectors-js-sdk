@@ -23,16 +23,19 @@ export const USER_AGENT_PREFIX = 'aetherfy-agent-js/';
 export const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
- * The control plane's 503s worth one more try after their `Retry-After`, each
- * only for a call whose repeat gives the same result (`repeatable`): either
- * can come PARTWAY through a request. `SERVICE_UNAVAILABLE`: the archive
- * storage an upload or a rebuild needs. `RESOURCE_BUSY`: a request's first
- * unit found no database slot (control plane REVIEW_FAQ §97, nothing ran), but
- * today the same code also answers a lock or statement timeout partway through
- * a request.
+ * The control plane's 503s worth one more try after their `Retry-After`.
+ * `RESOURCE_BUSY`: the request was refused before anything ran (its first
+ * unit found no database slot), so ANY request may be sent again, a create or
+ * a delete included. `REQUEST_TIMED_OUT` and `SERVICE_UNAVAILABLE` can come
+ * PARTWAY through a request (a later unit timed out, or the archive storage an
+ * upload or a rebuild needs was unreachable), so only a call whose repeat
+ * gives the same result (`repeatable`) is sent again.
  */
 export const RESOURCE_BUSY = 'RESOURCE_BUSY';
+export const REQUEST_TIMED_OUT = 'REQUEST_TIMED_OUT';
 export const SERVICE_UNAVAILABLE = 'SERVICE_UNAVAILABLE';
+/** The 503s that may have partly run: repeated only for a repeatable call. */
+const PARTWAY: readonly string[] = [REQUEST_TIMED_OUT, SERVICE_UNAVAILABLE];
 /** The longest `Retry-After` the helper waits out itself: the request's own timeout. */
 export const MAX_RETRY_AFTER_WAITED_SECONDS = DEFAULT_TIMEOUT_MS / 1000;
 
@@ -54,15 +57,13 @@ function worthOneMoreTry(
   const refusals = options.refusals ?? 'by-the-rule';
   const detail = (body as { detail?: unknown } | null)?.detail;
   const code = (detail as { code?: unknown } | null | undefined)?.code;
-  const codes =
-    refusals === 'resource-busy-only'
-      ? [RESOURCE_BUSY]
-      : [RESOURCE_BUSY, SERVICE_UNAVAILABLE];
   const retryable =
     refusals !== 'none' &&
-    options.repeatable &&
     typeof code === 'string' &&
-    codes.includes(code);
+    (code === RESOURCE_BUSY ||
+      (refusals === 'by-the-rule' &&
+        options.repeatable &&
+        PARTWAY.includes(code)));
   return (
     status === 503 &&
     retryable &&
@@ -104,11 +105,12 @@ export interface RequestOptions {
    */
   repeatable: boolean;
   /**
-   * Which of the control plane's 503s are waited out and repeated for a
-   * repeatable call (see {@link requestJson}). `'by-the-rule'`, the default:
-   * `RESOURCE_BUSY` and `SERVICE_UNAVAILABLE`. `'resource-busy-only'`:
-   * `RESOURCE_BUSY` alone. `'none'`: neither, returned as they came. The peer
-   * lookup chooses: it has a last known address to serve at once instead.
+   * Which of the control plane's 503s are waited out and repeated (see
+   * {@link requestJson}). `'by-the-rule'`, the default: `RESOURCE_BUSY` for any
+   * call, `REQUEST_TIMED_OUT` and `SERVICE_UNAVAILABLE` for a repeatable one.
+   * `'resource-busy-only'`: `RESOURCE_BUSY` alone. `'none'`: none, returned as
+   * they came. The peer lookup chooses: it has a last known address to serve
+   * at once instead.
    */
   refusals?: 'by-the-rule' | 'resource-busy-only' | 'none';
 }
@@ -144,9 +146,10 @@ async function readJson(response: Response): Promise<unknown> {
  *   same result. A call that is not repeatable throws at once, saying the
  *   request may have been applied, because a blind repeat could do the work a
  *   second time;
- * - a 503 `RESOURCE_BUSY` or `SERVICE_UNAVAILABLE` with a `Retry-After` is
- *   retried after it only when the call is `repeatable`: either can come
- *   partway through a request. It waits at most
+ * - a 503 with a `Retry-After` is retried after it: `RESOURCE_BUSY` whatever
+ *   the call (it was refused before anything ran), `REQUEST_TIMED_OUT` and
+ *   `SERVICE_UNAVAILABLE` only when the call is `repeatable` (either can come
+ *   partway through a request). It waits at most
  *   {@link MAX_RETRY_AFTER_WAITED_SECONDS}; a longer one is returned as it
  *   came.
  *

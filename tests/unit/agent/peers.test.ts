@@ -1395,16 +1395,19 @@ describe('a lookup the control plane answered 503 RESOURCE_BUSY', () => {
     expect([lookupCalls.length, waits]).toEqual([2, [5000]]);
   });
 
-  it('with no known address, any other 503 fails as it came', async () => {
-    lookupReplies.set('analyst', {
-      status: 503,
-      body: envelope('SERVICE_UNAVAILABLE'),
-      headers: { 'Retry-After': '5' },
-    });
-    const error = await agentUrl('analyst').catch(e => e);
-    expect(error).toBeInstanceOf(PeerLookupError);
-    expect([lookupCalls.length, waits]).toEqual([1, []]);
-  });
+  it.each([['REQUEST_TIMED_OUT'], ['SERVICE_UNAVAILABLE']])(
+    'with no known address, any other 503 fails as it came (%s)',
+    async code => {
+      lookupReplies.set('analyst', {
+        status: 503,
+        body: envelope(code),
+        headers: { 'Retry-After': '5' },
+      });
+      const error = await agentUrl('analyst').catch(e => e);
+      expect(error).toBeInstanceOf(PeerLookupError);
+      expect([lookupCalls.length, waits]).toEqual([1, []]);
+    }
+  );
 
   it('with a known address, RESOURCE_BUSY serves it at once and waits for nothing', async () => {
     await expect(agentUrl('analyst')).resolves.toBe(OLD);
