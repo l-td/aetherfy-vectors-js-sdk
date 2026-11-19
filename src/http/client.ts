@@ -9,6 +9,24 @@ import http from 'http';
 import https from 'https';
 import type net from 'net';
 
+/**
+ * How long a pooled connection may sit unused before the SDK closes it.
+ *
+ * The service's edge closes a client connection that has been idle for 400 s,
+ * and that is not configurable. This is far below it, so the SDK is always the
+ * side that closes an idle socket, and never the one that finds it already
+ * closed when it reuses it: a request sent on a socket the edge has closed
+ * fails as a connection reset, which the retry rules do not repeat for the
+ * operations that cannot safely be repeated (the ONCE class of
+ * retry-policy.ts).
+ *
+ * Held below half of the edge's figure by tests/unit/http-idle.test.ts. A
+ * customer's own proxy or NAT may close an idle connection sooner than either;
+ * a shorter value here narrows that window and costs a new connection after a
+ * pause.
+ */
+export const IDLE_SOCKET_MS = 60_000;
+
 // Marks on the sockets the SDK's agents create (HttpClient.watchingAgent).
 const WATCHED = Symbol('aetherfy.watchedSocket');
 const CONNECTED = Symbol('aetherfy.connectedSocket');
@@ -143,7 +161,7 @@ export class HttpClient {
             keepAlive: true,
             maxSockets: 50,
             maxFreeSockets: 10,
-            timeout: 60000,
+            timeout: IDLE_SOCKET_MS,
             keepAliveMsecs: 1000,
           }
         : { keepAlive: false };

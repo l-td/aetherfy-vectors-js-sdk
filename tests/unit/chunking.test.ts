@@ -113,7 +113,7 @@ describe('chunkPointsByBytes', () => {
   it('sends a single oversized point alone in its own chunk (no silent drop)', () => {
     // One point with a huge embedded payload that itself exceeds the
     // target. The chunker must yield it in its own chunk rather than
-    // refuse to emit it. The backend (or Cloudflare) may then reject
+    // refuse to emit it. The backend (or the edge) may then reject
     // it, but the SDK NEVER drops user data without telling them.
     const tiny = { id: 'tiny', vector: [0.1] };
     const huge = {
