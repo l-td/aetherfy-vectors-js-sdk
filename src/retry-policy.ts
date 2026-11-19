@@ -7,6 +7,11 @@
  * 1. REFUSED BEFORE ANYTHING HAPPENED. Retried for EVERY operation.
  *    - 503 WORKSPACE_LOOKUP_UNAVAILABLE, COLLECTION_LOOKUP_UNAVAILABLE,
  *      PLACEMENT_UNAVAILABLE: the server refused at its edge; nothing ran.
+ *    - 503 RESOURCE_BUSY: the vector API's own database had no connection for
+ *      a request that had changed nothing yet (vectordb
+ *      backend/utils/databaseUnavailable.js: a handler marks the request
+ *      before it changes anything). The same wait AFTER something ran is a 503
+ *      REQUEST_TIMED_OUT, which is kind 2 below.
  *    - A connection never made: DNS, connection refused, or a connect that
  *      never completed. Under real Node axios reports the last with its own
  *      timeout code (ECONNABORTED), like a timeout waiting for the answer, so
@@ -18,7 +23,8 @@
  *      kind 2 below, never kind 1.
  *    - 429 with a Retry-After: refused, nothing ran (as before this rule).
  * 2. AMBIGUOUS: a timeout waiting for the answer, a reset after sending, any
- *    other 5xx. The request may have run. Retried only for an operation whose
+ *    other 5xx (a 503 REQUEST_TIMED_OUT, the wait partway through a request,
+ *    included). The request may have run. Retried only for an operation whose
  *    repeat gives the same result (REPEATABLE below). A ONCE operation throws
  *    after one attempt: its repeat after a hidden success reports a false
  *    error (a delete finds nothing, a create finds the collection).
@@ -175,11 +181,17 @@ export function serverAskedWaitMs(error: unknown): number | undefined {
     : undefined;
 }
 
-/** 503s the server answers at its edge, before running anything. */
+/**
+ * 503s the server answers before running anything: three at its edge, and
+ * RESOURCE_BUSY, the vector API's refusal when its database had no connection
+ * for a request that had changed nothing yet. (The wait after something ran
+ * is REQUEST_TIMED_OUT: not in this set, so it is ambiguous.)
+ */
 export const REFUSED_BEFORE_ANYTHING_CODES: ReadonlySet<string> = new Set([
   'WORKSPACE_LOOKUP_UNAVAILABLE',
   'COLLECTION_LOOKUP_UNAVAILABLE',
   'PLACEMENT_UNAVAILABLE',
+  'RESOURCE_BUSY',
 ]);
 
 interface FailureShape {

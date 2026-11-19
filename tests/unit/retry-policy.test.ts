@@ -12,6 +12,7 @@ import { DistanceMetric } from '../../src/models';
 import {
   ONCE,
   OPERATIONS,
+  REFUSED_BEFORE_ANYTHING_CODES,
   REPEATABLE,
   REPEATABLE_DESPITE_ITS_NAME,
   ambiguous,
@@ -25,6 +26,8 @@ const LOOKUP = {
   error: { code: 'WORKSPACE_LOOKUP_UNAVAILABLE', message: 'x' },
 };
 const OTHER_503 = { error: { code: 'SOMETHING_ELSE', message: 'x' } };
+const BUSY = { error: { code: 'RESOURCE_BUSY', message: 'x' } };
+const TIMED_OUT = { error: { code: 'REQUEST_TIMED_OUT', message: 'x' } };
 
 function client(): AetherfyVectorsClient {
   return new AetherfyVectorsClient({
@@ -124,6 +127,27 @@ describe('1. refused before anything ran: every operation', () => {
     expect(w.attempts()).toBe(2);
   });
 
+  it.each(['getCollection', 'deleteCollection', 'createCollection', 'count'])(
+    'a RESOURCE_BUSY 503 is retried for every operation: %s',
+    async op => {
+      // The vector API answers RESOURCE_BUSY only for a request that had
+      // changed nothing yet, so a create or a delete is sent again after it.
+      const w = wire(CALLS[op], [[503, BUSY]]);
+      await CALLS[op].run(client());
+      expect(w.attempts()).toBe(2);
+    }
+  );
+
+  it('the refused set is the edge codes and RESOURCE_BUSY, and not REQUEST_TIMED_OUT', () => {
+    expect([...REFUSED_BEFORE_ANYTHING_CODES].sort()).toEqual([
+      'COLLECTION_LOOKUP_UNAVAILABLE',
+      'PLACEMENT_UNAVAILABLE',
+      'RESOURCE_BUSY',
+      'WORKSPACE_LOOKUP_UNAVAILABLE',
+    ]);
+    expect(REFUSED_BEFORE_ANYTHING_CODES.has('REQUEST_TIMED_OUT')).toBe(false);
+  });
+
   it('a connection never made (HttpClient: requestSent false) is a refusal', () => {
     // nock has no socket to watch; the real thing is proven by
     // retry-real-network.test.ts. Here, the rule on the marked error.
@@ -174,6 +198,27 @@ describe('2. ambiguous: only operations whose repeat gives the same result', () 
         expect(w.attempts()).toBe(2);
         nock.cleanAll();
       }
+    }
+  );
+
+  it.each(['deleteCollection', 'createCollection'])(
+    'a REQUEST_TIMED_OUT 503 is not retried for a ONCE operation: %s',
+    async op => {
+      // The wait partway through a request: some of it may have been applied.
+      const w = wire(CALLS[op], [[503, TIMED_OUT]]);
+      await expect(CALLS[op].run(client())).rejects.toMatchObject({
+        code: 'REQUEST_TIMED_OUT',
+      });
+      expect(w.attempts()).toBe(1);
+    }
+  );
+
+  it.each(['getCollection', 'count', 'scroll', 'retrieve'])(
+    'a REQUEST_TIMED_OUT 503 is retried for a read: %s',
+    async op => {
+      const w = wire(CALLS[op], [[503, TIMED_OUT]]);
+      await CALLS[op].run(client());
+      expect(w.attempts()).toBe(2);
     }
   );
 
