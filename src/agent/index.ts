@@ -737,8 +737,8 @@ export async function writeResult(value: unknown): Promise<void> {
  * `'cancelled'`. {@link wait} is the same read with the waiting done
  * server-side, and is what to use when the answer is the point.
  *
- * `runId` is a run's id — `Spawn.spawn_id` from a {@link spawn}, or the id of
- * this run itself in `AETHERFY_SPAWN_ID`.
+ * `runId` is a run's id — `Spawn.spawn_id` from a {@link spawn}, or, on a task
+ * machine, the id of this run itself in `AETHERFY_DEPLOYMENT_ID`.
  *
  * @throws {RunNotFound} 404, no run has that id.
  * @throws {RunAccessDenied} 403 `DEPLOYMENT_ACCESS_DENIED`, the run belongs to
@@ -1746,8 +1746,15 @@ const pendingAcks = new Map<string, string[]>();
 const pendingWaits = new Map<string, string>();
 const receiveChains = new Map<string, Promise<unknown>>();
 
+/**
+ * The deployment whose mailbox this process reads: `AETHERFY_DEPLOYMENT_ID`, and
+ * nothing else. On a task machine the supervisor sets it to the run being
+ * executed, on every run; on a service machine the platform sets it to the
+ * release the machine serves, whose mailbox the service's own code reads.
+ * (`AETHERFY_SPAWN_ID` names a run only, and a service machine has none.)
+ */
 function ownRunId(purpose: string): string {
-  return requireEnv('AETHERFY_SPAWN_ID', purpose);
+  return requireEnv('AETHERFY_DEPLOYMENT_ID', purpose);
 }
 
 /**

@@ -15,6 +15,9 @@ Ships after 1.5.0, with messaging between running agents.
   `send`, `receive`, `messages` and `parent`.
 - A waiting `receive()` names the machine it runs on (`AETHERFY_INSTANCE_ID`, set by the platform), so a service
   release's wait is released on the machine that holds its handler.
+- The mailbox the helpers read is the one `AETHERFY_DEPLOYMENT_ID` names, set by the platform on every machine: the
+  current run on a task agent, the release on a service. So a service's own code reads its release's mailbox (naming
+  `fromRun`), what the runs its release spawned send to `parent()`.
 - New types `Message`, `Ended` and `Sent`, and the refusals `MessageError`, `MessageTooLarge`, `MessageRateLimited`
   (`retryAfter`), `MailboxFull`, `MessageStorageFull`, `RecipientEnded` and `SenderEnded`.
 

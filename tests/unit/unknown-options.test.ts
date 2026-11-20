@@ -443,7 +443,7 @@ function onMailbox(call: (options: Options) => unknown): EntryPoint['setup'] {
   return () => {
     process.env.AETHERFY_API_URL = 'https://agents.aetherfy.com/api/v1';
     process.env.AETHERFY_API_KEY = API_KEY;
-    process.env.AETHERFY_SPAWN_ID = '11111111-1111-4111-8111-111111111111';
+    process.env.AETHERFY_DEPLOYMENT_ID = '11111111-1111-4111-8111-111111111111';
     const fetchMock = jest.fn(async (input: unknown) => {
       const url = String(input);
       if (url.endsWith('/messages/receive')) {

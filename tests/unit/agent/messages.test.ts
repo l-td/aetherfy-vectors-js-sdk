@@ -80,7 +80,11 @@ function receiveWaitIds(): string[] {
 beforeEach(() => {
   process.env.AETHERFY_API_URL = API;
   process.env.AETHERFY_API_KEY = 'afy_test_run_key';
-  process.env.AETHERFY_SPAWN_ID = OWN;
+  // The mailbox is found through AETHERFY_DEPLOYMENT_ID alone: the run on a task
+  // machine, the release on a service's. AETHERFY_SPAWN_ID names a run only, so
+  // it is absent here, as on a service's machine.
+  process.env.AETHERFY_DEPLOYMENT_ID = OWN;
+  delete process.env.AETHERFY_SPAWN_ID;
   process.env.AETHERFY_SUPERVISOR_WAIT_URL = LOCAL;
   fetchMock = jest.fn();
   global.fetch = fetchMock as unknown as typeof fetch;
@@ -274,6 +278,53 @@ describe('receive()', () => {
     queue(reply(200, { waiting: false }));
     expect(await receive({ timeoutSeconds: 0 })).toBeNull();
   });
+
+  it("a service reads its release's mailbox, with no spawn id", async () => {
+    // A service's machine: AETHERFY_DEPLOYMENT_ID is the release it serves.
+    const release = '44444444-4444-4444-8444-444444444444';
+    process.env.AETHERFY_DEPLOYMENT_ID = release;
+    queue(reply(200, { message: stored(1, CHILD) }));
+    const got = await receive({ timeoutSeconds: 0, fromRun: CHILD });
+    expect(got && got.kind === 'message' ? got.sender_run_id : null).toBe(
+      CHILD
+    );
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      `${API}/deployments/${release}/messages/receive`
+    );
+  });
+
+  it.each([
+    [
+      'receive',
+      async () => {
+        await receive({ timeoutSeconds: 0 });
+      },
+    ],
+    [
+      'messages',
+      async () => {
+        for await (const m of messages()) void m;
+      },
+    ],
+  ])(
+    '%s never reads the mailbox from AETHERFY_SPAWN_ID',
+    async (_name, call) => {
+      // One source: with AETHERFY_DEPLOYMENT_ID missing, a spawn id does not stand in for it.
+      delete process.env.AETHERFY_DEPLOYMENT_ID;
+      process.env.AETHERFY_SPAWN_ID = OWN;
+      const error = await Promise.resolve()
+        .then(call)
+        .then(
+          () => null,
+          (e: unknown) => e
+        );
+      expect(error).toBeInstanceOf(NotRunningOnAgent);
+      expect((error as NotRunningOnAgent).variable).toBe(
+        'AETHERFY_DEPLOYMENT_ID'
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
 
   it('a wait whose request failed is named again by the next call', async () => {
     // The request may have arrived and recorded the wait: a fresh id would be
