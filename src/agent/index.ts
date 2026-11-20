@@ -1707,7 +1707,10 @@ const LOCAL_WAIT_ATTEMPTS = 3;
 
 /** Options of {@link send}. */
 export interface SendOptions {
-  /** The message's own id; one is made when none is given. The same id again is the same message. */
+  /**
+   * The message's own id, a UUID (anything else is refused, 422 VALIDATION_ERROR); one is made when none is given.
+   * The same id again is the same message.
+   */
   id?: string;
 }
 
