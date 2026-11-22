@@ -587,3 +587,166 @@ export class PeerHasNoUrl extends PeerLookupError {
     Object.setPrototypeOf(this, PeerHasNoUrl.prototype);
   }
 }
+
+// --- MESSAGES BETWEEN RUNNING AGENTS ------------------------------------------
+//
+// The codes a message call refuses with (control plane, messaging between
+// running agents). The STATUS AND THE CODE together select a subclass; an
+// unrecognised pairing arrives as MessageError reporting exactly what came back.
+
+/** A message larger than the inline cap (the run payload's). */
+export const RUN_MESSAGE_TOO_LARGE = 'RUN_MESSAGE_TOO_LARGE';
+/** More messages from one sending run in a minute than the rate allows. */
+export const RUN_MESSAGE_RATE_LIMITED = 'RUN_MESSAGE_RATE_LIMITED';
+/** The recipient's mailbox holds as many unread messages as it may. */
+export const RUN_MAILBOX_FULL = 'RUN_MAILBOX_FULL';
+/** The account's live runs' messages would pass its stored-logs budget. */
+export const RUN_MESSAGE_STORAGE_FULL = 'RUN_MESSAGE_STORAGE_FULL';
+/** The recipient has ended: its mailbox takes no more messages. */
+export const RUN_MESSAGE_RECIPIENT_ENDED = 'RUN_MESSAGE_RECIPIENT_ENDED';
+/** receive({ fromRun }) on a run that has ended and left nothing unread. */
+export const RUN_MESSAGE_SENDER_ENDED = 'RUN_MESSAGE_SENDER_ENDED';
+
+/**
+ * The control plane refused a message call (send, receive, the history) for a
+ * reason with no type of its own. `code` is the platform's stable code and the
+ * thing to branch on; `message` is prose. An id no run has is RunNotFound, and a
+ * run this key may not reach is RunAccessDenied, as for every run call.
+ */
+export class MessageError extends AgentError {
+  public readonly status?: number;
+  public readonly code?: string;
+  public readonly detail: Record<string, unknown>;
+  /** The seconds the control plane's `Retry-After` header asked to wait, or undefined. */
+  public readonly retryAfter?: number;
+
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      code?: string;
+      detail?: Record<string, unknown>;
+      retryAfter?: number;
+    } = {}
+  ) {
+    super(message);
+    this.name = 'MessageError';
+    this.status = options.status;
+    this.code = options.code;
+    this.detail = options.detail ?? {};
+    this.retryAfter = options.retryAfter;
+    Object.setPrototypeOf(this, MessageError.prototype);
+  }
+}
+
+/**
+ * `413 RUN_MESSAGE_TOO_LARGE`: the message is larger than the inline cap, the
+ * same one a run's payload has. Put large data in a collection and send its id.
+ */
+export class MessageTooLarge extends MessageError {
+  public readonly messageBytes?: number;
+  public readonly maxBytes?: number;
+
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 413, code: RUN_MESSAGE_TOO_LARGE, detail });
+    this.name = 'MessageTooLarge';
+    this.messageBytes = numberOrUndefined(detail?.message_bytes);
+    this.maxBytes = numberOrUndefined(detail?.max_bytes);
+    Object.setPrototypeOf(this, MessageTooLarge.prototype);
+  }
+}
+
+/**
+ * `429 RUN_MESSAGE_RATE_LIMITED`: this run sent as many messages in the last
+ * minute as it may. `retryAfter` is the seconds until the next one is taken.
+ */
+export class MessageRateLimited extends MessageError {
+  public override readonly retryAfter?: number;
+
+  constructor(
+    message: string,
+    detail?: Record<string, unknown>,
+    retryAfter?: number
+  ) {
+    super(message, {
+      status: 429,
+      code: RUN_MESSAGE_RATE_LIMITED,
+      detail,
+      retryAfter,
+    });
+    this.name = 'MessageRateLimited';
+    this.retryAfter = retryAfter;
+    Object.setPrototypeOf(this, MessageRateLimited.prototype);
+  }
+}
+
+/**
+ * `429 RUN_MAILBOX_FULL`: the recipient has as many unread messages as its
+ * mailbox holds. It clears when the recipient reads, not with time.
+ */
+export class MailboxFull extends MessageError {
+  public readonly unread?: number;
+  public readonly maxUnread?: number;
+
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 429, code: RUN_MAILBOX_FULL, detail });
+    this.name = 'MailboxFull';
+    this.unread = numberOrUndefined(detail?.unread);
+    this.maxUnread = numberOrUndefined(detail?.max_unread);
+    Object.setPrototypeOf(this, MailboxFull.prototype);
+  }
+}
+
+/**
+ * `429 RUN_MESSAGE_STORAGE_FULL`: the messages of the account's live runs would
+ * pass its plan's stored-logs budget. It clears as runs read and end.
+ */
+export class MessageStorageFull extends MessageError {
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 429, code: RUN_MESSAGE_STORAGE_FULL, detail });
+    this.name = 'MessageStorageFull';
+    Object.setPrototypeOf(this, MessageStorageFull.prototype);
+  }
+}
+
+/**
+ * `409 RUN_MESSAGE_RECIPIENT_ENDED`: the run the message is for has ended, and
+ * an ended run's mailbox takes no more messages. `recipientState` is how it ended.
+ */
+export class RecipientEnded extends MessageError {
+  public readonly recipientState?: string;
+
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 409, code: RUN_MESSAGE_RECIPIENT_ENDED, detail });
+    this.name = 'RecipientEnded';
+    this.recipientState =
+      typeof detail?.recipient_state === 'string'
+        ? detail.recipient_state
+        : undefined;
+    Object.setPrototypeOf(this, RecipientEnded.prototype);
+  }
+}
+
+/**
+ * `409 RUN_MESSAGE_SENDER_ENDED`, from receive({ fromRun }): that run has ended
+ * and nothing it sent is left unread. `senderState` is how it ended.
+ */
+export class SenderEnded extends MessageError {
+  public readonly senderState?: string;
+
+  constructor(message: string, detail?: Record<string, unknown>) {
+    super(message, { status: 409, code: RUN_MESSAGE_SENDER_ENDED, detail });
+    this.name = 'SenderEnded';
+    this.senderState =
+      typeof detail?.sender_state === 'string'
+        ? detail.sender_state
+        : undefined;
+    Object.setPrototypeOf(this, SenderEnded.prototype);
+  }
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : undefined;
+}

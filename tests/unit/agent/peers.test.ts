@@ -29,6 +29,7 @@ import {
   PEER_CACHE_SECONDS,
 } from '../../../src/agent';
 import * as agent from '../../../src/agent';
+import { waiting } from '../../../src/agent/http';
 import {
   AgentError,
   AgentTransportError,
@@ -84,7 +85,7 @@ interface Call {
 let lookupCalls: Call[];
 let peerCalls: Call[];
 /** key (a peer name, or null for the list) -> the lookup's answer. */
-let lookupReplies: Map<string | null, Reply>;
+let lookupReplies: Map<string | null, Reply | Reply[]>;
 let behaviour: Map<string, Behaviour>;
 let lookupRetryAfter: string | undefined;
 
@@ -111,7 +112,9 @@ function fakeFetch(input: unknown, init: unknown): Promise<Response> {
     lookupCalls.push(call);
     const key =
       url === PEERS ? null : decodeURIComponent(url.slice(PEERS.length + 1));
-    const reply = lookupReplies.get(key);
+    // A list answers each lookup with its next reply, in order.
+    const queued = lookupReplies.get(key);
+    const reply = Array.isArray(queued) ? queued.shift() : queued;
     if (!reply) throw new Error(`no lookup reply for ${String(key)}`);
     const headers = { ...reply.headers };
     if (lookupRetryAfter) headers['Retry-After'] = lookupRetryAfter;
@@ -1354,5 +1357,94 @@ describe('a control plane that cannot answer', () => {
     expect(error).toBeInstanceOf(PeerLookupError);
     expect(error.status).toBe(503);
     expect(peerCalls.map(c => c.url)).toEqual([`${OLD}/x`]); // one request, to the address that was known
+  });
+});
+
+// --- A LOOKUP THE CONTROL PLANE REFUSED BEFORE ANYTHING RAN ---------------------
+//
+// With a last known address the peer policy stands: it is served at once, and Retry-After is kept before asking
+// again. With NOTHING known (the first lookup in this process, or a fresh one), a 503 RESOURCE_BUSY (nothing ran) is
+// waited out once and asked again before the lookup fails; any other 429 or 5xx fails as it came. Every wait is
+// recorded (`waiting.sleep`), never taken.
+
+describe('a lookup the control plane answered 503 RESOURCE_BUSY', () => {
+  let waits: number[];
+  const busy: Reply = {
+    status: 503,
+    body: envelope('RESOURCE_BUSY'),
+    headers: { 'Retry-After': '5' },
+  };
+
+  beforeEach(() => {
+    waits = [];
+    jest
+      .spyOn(waiting, 'sleep')
+      .mockImplementation(async (ms: number) => void waits.push(ms));
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('with no known address, RESOURCE_BUSY is waited out once and asked again', async () => {
+    lookupReplies.set('analyst', [
+      busy,
+      { status: 200, body: { name: 'analyst', url: OLD } },
+    ]);
+    await expect(agentUrl('analyst')).resolves.toBe(OLD);
+    expect([lookupCalls.length, waits]).toEqual([2, [5000]]);
+  });
+
+  it.each([['REQUEST_TIMED_OUT'], ['SERVICE_UNAVAILABLE']])(
+    'with no known address, any other 503 fails as it came (%s)',
+    async code => {
+      lookupReplies.set('analyst', {
+        status: 503,
+        body: envelope(code),
+        headers: { 'Retry-After': '5' },
+      });
+      const error = await agentUrl('analyst').catch(e => e);
+      expect(error).toBeInstanceOf(PeerLookupError);
+      expect([lookupCalls.length, waits]).toEqual([1, []]);
+    }
+  );
+
+  it('with a known address, RESOURCE_BUSY serves it at once and waits for nothing', async () => {
+    await expect(agentUrl('analyst')).resolves.toBe(OLD);
+    clock.advance(PEER_CACHE_SECONDS + 1);
+    lookupReplies.set('analyst', busy);
+    await expect(agentUrl('analyst')).resolves.toBe(OLD);
+    expect([lookupCalls.length, waits]).toEqual([2, []]);
+  });
+
+  it('a fresh lookup has nothing known to serve, so RESOURCE_BUSY is waited out once', async () => {
+    await expect(agentUrl('analyst')).resolves.toBe(OLD);
+    lookupReplies.set('analyst', [
+      busy,
+      { status: 200, body: { name: 'analyst', url: NEW } },
+    ]);
+    await expect(agentUrl('analyst', { fresh: true })).resolves.toBe(NEW);
+    expect([lookupCalls.length, waits]).toEqual([3, [5000]]);
+  });
+
+  it('the list: with no known list, RESOURCE_BUSY is waited out once and asked again', async () => {
+    lookupReplies.set(null, [
+      busy,
+      { status: 200, body: { peers: [{ name: 'analyst', url: OLD }] } },
+    ]);
+    await expect(agentUrls()).resolves.toEqual({ analyst: OLD });
+    expect([lookupCalls.length, waits]).toEqual([2, [5000]]);
+  });
+
+  it('the list: with a known list, RESOURCE_BUSY serves it at once', async () => {
+    lookupReplies.set(null, {
+      status: 200,
+      body: { peers: [{ name: 'analyst', url: OLD }] },
+    });
+    await agentUrls();
+    clock.advance(PEER_CACHE_SECONDS + 1);
+    lookupReplies.set(null, busy);
+    await expect(agentUrls()).resolves.toEqual({ analyst: OLD });
+    expect([lookupCalls.length, waits]).toEqual([2, []]);
   });
 });

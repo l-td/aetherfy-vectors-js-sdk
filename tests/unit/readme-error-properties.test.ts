@@ -166,6 +166,13 @@ const EXPECTED_CLAIMS: string[] = [
   'CollectionNotFoundError.collectionName',
   'InvalidFilterError.key',
   'InvalidFilterError.suggestion',
+  // The messages section's refusals (messaging between running runs).
+  'MailboxFull.maxUnread',
+  'MailboxFull.unread',
+  'MessageError.code',
+  'MessageRateLimited.retryAfter',
+  'MessageTooLarge.maxBytes',
+  'MessageTooLarge.messageBytes',
   // The agent helper's two error sections. They were in the README from the
   // release that added `aetherfy-vectors/agent` and were INVISIBLE here until
   // the specifier match learned about subpaths — the eight lines below are what
@@ -179,6 +186,7 @@ const EXPECTED_CLAIMS: string[] = [
   'QuotaExceededError.limit',
   'QuotaExceededError.upgradeUrl',
   'RateLimitExceededError.retryAfter',
+  'RecipientEnded.recipientState',
   'ResultTooLarge.maxBytes',
   'ResultTooLarge.resultBytes',
   'RunCancelError.code',

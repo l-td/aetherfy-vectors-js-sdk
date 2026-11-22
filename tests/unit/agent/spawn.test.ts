@@ -69,13 +69,30 @@ describe('spawn()', () => {
       'https://agents.aetherfy.com/api/v1/agents/parent-agent-id/spawn'
     );
     expect(url).not.toContain('{id}');
-    expect(JSON.parse(init.body)).toEqual({
+    const { request_id: requestId, ...rest } = JSON.parse(init.body);
+    expect(rest).toEqual({
       child_agent_id: 'nightly-rollup',
       payload: { date: '2026-09-07' },
     });
+    // THE SPAWN'S OWN ID (its idempotency): a uuid, made once per call.
+    expect(requestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    );
     expect(init.headers.Authorization).toBe('Bearer afy_test_key');
     expect(init.headers['User-Agent']).toMatch(/^aetherfy-agent-js\//);
     expect(init.headers['Content-Type']).toBe('application/json');
+  });
+
+  it('gives every spawn an id of its own', async () => {
+    // One id per CALL, never per process: two spawns of the same child with
+    // the same payload are two runs, and must not be taken for a resend.
+    fetchMock.mockImplementation(async () => reply(202, ACCEPTED));
+    await spawn('nightly-rollup', { date: '2026-09-07' });
+    await spawn('nightly-rollup', { date: '2026-09-07' });
+    const ids = fetchMock.mock.calls.map(
+      ([, init]) => JSON.parse(init.body).request_id
+    );
+    expect(new Set(ids).size).toBe(2);
   });
 
   it('sends an empty object when no payload is given', async () => {

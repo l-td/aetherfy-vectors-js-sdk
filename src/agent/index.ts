@@ -9,7 +9,7 @@
  * ```javascript
  * const {
  *   payload, machine, fanOut, spawn, writeResult, result, wait, cancel,
- *   agentUrl, callAgent,
+ *   send, receive, messages, parent, restarted, agentUrl, callAgent,
  * } = require('aetherfy-vectors/agent');
  *
  * const data = await payload();              // this run's input, {} when none
@@ -22,6 +22,9 @@
  * console.log(finished.result);
  * await cancel(run.spawn_id); // stop it, waiting or running
  *
+ * await send(run.spawn_id, { focus: 'eu' }); // a message to a run while it runs
+ * const message = await receive();           // this run's next message, or a child's end
+ *
  * const url = await agentUrl('analyst');     // a peer service's address, by name
  * const reply = await callAgent('analyst', '/summarise', {
  *   method: 'POST',
@@ -33,8 +36,16 @@
  * TWO HALVES, and they are the same contract read from opposite ends. A task
  * reads its payload and writes its result; whoever started it spawns and then
  * reads that result back. `payload`/`writeResult` are files on the machine and
- * touch no network at all; `spawn`/`result`/`wait`/`cancel` are the control
- * plane, and are the only calls here that do.
+ * touch no network at all; `spawn`/`result`/`wait`/`cancel` and the messages
+ * are the control plane, and are the only calls here that do.
+ *
+ * WHILE BOTH RUN, THEY CAN TALK. Every run has a mailbox on the control plane.
+ * `send` puts a message in another run's mailbox; `receive` hands over this
+ * run's next one, or the end of a run it started. A task run that waits in
+ * `receive` past a short grace is suspended, and is not billed until a message
+ * wakes it. A message stays unread until the receiving run asks for the next
+ * one, so a run that starts again on a new machine (`restarted()`) reads again
+ * what it had not finished with, and `messages()` is its whole history.
  *
  * A RUN HAS A LIFE BEFORE IT RUNS. When the account is at its in-flight limit, a
  * new run waits in the account's line (state `waiting`, no machine, nothing
@@ -63,6 +74,7 @@
  * @public
  */
 
+import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 
 import {
@@ -76,6 +88,11 @@ import {
   DEPLOYMENT_NOT_A_RUN,
   DEPLOYMENT_NOT_FOUND,
   DEPLOYMENT_WAIT_TIMEOUT_INVALID,
+  MailboxFull,
+  MessageError,
+  MessageRateLimited,
+  MessageStorageFull,
+  MessageTooLarge,
   NotARun,
   NotAServiceRun,
   NotRunningOnAgent,
@@ -87,13 +104,21 @@ import {
   PeerNotFound,
   RUN_ID_HEADER,
   RUN_KEY_HEADER,
+  RUN_MAILBOX_FULL,
+  RUN_MESSAGE_RATE_LIMITED,
+  RUN_MESSAGE_RECIPIENT_ENDED,
+  RUN_MESSAGE_SENDER_ENDED,
+  RUN_MESSAGE_STORAGE_FULL,
+  RUN_MESSAGE_TOO_LARGE,
   RUN_PAYLOAD_TOO_LARGE,
+  RecipientEnded,
   ResultTooLarge,
   RunAccessDenied,
   RunCancelError,
   RunLineFull,
   RunNotFound,
   RunReadError,
+  SenderEnded,
   SpawnError,
   WaitTimeoutInvalid,
 } from './errors';
@@ -106,10 +131,13 @@ import {
 } from './http';
 import {
   Cancellation,
+  Ended,
   MachineShape,
+  Message,
   PeerResponse,
   Run,
   RunRetry,
+  Sent,
   Spawn,
 } from './models';
 import {
@@ -126,6 +154,11 @@ import { SDK_VERSION } from '../version';
 export {
   AgentError,
   AgentTransportError,
+  MailboxFull,
+  MessageError,
+  MessageRateLimited,
+  MessageStorageFull,
+  MessageTooLarge,
   NotARun,
   NotAServiceRun,
   NotRunningOnAgent,
@@ -134,16 +167,28 @@ export {
   PeerHasNoUrl,
   PeerLookupError,
   PeerNotFound,
+  RecipientEnded,
   ResultTooLarge,
   RunAccessDenied,
   RunCancelError,
   RunLineFull,
   RunNotFound,
   RunReadError,
+  SenderEnded,
   SpawnError,
   WaitTimeoutInvalid,
 };
-export type { Cancellation, MachineShape, PeerResponse, Run, RunRetry, Spawn };
+export type {
+  Cancellation,
+  Ended,
+  MachineShape,
+  Message,
+  PeerResponse,
+  Run,
+  RunRetry,
+  Sent,
+  Spawn,
+};
 
 /**
  * How long a looked-up peer address is served without asking again. The one
@@ -346,6 +391,7 @@ export async function payload(): Promise<Record<string, unknown>> {
   const { status, body } = await requestJson('GET', url, {
     apiKey,
     userAgent: userAgent(),
+    repeatable: true,
   });
   if (status !== 200) {
     const message = detailOf(body).message;
@@ -530,10 +576,19 @@ async function spawnAs(
 ): Promise<Spawn> {
   const url = spawnUrl();
 
+  // THE SPAWN'S OWN ID, made once per call. The control plane stores it with
+  // the run it makes and answers a repeat of the same id with that run, so a
+  // spawn whose answer was lost on the way (a timeout after the request left)
+  // is sent again safely and never makes a second run.
   const { status, body, retryAfter } = await requestJson('POST', url, {
     apiKey,
     userAgent: userAgent(),
-    body: { child_agent_id: child, payload: spawnPayload ?? {} },
+    body: {
+      child_agent_id: child,
+      payload: spawnPayload ?? {},
+      request_id: randomUUID(),
+    },
+    repeatable: true,
   });
 
   if (status === 200 || status === 201 || status === 202) {
@@ -684,8 +739,8 @@ export async function writeResult(value: unknown): Promise<void> {
  * `'cancelled'`. {@link wait} is the same read with the waiting done
  * server-side, and is what to use when the answer is the point.
  *
- * `runId` is a run's id — `Spawn.spawn_id` from a {@link spawn}, or the id of
- * this run itself in `AETHERFY_SPAWN_ID`.
+ * `runId` is a run's id — `Spawn.spawn_id` from a {@link spawn}, or, on a task
+ * machine, the id of this run itself in `AETHERFY_DEPLOYMENT_ID`.
  *
  * @throws {RunNotFound} 404, no run has that id.
  * @throws {RunAccessDenied} 403 `DEPLOYMENT_ACCESS_DENIED`, the run belongs to
@@ -772,7 +827,7 @@ async function waitAs(
   }
   return readRun(`${runUrl(runId)}/wait?timeout_seconds=${seconds}`, apiKey, {
     timeoutMs: (seconds + WAIT_TRANSPORT_MARGIN_SECONDS) * 1000,
-    retryConnectionErrors: false,
+    repeatable: false,
   });
 }
 
@@ -816,10 +871,13 @@ export async function cancel(runId: string): Promise<Cancellation> {
 }
 
 async function cancelAs(apiKey: string, runId: string): Promise<Cancellation> {
+  // REPEATABLE: a second cancel of the same run changes nothing (it answers
+  // `stopping` with a count of 0, or `already_finished`), so a cancel whose
+  // answer was lost is sent again rather than reported as maybe applied.
   const { status, body, retryAfter } = await requestJson(
     'POST',
     `${runUrl(runId)}/cancel`,
-    { apiKey, userAgent: userAgent() }
+    { apiKey, userAgent: userAgent(), repeatable: true }
   );
 
   if (status === 200) {
@@ -919,6 +977,18 @@ export interface ServiceRun {
   wait(runId: string, timeoutSeconds?: number): Promise<Run>;
   /** {@link cancel}, with this run's key: it may cancel the runs below this run. */
   cancel(runId: string): Promise<Cancellation>;
+  /** {@link send}, from this run: to a run of its run tree. */
+  send(runId: string, body: unknown, options?: SendOptions): Promise<Sent>;
+  /**
+   * {@link receive}, for this run's mailbox. A service run that waits stays
+   * awake in its request (its service is billed as it always is), and the wait
+   * still holds nothing open to the control plane.
+   */
+  receive(options?: ReceiveOptions): Promise<Message | Ended | null>;
+  /** {@link messages}, for this run's mailbox. */
+  messages(options?: MessagesOptions): AsyncIterableIterator<Message>;
+  /** {@link parent}, of this run. */
+  parent(): Promise<string | null>;
 }
 
 /**
@@ -967,6 +1037,19 @@ export function serviceRun(headers: HeaderSource): ServiceRun {
     wait: (id: string, timeoutSeconds: number = WAIT_TIMEOUT_DEFAULT_SECONDS) =>
       waitAs(apiKey, id, timeoutSeconds),
     cancel: (id: string) => cancelAs(apiKey, id),
+    send: (id: string, body: unknown, options: SendOptions = {}) => {
+      assertAllowedOptionKeys(options, SEND_OPTION_KEYS, 'send');
+      return sendAs(apiKey, id, body, options.id);
+    },
+    receive: (options: ReceiveOptions = {}) => {
+      assertAllowedOptionKeys(options, RECEIVE_OPTION_KEYS, 'receive');
+      return receiveAs(apiKey, runId, options);
+    },
+    messages: (options: MessagesOptions = {}) => {
+      assertAllowedOptionKeys(options, MESSAGES_OPTION_KEYS, 'messages');
+      return messagesAs(apiKey, runId, options.after ?? 0);
+    },
+    parent: async () => parentOf(await resultAs(apiKey, runId)),
   });
 }
 
@@ -1143,13 +1226,13 @@ function sharedRunRefusal(
 async function readRun(
   url: string,
   apiKey: string,
-  options: { timeoutMs?: number; retryConnectionErrors?: boolean } = {}
+  options: { timeoutMs?: number; repeatable?: boolean } = {}
 ): Promise<Run> {
   const { status, body, retryAfter } = await requestJson('GET', url, {
     apiKey,
     userAgent: userAgent(),
     timeoutMs: options.timeoutMs,
-    retryConnectionErrors: options.retryConnectionErrors,
+    repeatable: options.repeatable ?? true,
   });
 
   if (status === 200) {
@@ -1278,7 +1361,11 @@ export async function agentUrl(
 
   let body: Record<string, unknown>;
   try {
-    body = await lookupPeers(`${peersUrl()}/${encodeURIComponent(name)}`, name);
+    body = await lookupPeers(
+      `${peersUrl()}/${encodeURIComponent(name)}`,
+      name,
+      !options.fresh && peerCache.lastKnownUrl(name) !== undefined
+    );
   } catch (error) {
     if (error instanceof PeerNotFound || error instanceof PeerHasNoUrl) {
       peerCache.forgetUrl(name);
@@ -1342,7 +1429,11 @@ export async function agentUrls(
 
   let body: Record<string, unknown>;
   try {
-    body = await lookupPeers(peersUrl(), null);
+    body = await lookupPeers(
+      peersUrl(),
+      null,
+      !options.fresh && peerCache.lastKnownList() !== undefined
+    );
   } catch (error) {
     if (!controlPlaneCouldNotAnswer(error)) throw error;
     blockLookup(null, error);
@@ -1585,9 +1676,16 @@ function stillWaiting(what: string, waiting: PeerWait): PeerLookupError {
   );
 }
 
+/**
+ * `known`: an address (or a list) this call would serve if the lookup cannot be answered. Then a control-plane
+ * refusal is not waited out: the last known answer is served at once, and Retry-After is kept before asking again.
+ * With nothing known (the first lookup in this process, or a `fresh` one), a 503 RESOURCE_BUSY (nothing ran) is
+ * waited out once and asked again before the lookup fails; any other 429 or 5xx fails as it came.
+ */
 async function lookupPeers(
   url: string,
-  name: string | null
+  name: string | null,
+  known: boolean
 ): Promise<Record<string, unknown>> {
   const apiKey = requireEnv(
     'AETHERFY_API_KEY',
@@ -1596,6 +1694,8 @@ async function lookupPeers(
   const { status, body, retryAfter } = await requestJson('GET', url, {
     apiKey,
     userAgent: userAgent(),
+    repeatable: true,
+    refusals: known ? 'none' : 'resource-busy-only',
   });
 
   if (status === 200) {
@@ -1624,4 +1724,478 @@ async function lookupPeers(
     throw new PeerHasNoUrl(message, detail);
   }
   throw new PeerLookupError(message, { status, code, detail, retryAfter });
+}
+
+// --- MESSAGES BETWEEN RUNNING AGENTS -----------------------------------------
+//
+// A run has a mailbox on the control plane. Any run of its run tree can send it
+// a message (send), a person on the account can too, and the run reads its own
+// mailbox in order (receive), the oldest unread message first.
+//
+// WAITING HOLDS NOTHING OPEN TO THE CONTROL PLANE. A receive() with nothing to
+// read makes ONE short request that records the wait, then blocks on a LOCAL
+// call to this machine's supervisor (AETHERFY_SUPERVISOR_WAIT_URL, loopback
+// only). A message, a child's end or the receive's own deadline makes the
+// control plane tell the supervisor, which releases the call; the helper then
+// asks once more and gets what is there. While it waits, a task's machine is
+// put to sleep after a short grace and nothing is billed for running time.
+//
+// AT LEAST ONCE. A message stays unread until the NEXT call acknowledges it, so
+// one whose answer was lost on the way is handed over again rather than lost. A
+// run that restarts (restarted() is true) reads what it had already been handed
+// with messages(). The Python helper behaves the same way, call for call.
+
+/** Where the supervisor holds a waiting receive(): set by the platform on the run's process or service. */
+export const SUPERVISOR_WAIT_URL_VARIABLE = 'AETHERFY_SUPERVISOR_WAIT_URL';
+
+/**
+ * The machine this process runs on, as the platform names it to the control
+ * plane: set by a supervisor that holds waits (run-request-v4). A wait records
+ * the machine whose supervisor holds its call; a service release's wait names
+ * it with this, since a release has no one machine of its own.
+ */
+export const INSTANCE_ID_VARIABLE = 'AETHERFY_INSTANCE_ID';
+
+/** How many times the local wait is asked again after its connection dropped. */
+const LOCAL_WAIT_ATTEMPTS = 3;
+
+/** Options of {@link send}. */
+export interface SendOptions {
+  /**
+   * The message's own id, a UUID (anything else is refused, 422 VALIDATION_ERROR); one is made when none is given.
+   * The same id again is the same message.
+   */
+  id?: string;
+}
+
+/** Options of {@link receive}. */
+export interface ReceiveOptions {
+  /** 0: one check, no wait. Undefined: wait for as long as it takes. */
+  timeoutSeconds?: number;
+  /** Read only what this run sent (and its end, if this run started it). */
+  fromRun?: string;
+}
+
+/** Options of {@link messages}. */
+export interface MessagesOptions {
+  /** Skip the messages up to this `seq`. */
+  after?: number;
+}
+
+const SEND_OPTION_KEYS = optionKeys<SendOptions>({ id: true });
+const RECEIVE_OPTION_KEYS = optionKeys<ReceiveOptions>({
+  timeoutSeconds: true,
+  fromRun: true,
+});
+const MESSAGES_OPTION_KEYS = optionKeys<MessagesOptions>({ after: true });
+
+// What each run's process has handed to its code and not yet acknowledged, and
+// the chain that makes one receive() at a time per run: a run's mailbox has one
+// reader, and two waits at once would strand one of them.
+const pendingAcks = new Map<string, string[]>();
+// The wait a receive() may have recorded and did not see through: its request,
+// or its local call, failed after the request may have arrived. The next call
+// names it again, so the control plane answers with that same wait instead of
+// refusing a second one while the first is outstanding.
+const pendingWaits = new Map<string, string>();
+const receiveChains = new Map<string, Promise<unknown>>();
+
+/**
+ * The deployment whose mailbox this process reads: `AETHERFY_DEPLOYMENT_ID`, and
+ * nothing else. On a task machine the supervisor sets it to the run being
+ * executed, on every run; on a service machine the platform sets it to the
+ * release the machine serves, whose mailbox the service's own code reads.
+ * (`AETHERFY_SPAWN_ID` names a run only, and a service machine has none.)
+ */
+function ownRunId(purpose: string): string {
+  return requireEnv('AETHERFY_DEPLOYMENT_ID', purpose);
+}
+
+/**
+ * Send one message to a run: the run that started this one ({@link parent}),
+ * a run it started, or any run of the same run tree.
+ *
+ * `body` is any JSON value, up to the inline cap a run's payload has. The same
+ * `id` again is the same message, stored once, so a send whose answer was lost
+ * can simply be repeated. A recipient that is waiting is woken; a recipient
+ * that has ended refuses it.
+ *
+ * @throws {MessageTooLarge} 413, the message is larger than the cap.
+ * @throws {MessageRateLimited} 429, this run sent too many in the last minute.
+ * @throws {MailboxFull} 429, the recipient has too many unread messages.
+ * @throws {MessageStorageFull} 429, the account's stored-logs budget is full.
+ * @throws {RecipientEnded} 409, the recipient has ended.
+ * @throws {RunNotFound} 404; {@link RunAccessDenied} 403, as for every run call.
+ */
+export async function send(
+  runId: string,
+  body: unknown,
+  options: SendOptions = {}
+): Promise<Sent> {
+  assertAllowedOptionKeys(options, SEND_OPTION_KEYS, 'send');
+  return sendAs(
+    environmentKey('the key a message is sent with'),
+    runId,
+    body,
+    options.id
+  );
+}
+
+async function sendAs(
+  apiKey: string,
+  runId: string,
+  body: unknown,
+  messageId: string | undefined
+): Promise<Sent> {
+  if (!runId) {
+    throw new AgentError('runId must name the run the message is for.');
+  }
+  const answer = await requestJson('POST', `${runUrl(runId)}/messages`, {
+    apiKey,
+    userAgent: userAgent(),
+    body: { id: messageId ?? randomUUID(), body },
+    repeatable: true,
+  });
+  if (answer.status === 200 || answer.status === 201) {
+    const record = asRecord(answer.body);
+    const message = asRecord(record?.message);
+    const recipient = asRecord(record?.recipient);
+    if (!record || !message || !recipient) {
+      throw new MessageError(
+        `The message was accepted with ${answer.status} but the answer names ` +
+          'no message and recipient.',
+        { status: answer.status }
+      );
+    }
+    return {
+      message_id: String(message.id),
+      seq: typeof message.seq === 'number' ? message.seq : 0,
+      recipient_id: String(recipient.id),
+      recipient_agent:
+        typeof recipient.agent === 'string' ? recipient.agent : null,
+      recipient_state:
+        typeof recipient.state === 'string' ? recipient.state : null,
+      raw: record,
+    };
+  }
+  throw messageRefusal(
+    answer.status,
+    answer.body,
+    answer.retryAfter,
+    'Sending the message'
+  );
+}
+
+/**
+ * The next message to this run, the oldest unread first; or the end of a run
+ * this run started ({@link Ended}); or `null` when `timeoutSeconds` ran out.
+ *
+ * With nothing to read it WAITS: with no timeout, until something arrives; with
+ * `timeoutSeconds: 0`, not at all (one check). While it waits, nothing is held
+ * open to the control plane, and a task run's machine sleeps after a short
+ * grace, unbilled; a message wakes it where it left off. `fromRun` reads only
+ * what that run sent; other senders' messages wait their turn.
+ *
+ * One receive() at a time per run: a second call waits for the first. A message
+ * is acknowledged on the NEXT call, so one whose answer was lost is handed over
+ * again; `id` tells a repeat apart.
+ *
+ * @throws {SenderEnded} 409, `fromRun` has ended and left nothing unread.
+ * @throws {MessageError} any other refusal, with its code.
+ */
+export async function receive(
+  options: ReceiveOptions = {}
+): Promise<Message | Ended | null> {
+  assertAllowedOptionKeys(options, RECEIVE_OPTION_KEYS, 'receive');
+  return receiveAs(
+    environmentKey('the key a message is received with'),
+    ownRunId('the run whose messages are received'),
+    options
+  );
+}
+
+async function receiveAs(
+  apiKey: string,
+  runId: string,
+  options: ReceiveOptions
+): Promise<Message | Ended | null> {
+  if (options.timeoutSeconds !== undefined && options.timeoutSeconds < 0) {
+    throw new AgentError(
+      'timeoutSeconds must be 0 or more, or left out to wait for as long as it takes.'
+    );
+  }
+  // A call that may wait needs the supervisor's local call to wait on. Refused
+  // BEFORE any request: the request records the wait and puts the run to sleep
+  // after a short grace, under a process that would not be waiting.
+  let localWaitUrl = '';
+  if (options.timeoutSeconds !== 0) {
+    localWaitUrl = process.env[SUPERVISOR_WAIT_URL_VARIABLE] ?? '';
+    if (!localWaitUrl) {
+      throw new NotRunningOnAgent(
+        SUPERVISOR_WAIT_URL_VARIABLE,
+        'the local call a waiting receive() blocks on',
+        'Redeploy the agent: it runs on a platform older than waiting for a ' +
+          'message. receive({ timeoutSeconds: 0 }) only checks, and works ' +
+          'without it.'
+      );
+    }
+  }
+  const previous = receiveChains.get(runId) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(() => receiveOnce(apiKey, runId, options, localWaitUrl));
+  receiveChains.set(runId, next);
+  return next;
+}
+
+async function receiveOnce(
+  apiKey: string,
+  runId: string,
+  options: ReceiveOptions,
+  localWaitUrl: string
+): Promise<Message | Ended | null> {
+  const pending = pendingAcks.get(runId) ?? [];
+  pendingAcks.set(runId, pending);
+  for (;;) {
+    const waitId = pendingWaits.get(runId) ?? randomUUID();
+    const request: Record<string, unknown> = {
+      ack: [...pending],
+      wait_id: waitId,
+    };
+    if (options.fromRun !== undefined) request.from_run = options.fromRun;
+    if (options.timeoutSeconds !== undefined) {
+      request.timeout_seconds = options.timeoutSeconds;
+    }
+    const instanceId = process.env[INSTANCE_ID_VARIABLE];
+    if (instanceId) request.instance_id = instanceId;
+    // Kept until this call sees the wait through: if the request fails after
+    // it may have arrived, the next call names the same wait.
+    pendingWaits.set(runId, waitId);
+    const answer = await requestJson(
+      'POST',
+      `${runUrl(runId)}/messages/receive`,
+      { apiKey, userAgent: userAgent(), body: request, repeatable: true }
+    );
+    const record = asRecord(answer.body);
+    if (answer.status !== 200 || !record) {
+      // An answer, even a refusal, is the whole outcome: no wait of this id is
+      // outstanding.
+      pendingWaits.delete(runId);
+      throw messageRefusal(
+        answer.status,
+        answer.body,
+        answer.retryAfter,
+        'Receiving a message'
+      );
+    }
+    // What this call acknowledged is acknowledged: the next call starts clean.
+    pending.length = 0;
+    if (!record.waiting) pendingWaits.delete(runId);
+    const message = asRecord(record.message);
+    if (message) {
+      const handed = messageFrom(message);
+      pending.push(handed.id);
+      return handed;
+    }
+    const ended = asRecord(record.ended);
+    if (ended) {
+      const child = String(ended.run_id);
+      pending.push(child);
+      return {
+        kind: 'ended',
+        run_id: child,
+        state: String(ended.state),
+        raw: ended,
+      };
+    }
+    if (!record.waiting) return null;
+    const released = await waitLocally(
+      localWaitUrl,
+      apiKey,
+      String(record.wait_id ?? waitId)
+    );
+    // Seen through: the wait was released.
+    pendingWaits.delete(runId);
+    if (released === 'timeout') return null;
+    // Released by a message or a child's end: ask again, and it is there.
+  }
+}
+
+/**
+ * Block on the supervisor's local call at `base` until the control plane
+ * releases this wait. Returns why ("message", "ended" or "timeout"). No timeout
+ * of its own: the deadline, when there is one, is the control plane's, and a
+ * machine asleep under this call does not count the time it slept.
+ */
+async function waitLocally(
+  base: string,
+  apiKey: string,
+  waitId: string
+): Promise<string> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < LOCAL_WAIT_ATTEMPTS; attempt += 1) {
+    let answer;
+    try {
+      answer = await requestJson('POST', `${base.replace(/\/+$/, '')}/wait`, {
+        apiKey,
+        userAgent: userAgent(),
+        body: { wait_id: waitId },
+        timeoutMs: null,
+        repeatable: true,
+      });
+    } catch (error) {
+      if (!(error instanceof AgentTransportError)) throw error;
+      lastError = error;
+      continue;
+    }
+    const record = asRecord(answer.body);
+    if (answer.status === 200 && record) {
+      return typeof record.released === 'string' ? record.released : 'message';
+    }
+    throw new MessageError(
+      `This run's supervisor answered ${answer.status} to the local wait.`,
+      { status: answer.status }
+    );
+  }
+  const reason =
+    lastError instanceof Error ? lastError.message : String(lastError);
+  throw new AgentTransportError(
+    `The local wait on this run's supervisor did not hold after ` +
+      `${LOCAL_WAIT_ATTEMPTS} attempts: ${reason}`
+  );
+}
+
+/**
+ * Every message this run's mailbox holds, in order, read or not: the history a
+ * run that restarted rebuilds its state from. `after` skips the messages up to
+ * that `seq`. Messages are kept as long as the account's plan keeps logs, and
+ * for as long as the run lives.
+ */
+export function messages(
+  options: MessagesOptions = {}
+): AsyncIterableIterator<Message> {
+  assertAllowedOptionKeys(options, MESSAGES_OPTION_KEYS, 'messages');
+  return messagesAs(
+    environmentKey('the key a mailbox is read with'),
+    ownRunId('the run whose mailbox is read'),
+    options.after ?? 0
+  );
+}
+
+async function* messagesAs(
+  apiKey: string,
+  runId: string,
+  after: number
+): AsyncIterableIterator<Message> {
+  let cursor = after;
+  for (;;) {
+    const answer = await requestJson(
+      'GET',
+      `${runUrl(runId)}/messages?after=${Math.trunc(cursor)}`,
+      { apiKey, userAgent: userAgent(), repeatable: true }
+    );
+    const record = asRecord(answer.body);
+    if (answer.status !== 200 || !record) {
+      throw messageRefusal(
+        answer.status,
+        answer.body,
+        answer.retryAfter,
+        'Reading the mailbox'
+      );
+    }
+    const page = Array.isArray(record.messages) ? record.messages : [];
+    if (page.length === 0) return;
+    for (const item of page) {
+      const message = asRecord(item);
+      if (!message) continue;
+      const handed = messageFrom(message);
+      cursor = Math.max(cursor, handed.seq);
+      yield handed;
+    }
+    if (record.next_after === null || record.next_after === undefined) return;
+  }
+}
+
+/**
+ * Whether this process is a restart of its run: the run waited for a message,
+ * its machine's memory was not kept, and the platform started it again. Its code
+ * then rebuilds what it needs from its history ({@link messages}) and its
+ * payload. False on a run's first start.
+ */
+export async function restarted(): Promise<boolean> {
+  const run = await result(ownRunId('the run asked about'));
+  const attempt = run.raw.attempt;
+  return typeof attempt === 'number' && attempt > 1;
+}
+
+/**
+ * The id of the run that started this one, or `null` for a run started by a
+ * person, a schedule or a service's public request: the usual recipient of a
+ * child's progress and questions, `send(await parent(), {...})`.
+ */
+export async function parent(): Promise<string | null> {
+  const run = await result(ownRunId('the run whose parent is read'));
+  return parentOf(run);
+}
+
+function parentOf(run: Run): string | null {
+  const found = run.raw.spawned_by_deployment_id;
+  return typeof found === 'string' && found !== '' ? found : null;
+}
+
+function messageFrom(item: Record<string, unknown>): Message {
+  const senderRun =
+    typeof item.sender_run_id === 'string' ? item.sender_run_id : null;
+  return {
+    kind: 'message',
+    id: String(item.id),
+    seq: typeof item.seq === 'number' ? item.seq : 0,
+    sender:
+      typeof item.sender === 'string'
+        ? item.sender
+        : senderRun
+          ? 'run'
+          : 'person',
+    sender_run_id: senderRun,
+    body: item.body,
+    created_at: typeof item.created_at === 'string' ? item.created_at : null,
+    raw: item,
+  };
+}
+
+/** The error a refused message call throws: THE CODE DECIDES, NOT THE STATUS ALONE, as in every call here. */
+function messageRefusal(
+  status: number,
+  body: unknown,
+  retryAfter: number | undefined,
+  doing: string
+): AgentError {
+  const detail = detailOf(body);
+  const message =
+    (typeof detail.message === 'string' && detail.message) ||
+    `${doing} failed with status ${status}.`;
+  const code = typeof detail.code === 'string' ? detail.code : undefined;
+  const shared = sharedRunRefusal(status, code, message, detail);
+  if (shared) return shared;
+  if (status === 403 && code === AUTH_AGENT_KEY_OUT_OF_SCOPE) {
+    return new RunAccessDenied(message, detail, AUTH_AGENT_KEY_OUT_OF_SCOPE);
+  }
+  if (status === 413 && code === RUN_MESSAGE_TOO_LARGE) {
+    return new MessageTooLarge(message, detail);
+  }
+  if (status === 429 && code === RUN_MESSAGE_RATE_LIMITED) {
+    return new MessageRateLimited(message, detail, retryAfter);
+  }
+  if (status === 429 && code === RUN_MAILBOX_FULL)
+    return new MailboxFull(message, detail);
+  if (status === 429 && code === RUN_MESSAGE_STORAGE_FULL) {
+    return new MessageStorageFull(message, detail);
+  }
+  if (status === 409 && code === RUN_MESSAGE_RECIPIENT_ENDED) {
+    return new RecipientEnded(message, detail);
+  }
+  if (status === 409 && code === RUN_MESSAGE_SENDER_ENDED) {
+    return new SenderEnded(message, detail);
+  }
+  return new MessageError(message, { status, code, detail, retryAfter });
 }

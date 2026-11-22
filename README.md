@@ -853,13 +853,107 @@ run. A release is cancelled with `afy cancel <agent>`, not with this call.
 from a cancel carries `code` `DEPLOYMENT_ACCESS_DENIED` (another account's run)
 or `AUTH_AGENT_KEY_OUT_OF_SCOPE` (a run this agent's key may not cancel).
 
+### Messages between running runs
+
+A result is one answer at the end. While both runs are still going, they can
+talk: every run has a mailbox, `send` puts a message in another run's mailbox,
+and `receive` hands over this run's next one. A child reports progress or asks a
+question; the parent answers or changes the plan.
+
+```typescript
+import { receive, send, spawn } from 'aetherfy-vectors/agent';
+
+// In the parent: start a child, then read what it says until it ends.
+const child = await spawn('researcher', { topic: 'battery recycling' });
+for (;;) {
+  const got = await receive(); // the next message, or a child's end
+  if (got === null) continue;
+  if (got.kind === 'ended') {
+    console.log('the child ended', got.state); // read its answer with result()
+    break;
+  }
+  const body = got.body as { question?: string };
+  if (body.question && got.sender_run_id) {
+    await send(got.sender_run_id, { answer: 'Europe only' });
+  } else {
+    console.log('progress', got.body);
+  }
+}
+```
+
+```typescript
+import { parent, receive, send } from 'aetherfy-vectors/agent';
+
+// In the child: tell the run that started it, and wait for its answer.
+const boss = await parent();
+if (boss) {
+  await send(boss, { question: 'which region?' });
+  const reply = await receive({ fromRun: boss }); // that run's message only
+}
+```
+
+`receive()` waits as long as it takes. `receive({ timeoutSeconds: 30 })` returns
+`null` when nothing came in that time, and `timeoutSeconds: 0` only checks. A
+task run that waits past a short grace is suspended and is not billed until a
+message wakes it; a service run waits awake, inside its request. A parent also
+receives the end of each run it started (`kind` `'ended'`, once per child),
+unless it already saw that end through `wait` or `result`.
+
+A message is acknowledged when its run asks for the next one, never by the
+answer that handed it over. If a run's machine is lost while it waits, the run
+starts again on a new one: `restarted()` is then `true`, the messages it had not
+acknowledged are handed over again, and `messages()` reads the run's whole
+history, in order, to rebuild its state from. `parent()` is the run that started
+this one, or `null`.
+
+A message body is any JSON value, up to the same size as a payload. A refused
+send throws a type of its own, all of them `MessageError`s:
+
+```typescript
+import {
+  MailboxFull,
+  MessageError,
+  MessageRateLimited,
+  MessageTooLarge,
+  RecipientEnded,
+  send,
+} from 'aetherfy-vectors/agent';
+
+try {
+  await send(runId, { progress: 0.5 });
+} catch (error) {
+  if (error instanceof MessageTooLarge) {
+    console.error(error.messageBytes, 'exceeds', error.maxBytes);
+  } else if (error instanceof MessageRateLimited) {
+    console.error('send again in', error.retryAfter, 's');
+  } else if (error instanceof MailboxFull) {
+    // The recipient has not read what it was sent; it clears as it reads.
+    console.error(error.unread, 'unread of', error.maxUnread);
+  } else if (error instanceof RecipientEnded) {
+    console.error('that run has ended:', error.recipientState);
+  } else if (error instanceof MessageError) {
+    console.error(error.code);
+  } else {
+    throw error;
+  }
+}
+```
+
+A run sends up to 60 messages a minute, and a mailbox holds up to 100 unread
+ones. Messages count toward the account's log storage. A mailbox takes messages
+until its run ends; then it is read-only, and its history is kept as long as the
+run's logs. An agent's own key sends to the runs in its own run tree and
+receives only from its own mailbox; an account's key may send to any run of the
+account.
+
 ### Inside a service's run handler
 
 A service handles a run in `POST /aetherfy/run`. The platform gives that run a
 key of its own and sends it, with the run's id, in the headers
 `X-Aetherfy-Run-Key` and `X-Aetherfy-Run`, on that one call. `serviceRun` reads
-them into a handle whose `spawn`, `result`, `wait` and `cancel` are the
-functions above, with the same signatures and errors, authenticating as the run:
+them into a handle whose `spawn`, `result`, `wait`, `cancel`, `send`, `receive`,
+`messages` and `parent` are the functions above, with the same signatures and
+errors, authenticating as the run:
 
 ```typescript
 import { serviceRun } from 'aetherfy-vectors/agent';
